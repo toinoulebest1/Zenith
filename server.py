@@ -145,5 +145,7 @@ def stream_track(track_id):
 
 if __name__ == '__main__':
     init_client()
-    print("🚀 Serveur Qobuz avec Paroles lancé sur http://127.0.0.1:5000")
-    app.run(debug=True, port=5000)
+    # On récupère le PORT donné par Render, sinon on utilise 5000 par défaut
+    port = int(os.environ.get("PORT", 5000))
+    # On écoute sur 0.0.0.0 pour être accessible depuis internet
+    app.run(host='0.0.0.0', port=port)
