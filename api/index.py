@@ -68,7 +68,7 @@ def search_tracks():
     try:
         # Si on veut des titres ou tout
         if search_type in ['track', 'all']:
-            limit = 30 if search_type == 'track' else 20
+            limit = 75 if search_type == 'track' else 20
             tracks_resp = client.api_call("track/search", query=query, limit=limit)
             tracks_results = tracks_resp.get('tracks', {}).get('items', [])
 
