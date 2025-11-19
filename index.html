@@ -94,6 +94,9 @@
         }
         @keyframes pulseText { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }
 
+        .track-card.artist-card img { border-radius: 50%; aspect-ratio: 1/1; width: 80%; margin: 0 auto 15px auto; display: block; }
+        .track-card.artist-card { text-align: center; }
+
         .track-card img { width: 100%; border-radius: 12px; aspect-ratio: 1/1; object-fit: cover; margin-bottom: 10px; }
         .track-card h3 { font-weight: 600; margin-bottom: 4px; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .track-card p { font-size: 12px; color: var(--text-dim); }
@@ -102,6 +105,7 @@
         .type-badge { font-size: 9px; font-weight: 800; padding: 2px 6px; border-radius: 4px; color: #000; width: fit-content; }
         .badge-hires { background: var(--primary); box-shadow: 0 0 10px var(--primary); }
         .badge-album { background: var(--secondary); box-shadow: 0 0 10px var(--secondary); color: white; }
+        .badge-artist { background: #9d4edd; box-shadow: 0 0 10px #9d4edd; color: white; }
 
         /* LYRICS VIEW */
         .lyrics-view {
@@ -129,7 +133,11 @@
             display: flex; flex-direction: column; align-items: center; text-align: center; 
             border: 1px solid var(--glass-border);
         }
-        .xl-image-wrapper { position: relative; width: 100%; max-width: 300px; margin-bottom: 20px; }
+        /* Wrapper pour l'image et l'effet magique */
+        .xl-image-wrapper { 
+            position: relative; width: 100%; max-width: 300px; margin-bottom: 20px;
+            overflow: hidden; border-radius: 20px; /* Important pour que la magie ne dépasse pas */
+        }
         .album-art-xl { width: 100%; border-radius: 20px; aspect-ratio: 1/1; object-fit: cover; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
         .xl-badge {
             position: absolute; top: 15px; right: 15px;
@@ -137,6 +145,22 @@
             font-size: 11px; font-weight: 900; padding: 4px 8px; border-radius: 6px;
             box-shadow: 0 0 15px var(--primary);
             z-index: 10; display: none; 
+        }
+
+        /* --- ANIMATION MAGIQUE DUMBLEDORE --- */
+        .wand-light {
+            position: absolute; bottom: -20px;
+            width: 8px; height: 8px;
+            background: #fff; border-radius: 50%;
+            box-shadow: 0 0 15px #fff, 0 0 30px var(--primary);
+            opacity: 0; pointer-events: none;
+            animation: wandRise 5s ease-in-out forwards;
+        }
+        @keyframes wandRise {
+            0% { bottom: -20px; opacity: 0; transform: scale(0.5); }
+            20% { opacity: 1; transform: scale(1.2); }
+            80% { opacity: 0.8; }
+            100% { bottom: 120%; opacity: 0; transform: scale(0.2); }
         }
 
         /* PLAYER CAPSULE */
@@ -182,7 +206,7 @@
                 display: flex; flex-direction: column; padding: 10px;
                 width: 100%; height: 100%; border-radius: 0; border: none;
             }
-            .right-panel { display: none; }
+            .right-panel { display: none; } /* Note: L'animation ne se verra pas sur mobile car le panel est caché */
             .sidebar {
                 position: fixed; bottom: 0; left: 0; width: 100%; height: 60px;
                 flex-direction: row; justify-content: space-around; padding: 0;
@@ -239,6 +263,7 @@
                     <option value="all">Tout</option>
                     <option value="track">Titres</option>
                     <option value="album">Albums</option>
+                    <option value="artist">Artistes</option>
                 </select>
                 <input type="text" id="searchInput" class="search-input" placeholder="Rechercher...">
                 <button class="search-btn" id="btnSearch">GO</button>
@@ -260,10 +285,10 @@
         </main>
 
         <aside class="right-panel">
-            <div class="xl-image-wrapper">
+            <div class="xl-image-wrapper" id="xlWrapper">
                 <div id="xlBadge" class="xl-badge">HI-RES</div>
                 <img src="https://via.placeholder.com/600/222/222" id="xlArt" class="album-art-xl">
-            </div>
+                </div>
             <h2 id="xlTitle" style="font-size: 1.2rem; margin-bottom: 5px;">Prêt</h2>
             <p id="xlArtist" style="color: var(--primary); font-size: 1rem;">...</p>
         </aside>
@@ -302,7 +327,7 @@
     </div>
 
     <script>
-        const API_BASE = ''; // Vercel compliant
+        const API_BASE = ''; 
         let tracks = [];
         let currentIndex = 0;
         let audio = new Audio();
@@ -312,6 +337,7 @@
         let lyricsData = [];
         let firstLineTime = null;
         let currentTrackId = null;
+        let magicInterval = null; // Pour l'animation
         audio.volume = 1;
 
         function fmtTime(s) {
@@ -340,8 +366,7 @@
                 showTracks();
             }
         }
-        
-        // CORRECTION NOTIFICATION ANDROID
+
         function updateMediaSessionState() {
             if ('mediaSession' in navigator && audio.duration && !isNaN(audio.duration)) {
                 navigator.mediaSession.setPositionState({
@@ -350,6 +375,38 @@
                     position: audio.currentTime
                 });
             }
+        }
+
+        // --- MAGIE DE DUMBLEDORE ---
+        function startMagic() {
+            if(magicInterval) return; // Déjà actif
+            const wrapper = document.getElementById('xlWrapper');
+            
+            // Créer une lumière toutes les 400ms
+            magicInterval = setInterval(() => {
+                const light = document.createElement('div');
+                light.className = 'wand-light';
+                // Position aléatoire horizontale
+                light.style.left = (10 + Math.random() * 80) + '%'; 
+                // Taille aléatoire
+                const size = 4 + Math.random() * 6;
+                light.style.width = size + 'px';
+                light.style.height = size + 'px';
+                
+                wrapper.appendChild(light);
+                
+                // Supprimer après animation
+                setTimeout(() => light.remove(), 5000);
+            }, 400);
+        }
+
+        function stopMagic() {
+            if(magicInterval) {
+                clearInterval(magicInterval);
+                magicInterval = null;
+            }
+            // Nettoyer les lumières existantes
+            document.querySelectorAll('.wand-light').forEach(e => e.remove());
         }
 
         async function performSearch() {
@@ -366,10 +423,10 @@
                 const data = await res.json();
                 
                 const combined = [];
+                if(data.artists) data.artists.forEach(a => combined.push({...a, type: 'artist'}));
                 if(data.albums) data.albums.forEach(a => combined.push({...a, type: 'album'}));
                 if(data.tracks) data.tracks.forEach(t => combined.push({...t, type: 'track'}));
                 
-                // On ne gère plus 'artist', que track ou album
                 if(type !== 'album') tracks = data.tracks || [];
                 else tracks = [];
 
@@ -405,21 +462,38 @@
             }
             items.forEach((item, i) => {
                 const isAlbum = item.type === 'album';
-                let imgUrl = isAlbum ? item.image.large : item.album.image.large;
+                const isArtist = item.type === 'artist';
+                
+                let imgUrl = '';
+                if(isArtist) imgUrl = item.image.large;
+                else if(isAlbum) imgUrl = item.image.large;
+                else imgUrl = item.album.image.large;
+                
                 if(imgUrl) imgUrl = imgUrl.replace('_300','_600');
+                else imgUrl = 'https://via.placeholder.com/300';
+
                 const div = document.createElement('div');
                 div.className = 'track-card';
+                if(isArtist) div.classList.add('artist-card');
                 div.dataset.id = item.id;
                 
                 let badges = '';
-                if(isAlbum) badges += '<div class="type-badge badge-album">ALBUM</div>';
-                if(item.maximum_bit_depth > 16) badges += '<div class="type-badge badge-hires">HI-RES</div>';
+                if(isArtist) badges += '<div class="type-badge badge-artist">ARTISTE</div>';
+                else if(isAlbum) badges += '<div class="type-badge badge-album">ALBUM</div>';
+                else if(item.maximum_bit_depth > 16) badges += '<div class="type-badge badge-hires">HI-RES</div>';
                 let badgeHTML = `<div class="badges-container">${badges}</div>`;
                 
-                let artistName = isAlbum ? item.artist.name : item.performer.name;
-                div.innerHTML = `${badgeHTML}<img src="${imgUrl}"><h3>${item.title}</h3><p>${artistName}</p>`;
+                let title = item.name || item.title;
+                let sub = '';
+                if(isArtist) sub = 'Artiste';
+                else if(isAlbum) sub = item.artist.name;
+                else sub = item.performer.name;
+
+                div.innerHTML = `${badgeHTML}<img src="${imgUrl}"><h3>${title}</h3><p>${sub}</p>`;
+                
                 div.onclick = () => {
-                    if(isAlbum) openAlbum(item.id);
+                    if(isArtist) openArtist(item.id);
+                    else if(isAlbum) openAlbum(item.id);
                     else {
                         const trackIdx = tracks.findIndex(t => t.id === item.id);
                         isRadioActive = false;
@@ -432,27 +506,35 @@
             updateActiveCard();
         }
 
+        async function openArtist(id) {
+            document.getElementById('trackGrid').innerHTML = '<p style="text-align:center; margin-top:50px;">Chargement Artiste...</p>';
+            try {
+                const res = await fetch(`${API_BASE}/artist?id=${id}`);
+                const data = await res.json();
+                if(data.albums && data.albums.items) {
+                    const albums = data.albums.items.map(a => ({...a, type: 'album', artist: {name: data.name}}));
+                    renderGrid(albums); 
+                } else {
+                    document.getElementById('trackGrid').innerHTML = '<p style="text-align:center;">Aucun album trouvé.</p>';
+                }
+            } catch(e) { console.error(e); }
+        }
+
         async function openAlbum(id) {
             document.getElementById('trackGrid').innerHTML = '<p style="text-align:center; margin-top:50px;">Chargement Album...</p>';
             try {
                 const res = await fetch(`${API_BASE}/album?id=${id}`);
                 const data = await res.json();
                 if(data.tracks && data.tracks.items) {
-                    // --- CORRECTION BUG ALBUM ---
-                    // On injecte l'image et l'artiste de l'album dans chaque piste
-                    // pour que loadTrack trouve ce qu'il cherche.
                     const albumImg = data.image.large;
                     const albumArtist = data.artist.name;
-                    
                     tracks = data.tracks.items.map(t => ({
                         ...t,
                         type: 'track',
-                        // Fallback important pour l'artiste si 'performer' est manquant
                         performer: t.performer || { name: albumArtist },
                         album: { image: { large: albumImg }, title: data.title }
                     }));
-                    
-                    renderGrid(tracks);
+                    renderGrid(tracks); 
                 }
             } catch(e) { console.error(e); }
         }
@@ -464,7 +546,6 @@
             currentTrackId = t.id;
             audio.src = `${API_BASE}/stream/${t.id}`;
             
-            // Récupération robuste des données (avec fallbacks)
             let img = '';
             if(t.album && t.album.image) img = t.album.image.large;
             if(img) img = img.replace('_300','_600');
@@ -482,9 +563,19 @@
             document.getElementById('capArtist').innerText = artistName;
             document.getElementById('totTime').innerText = fmtTime(t.duration);
             
+            // GESTION DU BADGE HI-RES ET DE LA MAGIE
             const badge = document.getElementById('xlBadge');
             if (t.maximum_bit_depth > 16) badge.style.display = 'block';
             else badge.style.display = 'none';
+            
+            // VÉRIFICATION MAGIQUE : Dumbledore's Farewell
+            const titleLower = t.title.toLowerCase();
+            const artistLower = artistName.toLowerCase();
+            if (titleLower.includes("dumbledore") && artistLower.includes("hooper")) {
+                startMagic();
+            } else {
+                stopMagic();
+            }
             
             lyricsData = []; firstLineTime = null;
             document.getElementById('introContainer').style.display = 'none';
@@ -610,7 +701,12 @@
             isRadioActive = true;
             document.getElementById('radioBadge').style.display = 'block';
             const cur = tracks[currentIndex];
-            const artist = cur.performer ? cur.performer.name : (cur.artist ? cur.artist.name : '');
+            
+            // Check si artiste existe avant de l'utiliser
+            let artist = "Unknown";
+            if(cur.performer && cur.performer.name) artist = cur.performer.name;
+            else if(cur.artist && cur.artist.name) artist = cur.artist.name;
+
             try {
                 const res = await fetch(`${API_BASE}/recommend?artist=${encodeURIComponent(artist)}&current_id=${cur.id}`);
                 const raw = await res.json();
