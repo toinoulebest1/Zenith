@@ -5,6 +5,7 @@ from qobuz_api import QobuzClient, get_app_credentials
 from lyrics_search import LyricsSearcher 
 import logging
 import random
+import os  # <--- C'EST CETTE LIGNE QUI MANQUAIT !
 
 # --- CONFIGURATION ---
 USER_ID = '7610812'
@@ -66,7 +67,6 @@ def search_tracks():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# --- ROUTE PAROLES ---
 @app.route('/lyrics')
 def get_lyrics():
     artist = request.args.get('artist')
@@ -74,7 +74,6 @@ def get_lyrics():
     album = request.args.get('album')
     duration = request.args.get('duration')
     
-    # Convertir la durée en int si possible
     try:
         duration = int(float(duration)) if duration else 0
     except:
@@ -82,7 +81,6 @@ def get_lyrics():
 
     logger.info(f"Recherche paroles pour : {artist} - {title}")
     
-    # Utilisation de ton module lyrics_search.py
     plain, synced = lyrics_engine.search_lyrics(artist, title, album, duration)
     
     if synced:
@@ -99,22 +97,45 @@ def recommend_tracks():
     original_artist = request.args.get('artist')
     track_id = request.args.get('current_id')
     
+    logger.info(f"Analyse intelligente pour : {original_artist}")
+    
     try:
         track_meta = client.get_track_meta(track_id)
+        title = track_meta.get('title', '').lower()
+        album = track_meta.get('album', {}).get('title', '').lower()
         genre_name = None
         if 'album' in track_meta and 'genre' in track_meta['album']:
             genre_name = track_meta['album']['genre']['name']
 
-        search_query = genre_name if genre_name else original_artist
+        # LISTE MOTS-CLES AMBIANCE
+        christmas_keywords = ['christmas', 'noël', 'noel', 'santa', 'merry', 'holiday', 'navidad', 'jingle', 'snow', 'hiver']
+        
+        search_query = ""
+        is_context_mode = False
+
+        if any(word in title for word in christmas_keywords) or any(word in album for word in christmas_keywords):
+            search_query = "Christmas Music"
+            is_context_mode = True
+        else:
+            search_query = genre_name if genre_name else original_artist
+
         resp = client.api_call("track/search", query=search_query, limit=100)
         items = resp.get('tracks', {}).get('items', [])
         random.shuffle(items)
         
         recommendation = None
         for item in items:
-            if item['performer']['name'].lower() != original_artist.lower() and str(item['id']) != str(track_id):
-                recommendation = item
-                break
+            found_artist = item['performer']['name']
+            
+            if str(item['id']) == str(track_id):
+                continue
+
+            if not is_context_mode:
+                if found_artist.lower() == original_artist.lower():
+                    continue
+
+            recommendation = item
+            break
         
         if not recommendation and items:
             for item in items:
@@ -128,6 +149,7 @@ def recommend_tracks():
             return jsonify({"error": "No recommendation found"}), 404
 
     except Exception as e:
+        logger.error(f"Rec Error: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/stream/<track_id>')
@@ -145,7 +167,7 @@ def stream_track(track_id):
 
 if __name__ == '__main__':
     init_client()
-    # On récupère le PORT donné par Render, sinon on utilise 5000 par défaut
+    # Configuration pour Render : on récupère le PORT dynamique
     port = int(os.environ.get("PORT", 5000))
-    # On écoute sur 0.0.0.0 pour être accessible depuis internet
+    print(f"🚀 Serveur lancé sur le port {port}")
     app.run(host='0.0.0.0', port=port)
