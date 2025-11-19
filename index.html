@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Zenith Ultimate Fixed</title>
+    <title>Zenith Ultimate</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;500;700;800&display=swap" rel="stylesheet">
     
@@ -94,9 +94,6 @@
         }
         @keyframes pulseText { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }
 
-        .track-card.artist-card img { border-radius: 50%; aspect-ratio: 1/1; width: 80%; margin: 0 auto 15px auto; display: block; }
-        .track-card.artist-card { text-align: center; }
-
         .track-card img { width: 100%; border-radius: 12px; aspect-ratio: 1/1; object-fit: cover; margin-bottom: 10px; }
         .track-card h3 { font-weight: 600; margin-bottom: 4px; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .track-card p { font-size: 12px; color: var(--text-dim); }
@@ -105,7 +102,6 @@
         .type-badge { font-size: 9px; font-weight: 800; padding: 2px 6px; border-radius: 4px; color: #000; width: fit-content; }
         .badge-hires { background: var(--primary); box-shadow: 0 0 10px var(--primary); }
         .badge-album { background: var(--secondary); box-shadow: 0 0 10px var(--secondary); color: white; }
-        .badge-artist { background: #9d4edd; box-shadow: 0 0 10px #9d4edd; color: white; }
 
         /* LYRICS VIEW */
         .lyrics-view {
@@ -195,8 +191,6 @@
             }
             .main-feed { padding-bottom: 250px; }
             .bento-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
-
-            /* LECTEUR MOBILE OPTIMISÉ */
             .player-capsule {
                 width: 96%; 
                 height: auto;
@@ -245,7 +239,6 @@
                     <option value="all">Tout</option>
                     <option value="track">Titres</option>
                     <option value="album">Albums</option>
-                    <option value="artist">Artistes</option>
                 </select>
                 <input type="text" id="searchInput" class="search-input" placeholder="Rechercher...">
                 <button class="search-btn" id="btnSearch">GO</button>
@@ -309,7 +302,7 @@
     </div>
 
     <script>
-        const API_BASE = ''; 
+        const API_BASE = ''; // Vercel compliant
         let tracks = [];
         let currentIndex = 0;
         let audio = new Audio();
@@ -348,7 +341,7 @@
             }
         }
         
-        // --- FONCTION POUR FIXER LA NOTIF ANDROID ---
+        // CORRECTION NOTIFICATION ANDROID
         function updateMediaSessionState() {
             if ('mediaSession' in navigator && audio.duration && !isNaN(audio.duration)) {
                 navigator.mediaSession.setPositionState({
@@ -373,11 +366,11 @@
                 const data = await res.json();
                 
                 const combined = [];
-                if(data.artists) data.artists.forEach(a => combined.push({...a, type: 'artist'}));
                 if(data.albums) data.albums.forEach(a => combined.push({...a, type: 'album'}));
                 if(data.tracks) data.tracks.forEach(t => combined.push({...t, type: 'track'}));
                 
-                if(type === 'track' || type === 'all') tracks = data.tracks || [];
+                // On ne gère plus 'artist', que track ou album
+                if(type !== 'album') tracks = data.tracks || [];
                 else tracks = [];
 
                 renderGrid(combined);
@@ -412,38 +405,21 @@
             }
             items.forEach((item, i) => {
                 const isAlbum = item.type === 'album';
-                const isArtist = item.type === 'artist';
-                
-                let imgUrl = '';
-                if(isArtist) imgUrl = item.image.large;
-                else if(isAlbum) imgUrl = item.image.large;
-                else imgUrl = item.album.image.large;
-                
+                let imgUrl = isAlbum ? item.image.large : item.album.image.large;
                 if(imgUrl) imgUrl = imgUrl.replace('_300','_600');
-                else imgUrl = 'https://via.placeholder.com/300';
-
                 const div = document.createElement('div');
                 div.className = 'track-card';
-                if(isArtist) div.classList.add('artist-card');
                 div.dataset.id = item.id;
                 
                 let badges = '';
-                if(isArtist) badges += '<div class="type-badge badge-artist">ARTISTE</div>';
-                else if(isAlbum) badges += '<div class="type-badge badge-album">ALBUM</div>';
-                else if(item.maximum_bit_depth > 16) badges += '<div class="type-badge badge-hires">HI-RES</div>';
+                if(isAlbum) badges += '<div class="type-badge badge-album">ALBUM</div>';
+                if(item.maximum_bit_depth > 16) badges += '<div class="type-badge badge-hires">HI-RES</div>';
                 let badgeHTML = `<div class="badges-container">${badges}</div>`;
                 
-                let title = item.name || item.title;
-                let sub = '';
-                if(isArtist) sub = 'Artiste';
-                else if(isAlbum) sub = item.artist.name;
-                else sub = item.performer.name;
-
-                div.innerHTML = `${badgeHTML}<img src="${imgUrl}"><h3>${title}</h3><p>${sub}</p>`;
-                
+                let artistName = isAlbum ? item.artist.name : item.performer.name;
+                div.innerHTML = `${badgeHTML}<img src="${imgUrl}"><h3>${item.title}</h3><p>${artistName}</p>`;
                 div.onclick = () => {
-                    if(isArtist) openArtist(item.id);
-                    else if(isAlbum) openAlbum(item.id);
+                    if(isAlbum) openAlbum(item.id);
                     else {
                         const trackIdx = tracks.findIndex(t => t.id === item.id);
                         isRadioActive = false;
@@ -456,28 +432,27 @@
             updateActiveCard();
         }
 
-        async function openArtist(id) {
-            document.getElementById('trackGrid').innerHTML = '<p style="text-align:center; margin-top:50px;">Chargement Artiste...</p>';
-            try {
-                const res = await fetch(`${API_BASE}/artist?id=${id}`);
-                const data = await res.json();
-                if(data.albums && data.albums.items) {
-                    const albums = data.albums.items.map(a => ({...a, type: 'album', artist: {name: data.name}}));
-                    renderGrid(albums); 
-                } else {
-                    document.getElementById('trackGrid').innerHTML = '<p style="text-align:center;">Aucun album trouvé.</p>';
-                }
-            } catch(e) { console.error(e); }
-        }
-
         async function openAlbum(id) {
             document.getElementById('trackGrid').innerHTML = '<p style="text-align:center; margin-top:50px;">Chargement Album...</p>';
             try {
                 const res = await fetch(`${API_BASE}/album?id=${id}`);
                 const data = await res.json();
                 if(data.tracks && data.tracks.items) {
-                    tracks = data.tracks.items;
-                    renderGrid(tracks.map(t => ({...t, type: 'track', album: {image: data.image}}))); 
+                    // --- CORRECTION BUG ALBUM ---
+                    // On injecte l'image et l'artiste de l'album dans chaque piste
+                    // pour que loadTrack trouve ce qu'il cherche.
+                    const albumImg = data.image.large;
+                    const albumArtist = data.artist.name;
+                    
+                    tracks = data.tracks.items.map(t => ({
+                        ...t,
+                        type: 'track',
+                        // Fallback important pour l'artiste si 'performer' est manquant
+                        performer: t.performer || { name: albumArtist },
+                        album: { image: { large: albumImg }, title: data.title }
+                    }));
+                    
+                    renderGrid(tracks);
                 }
             } catch(e) { console.error(e); }
         }
@@ -489,17 +464,22 @@
             currentTrackId = t.id;
             audio.src = `${API_BASE}/stream/${t.id}`;
             
+            // Récupération robuste des données (avec fallbacks)
             let img = '';
             if(t.album && t.album.image) img = t.album.image.large;
             if(img) img = img.replace('_300','_600');
             else img = document.querySelector('.track-card img')?.src || '';
 
+            let artistName = 'Artiste';
+            if (t.performer && t.performer.name) artistName = t.performer.name;
+            else if (t.artist && t.artist.name) artistName = t.artist.name;
+
             document.getElementById('xlArt').src = img;
             document.getElementById('xlTitle').innerText = t.title;
-            document.getElementById('xlArtist').innerText = t.performer ? t.performer.name : 'Artiste';
+            document.getElementById('xlArtist').innerText = artistName;
             document.getElementById('capArt').src = img;
             document.getElementById('capTitle').innerText = t.title;
-            document.getElementById('capArtist').innerText = t.performer ? t.performer.name : 'Artiste';
+            document.getElementById('capArtist').innerText = artistName;
             document.getElementById('totTime').innerText = fmtTime(t.duration);
             
             const badge = document.getElementById('xlBadge');
@@ -510,12 +490,11 @@
             document.getElementById('introContainer').style.display = 'none';
             document.getElementById('lyricsView').innerHTML = '<p style="margin-top:50px; color:#666;">Chargement...</p>';
 
-            // MEDIA SESSION SETUP
             if ('mediaSession' in navigator) {
                 navigator.mediaSession.metadata = new MediaMetadata({
                     title: t.title,
-                    artist: t.performer.name,
-                    album: t.album.title,
+                    artist: artistName,
+                    album: t.album ? t.album.title : '',
                     artwork: [{ src: img, sizes: '512x512', type: 'image/jpeg' }]
                 });
                 navigator.mediaSession.setActionHandler('play', play);
@@ -532,13 +511,12 @@
 
             updateActiveCard();
             play();
-            fetchLyrics(t);
+            fetchLyrics(t, artistName);
         }
 
-        async function fetchLyrics(track) {
+        async function fetchLyrics(track, artistName) {
             try {
-                const artist = track.performer ? track.performer.name : '';
-                const res = await fetch(`${API_BASE}/lyrics?artist=${encodeURIComponent(artist)}&title=${encodeURIComponent(track.title)}&duration=${track.duration}`);
+                const res = await fetch(`${API_BASE}/lyrics?artist=${encodeURIComponent(artistName)}&title=${encodeURIComponent(track.title)}&duration=${track.duration}`);
                 if(!res.ok) throw new Error();
                 const data = await res.json();
                 if (data.type === 'synced') { parseLRC(data.lyrics); renderSyncedLyrics(); } 
@@ -632,7 +610,7 @@
             isRadioActive = true;
             document.getElementById('radioBadge').style.display = 'block';
             const cur = tracks[currentIndex];
-            const artist = cur.performer ? cur.performer.name : cur.artist;
+            const artist = cur.performer ? cur.performer.name : (cur.artist ? cur.artist.name : '');
             try {
                 const res = await fetch(`${API_BASE}/recommend?artist=${encodeURIComponent(artist)}&current_id=${cur.id}`);
                 const raw = await res.json();
