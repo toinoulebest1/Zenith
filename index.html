@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zenith Lyrics Pro</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;500;700;800&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --primary: #00d2ff;
+            --glass-bg: rgba(20, 20, 30, 0.85);
+            --glass-border: rgba(255, 255, 255, 0.1);
+            --text-main: #ffffff;
+            --text-dim: #888;
+            --active-lyric: #ffffff;
+            --inactive-lyric: rgba(255, 255, 255, 0.3);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Outfit', sans-serif; }
+
+        body {
+            background: #0a0a0a;
+            background-image: radial-gradient(circle at 50% 0%, #111 0%, #000000 80%);
+            height: 100vh; overflow: hidden; display: flex; justify-content: center; align-items: center;
+            color: white;
+        }
+
+        .app-layout { 
+            width: 95%; height: 92%; 
+            background: rgba(255, 255, 255, 0.01);
+            border: 1px solid var(--glass-border);
+            border-radius: 30px;
+            display: grid; grid-template-columns: 80px 1fr 350px; gap: 20px; position: relative; 
+            padding: 20px;
+            box-shadow: 0 30px 60px rgba(0,0,0,0.8);
+        }
+        
+        /* SIDEBAR */
+        .sidebar { 
+            background: var(--glass-bg); border-radius: 24px; border: 1px solid var(--glass-border);
+            display: flex; flex-direction: column; align-items: center; padding: 40px 0; gap: 40px; 
+        }
+        .nav-item { font-size: 22px; color: var(--text-dim); cursor: pointer; transition: 0.2s; } 
+        .nav-item:hover, .nav-item.active { color: var(--primary); text-shadow: 0 0 10px var(--primary); }
+
+        /* MAIN FEED */
+        .main-feed { 
+            display: flex; flex-direction: column; gap: 20px; 
+            overflow: hidden; position: relative; 
+        }
+
+        .search-container {
+            display: flex; gap: 10px; background: rgba(255,255,255,0.05); padding: 15px; border-radius: 18px; 
+            border: 1px solid var(--glass-border); flex-shrink: 0;
+        }
+        .search-input { flex: 1; background: transparent; border: none; color: white; font-size: 16px; outline: none; }
+        .search-btn { background: var(--primary); border: none; padding: 0 25px; border-radius: 10px; color: #000; font-weight: 700; cursor: pointer; }
+        .search-btn:active { transform: scale(0.95); }
+
+        /* GRID VIEW */
+        .track-view { overflow-y: auto; flex: 1; display: block; }
+        .track-view::-webkit-scrollbar { display: none; }
+
+        .bento-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 15px; padding-bottom: 120px; }
+        
+        .track-card { 
+            background: rgba(255,255,255,0.03); border-radius: 16px; padding: 15px; cursor: pointer; transition: 0.2s; 
+            border: 1px solid var(--glass-border); position: relative;
+        }
+        .track-card:hover { background: rgba(255,255,255,0.1); transform: translateY(-3px); border-color: var(--primary); }
+        .track-card img { width: 100%; border-radius: 12px; aspect-ratio: 1/1; object-fit: cover; margin-bottom: 10px; }
+        .track-card h3 { font-weight: 600; margin-bottom: 4px; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .track-card p { font-size: 12px; color: var(--text-dim); }
+        
+        .hires-badge {
+            position: absolute; top: 10px; right: 10px;
+            background: var(--primary); color: #000;
+            font-size: 10px; font-weight: 800; padding: 2px 6px; border-radius: 4px;
+            box-shadow: 0 0 10px var(--primary);
+        }
+
+        /* LYRICS VIEW */
+        .lyrics-view {
+            display: none; flex: 1; overflow-y: auto; 
+            text-align: center; padding: 20px 50px 120px 50px;
+            scroll-behavior: smooth; position: relative;
+        }
+        .lyrics-view::-webkit-scrollbar { display: none; }
+        
+        .lyric-line {
+            font-size: 24px; font-weight: 700; margin: 20px 0; 
+            color: var(--inactive-lyric); transition: 0.3s; cursor: pointer;
+        }
+        .lyric-line:hover { color: rgba(255,255,255,0.8); }
+        .lyric-line.active { 
+            color: var(--active-lyric); transform: scale(1.1); 
+            text-shadow: 0 0 20px rgba(255,255,255,0.3);
+        }
+
+        /* NOUVEAU STYLE INTRO BAR */
+        .intro-container {
+            position: fixed; top: 40%; left: 47%; transform: translate(-50%, -50%);
+            width: 350px;
+            display: none; pointer-events: none; z-index: 50;
+            text-align: center;
+        }
+        
+        .intro-text {
+            font-size: 14px; color: var(--primary); font-weight: 700; margin-bottom: 10px;
+            text-transform: uppercase; letter-spacing: 2px;
+            text-shadow: 0 0 15px rgba(0, 210, 255, 0.5);
+        }
+
+        .intro-bar-bg {
+            width: 100%; height: 6px; background: rgba(255,255,255,0.1);
+            border-radius: 10px; overflow: hidden;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .intro-bar-fill {
+            height: 100%; width: 0%;
+            background: var(--primary);
+            box-shadow: 0 0 20px var(--primary);
+            border-radius: 10px;
+            transition: width 0.1s linear;
+        }
+
+        /* RIGHT PANEL */
+        .right-panel { 
+            background: var(--glass-bg); border-radius: 24px; padding: 30px; 
+            display: flex; flex-direction: column; align-items: center; text-align: center; 
+            border: 1px solid var(--glass-border);
+        }
+        .album-art-xl { 
+            width: 100%; border-radius: 20px; margin-bottom: 20px; 
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5); max-width: 300px; aspect-ratio: 1/1; object-fit: cover;
+        }
+
+        /* PLAYER CAPSULE */
+        .player-capsule {
+            position: absolute; bottom: 25px; left: 50%; transform: translateX(-50%);
+            width: 750px; height: 100px; 
+            background: #141416; border-radius: 25px; display: flex; align-items: center; justify-content: space-between; padding: 0 30px;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.9); border: 1px solid rgba(255,255,255,0.15); z-index: 100;
+        }
+        
+        .cap-info { display: flex; align-items: center; gap: 15px; width: 200px; }
+        .cap-img { width: 60px; height: 60px; border-radius: 10px; object-fit: cover; background: #222; }
+        .cap-text { display: flex; flex-direction: column; overflow: hidden; }
+        .cap-title { font-weight: 700; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 130px; }
+        .cap-artist { color: #888; font-size: 12px; }
+
+        .cap-center { display: flex; flex-direction: column; align-items: center; gap: 8px; width: 300px; }
+        .controls { display: flex; align-items: center; gap: 20px; }
+        .ctrl-btn { background: none; border: none; color: #888; font-size: 16px; cursor: pointer; transition: 0.2s; }
+        .ctrl-btn:hover, .ctrl-btn.active { color: white; }
+        .play-btn { 
+            width: 40px; height: 40px; background: white; color: black; border-radius: 50%; 
+            display: flex; align-items: center; justify-content: center; font-size: 16px; transition: 0.2s;
+        }
+        .play-btn:hover { transform: scale(1.05); background: var(--primary); }
+
+        .timeline-box { width: 100%; display: flex; align-items: center; gap: 10px; font-size: 10px; color: #666; }
+        .progress-bg { flex: 1; height: 4px; background: #333; border-radius: 2px; cursor: pointer; position: relative; }
+        .progress-fill { width: 0%; height: 100%; background: var(--primary); border-radius: 2px; }
+        .seek-hitbox { position: absolute; top: -10px; bottom: -10px; width: 100%; cursor: pointer; }
+
+        .cap-right { width: 150px; display: flex; align-items: center; gap: 15px; justify-content: flex-end; }
+        .vol-slider { width: 80px; height: 4px; border-radius: 2px; -webkit-appearance: none; background: #333; outline: none; }
+        .vol-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 10px; height: 10px; background: white; border-radius: 50%; cursor: pointer; }
+
+        .radio-badge { 
+            position: absolute; top: -12px; left: 50%; transform: translateX(-50%);
+            background: var(--primary); color: black; padding: 2px 10px; border-radius: 10px;
+            font-size: 10px; font-weight: bold; box-shadow: 0 0 15px rgba(0, 210, 255, 0.4);
+            display: none;
+        }
+        .lyrics-btn.active { color: var(--primary); text-shadow: 0 0 10px var(--primary); }
+
+    </style>
+</head>
+<body>
+
+    <div id="introContainer" class="intro-container">
+        <div id="introText" class="intro-text">Début des paroles</div>
+        <div class="intro-bar-bg">
+            <div id="introBarFill" class="intro-bar-fill"></div>
+        </div>
+    </div>
+
+    <div class="app-layout">
+        
+        <nav class="sidebar">
+            <div style="font-size: 24px; color: white;"><i class="fas fa-infinity"></i></div>
+            <div class="nav-item active" onclick="showTracks()"><i class="fas fa-search"></i></div>
+            <div class="nav-item lyrics-btn" onclick="toggleLyrics()"><i class="fas fa-microphone-alt"></i></div>
+            <div class="nav-item"><i class="fas fa-cog"></i></div>
+        </nav>
+
+        <main class="main-feed">
+            <div class="search-container">
+                <input type="text" id="searchInput" class="search-input" placeholder="Artiste, titre...">
+                <button class="search-btn" id="btnSearch">GO</button>
+            </div>
+
+            <div class="track-view" id="trackView">
+                <h2 style="font-size: 1.2rem; margin: 20px 0; opacity: 0.8;">Résultats</h2>
+                <div class="bento-grid" id="trackGrid">
+                    <div style="grid-column: 1/-1; text-align: center; padding: 50px; color: #555;">
+                        <i class="fas fa-music" style="font-size: 30px; margin-bottom: 10px;"></i>
+                        <p>Prêt à streamer.</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="lyrics-view" id="lyricsView">
+                <div style="margin-top: 100px; color: #555;">Paroles.</div>
+            </div>
+        </main>
+
+        <aside class="right-panel">
+            <img src="https://via.placeholder.com/600/222/222" id="xlArt" class="album-art-xl">
+            <h2 id="xlTitle" style="font-size: 1.2rem; margin-bottom: 5px;">Prêt</h2>
+            <p id="xlArtist" style="color: var(--primary); font-size: 1rem;">...</p>
+        </aside>
+
+        <div class="player-capsule">
+            <div class="radio-badge" id="radioBadge">RADIO AUTO</div>
+            <div class="cap-info">
+                <img src="https://via.placeholder.com/60" id="capArt" class="cap-img">
+                <div class="cap-text">
+                    <div id="capTitle" class="cap-title">Titre</div>
+                    <div id="capArtist" class="cap-artist">Artiste</div>
+                </div>
+            </div>
+
+            <div class="cap-center">
+                <div class="controls">
+                    <button class="ctrl-btn" id="btnShuffle"><i class="fas fa-random"></i></button>
+                    <button class="ctrl-btn" id="btnPrev"><i class="fas fa-step-backward"></i></button>
+                    <button class="play-btn" id="btnPlay"><i class="fas fa-play" id="playIcon"></i></button>
+                    <button class="ctrl-btn" id="btnNext"><i class="fas fa-step-forward"></i></button>
+                    <button class="ctrl-btn lyrics-btn" onclick="toggleLyrics()"><i class="fas fa-microphone"></i></button>
+                </div>
+                <div class="timeline-box">
+                    <span id="currTime">0:00</span>
+                    <div class="progress-bg" id="progressBar">
+                        <div class="progress-fill" id="progressFill"></div>
+                        <div class="seek-hitbox"></div>
+                    </div>
+                    <span id="totTime">0:00</span>
+                </div>
+            </div>
+
+            <div class="cap-right">
+                <i class="fas fa-volume-up" style="color:#888; font-size:12px;"></i>
+                <input type="range" class="vol-slider" min="0" max="1" step="0.01" value="1" oninput="audio.volume=this.value">
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://127.0.0.1:5000';
+        let tracks = [];
+        let currentIndex = 0;
+        let audio = new Audio();
+        let isPlaying = false;
+        let isRadioActive = false;
+        let isLyricsMode = false;
+        let lyricsData = [];
+        let firstLineTime = null;
+
+        // Initialisation sécurisée
+        audio.volume = 1;
+        
+        function fmtTime(s) {
+            if(!s || isNaN(s) || !isFinite(s)) return "0:00";
+            let m = Math.floor(s/60);
+            let sec = Math.floor(s%60);
+            return m + ":" + (sec<10?"0":"") + sec;
+        }
+
+        // --- GESTION VUES ---
+        function showTracks() {
+            document.getElementById('trackView').style.display = 'block';
+            document.getElementById('lyricsView').style.display = 'none';
+            document.querySelectorAll('.lyrics-btn').forEach(b => b.classList.remove('active'));
+            isLyricsMode = false;
+            document.getElementById('introContainer').style.display = 'none';
+        }
+
+        function toggleLyrics() {
+            isLyricsMode = !isLyricsMode;
+            if(isLyricsMode) {
+                document.getElementById('trackView').style.display = 'none';
+                document.getElementById('lyricsView').style.display = 'block';
+                document.querySelectorAll('.lyrics-btn').forEach(b => b.classList.add('active'));
+                renderSyncedLyrics();
+            } else {
+                showTracks();
+            }
+        }
+
+        // --- RECHERCHE ---
+        async function performSearch() {
+            console.log("Lancement recherche...");
+            const q = document.getElementById('searchInput').value;
+            if(!q) return;
+            
+            isRadioActive = false;
+            document.getElementById('radioBadge').style.display = 'none';
+            showTracks();
+            document.getElementById('trackGrid').innerHTML = '<p style="text-align:center; margin-top:50px;">Chargement...</p>';
+
+            try {
+                const res = await fetch(`${API_BASE}/search?q=${encodeURIComponent(q)}`);
+                if(!res.ok) throw new Error("Erreur serveur");
+                const data = await res.json();
+                if(data.tracks && data.tracks.items) {
+                    tracks = data.tracks.items;
+                    renderGrid();
+                } else {
+                    document.getElementById('trackGrid').innerHTML = '<p style="text-align:center;">Aucun résultat.</p>';
+                }
+            } catch(e) {
+                console.error("Erreur recherche:", e);
+                document.getElementById('trackGrid').innerHTML = '<p style="text-align:center; color:red;">Erreur : Vérifiez que server.py est lancé.</p>';
+            }
+        }
+
+        function renderGrid() {
+            const grid = document.getElementById('trackGrid');
+            grid.innerHTML = '';
+            tracks.forEach((t, i) => {
+                let hd = (t.album.image.large||'').replace('_300','_600');
+                const div = document.createElement('div');
+                div.className = 'track-card';
+                let badge = (t.maximum_bit_depth > 16) ? '<div class="hires-badge">HI-RES</div>' : '';
+                div.innerHTML = `${badge}<img src="${hd}"><h3>${t.title}</h3><p>${t.performer.name}</p>`;
+                div.onclick = () => {
+                    isRadioActive = false;
+                    document.getElementById('radioBadge').style.display = 'none';
+                    loadTrack(i);
+                };
+                grid.appendChild(div);
+            });
+        }
+
+        async function loadTrack(index) {
+            currentIndex = index;
+            const t = tracks[index];
+            audio.src = `${API_BASE}/stream/${t.id}`;
+            
+            let img = (t.album.image.large||'').replace('_300','_600');
+            document.getElementById('xlArt').src = img;
+            document.getElementById('xlTitle').innerText = t.title;
+            document.getElementById('xlArtist').innerText = t.performer.name;
+            
+            document.getElementById('capArt').src = img;
+            document.getElementById('capTitle').innerText = t.title;
+            document.getElementById('capArtist').innerText = t.performer.name;
+            document.getElementById('totTime').innerText = fmtTime(t.duration);
+            
+            // Reset Lyrics & Timer
+            lyricsData = [];
+            firstLineTime = null;
+            document.getElementById('introContainer').style.display = 'none';
+            document.getElementById('lyricsView').innerHTML = '<p style="margin-top:50px; color:#666;">Chargement paroles...</p>';
+
+            play();
+            fetchLyrics(t);
+        }
+
+        async function fetchLyrics(track) {
+            try {
+                const res = await fetch(`${API_BASE}/lyrics?artist=${encodeURIComponent(track.performer.name)}&title=${encodeURIComponent(track.title)}&duration=${track.duration}`);
+                if(!res.ok) throw new Error();
+                const data = await res.json();
+
+                if (data.type === 'synced') {
+                    parseLRC(data.lyrics);
+                    renderSyncedLyrics();
+                } else if (data.type === 'plain') {
+                    document.getElementById('lyricsView').innerHTML = `<div style="white-space: pre-line; font-size:18px; line-height:1.6;">${data.lyrics}</div>`;
+                } else {
+                    document.getElementById('lyricsView').innerHTML = '<p style="margin-top:50px;">Paroles non trouvées.</p>';
+                }
+            } catch (e) {
+                document.getElementById('lyricsView').innerHTML = '<p style="margin-top:50px;">Paroles indisponibles.</p>';
+            }
+        }
+
+        function parseLRC(lrc) {
+            if(!lrc) return;
+            const lines = lrc.split('\n');
+            const regex = /^\[(\d{2}):(\d{2})\.(\d{2,3})\](.*)/;
+            lyricsData = [];
+            lines.forEach(line => {
+                const match = line.match(regex);
+                if (match) {
+                    const min = parseInt(match[1]);
+                    const sec = parseInt(match[2]);
+                    const ms = parseInt(match[3]);
+                    const time = min * 60 + sec + (ms / 1000);
+                    const text = match[4].trim();
+                    if (text) lyricsData.push({ time, text });
+                }
+            });
+            if(lyricsData.length > 0) firstLineTime = lyricsData[0].time;
+        }
+
+        function renderSyncedLyrics() {
+            if(!isLyricsMode || lyricsData.length === 0) return;
+            const container = document.getElementById('lyricsView');
+            container.innerHTML = '';
+            
+            const spacerTop = document.createElement('div');
+            spacerTop.style.height = "40vh";
+            container.appendChild(spacerTop);
+
+            lyricsData.forEach((line, i) => {
+                const div = document.createElement('div');
+                div.className = 'lyric-line';
+                div.id = `line-${i}`;
+                div.innerText = line.text;
+                div.onclick = () => { audio.currentTime = line.time; play(); };
+                container.appendChild(div);
+            });
+            
+            const spacerBot = document.createElement('div');
+            spacerBot.style.height = "40vh";
+            container.appendChild(spacerBot);
+        }
+
+        function syncLyricsUI() {
+            try {
+                // GESTION BARRE DE CHARGEMENT INTRO
+                const container = document.getElementById('introContainer');
+                const barFill = document.getElementById('introBarFill');
+                const textSpan = document.getElementById('introText');
+                
+                if (isLyricsMode && firstLineTime !== null && !isNaN(firstLineTime) && firstLineTime > 0) {
+                    const timeLeft = firstLineTime - audio.currentTime;
+                    
+                    // On affiche la barre si on est avant les paroles
+                    if (timeLeft > 0.5) {
+                        container.style.display = 'block';
+                        
+                        // Calcul du pourcentage : 0s = 0%, firstLineTime = 100%
+                        const pct = (audio.currentTime / firstLineTime) * 100;
+                        barFill.style.width = pct + '%';
+                        
+                        textSpan.innerText = `Début des paroles dans ${timeLeft.toFixed(1)}s`;
+                    } else {
+                        // Une fois le temps écoulé, on cache la barre
+                        container.style.display = 'none';
+                    }
+                } else {
+                    container.style.display = 'none';
+                }
+
+                // DEFILEMENT PAROLES (Reste inchangé)
+                if (!isLyricsMode || lyricsData.length === 0) return;
+                const cur = audio.currentTime;
+                let activeIdx = -1;
+                for (let i = 0; i < lyricsData.length; i++) {
+                    if (cur >= lyricsData[i].time) activeIdx = i; else break;
+                }
+                document.querySelectorAll('.lyric-line').forEach((div, i) => {
+                    if (i === activeIdx) {
+                        if(!div.classList.contains('active')) {
+                            div.classList.add('active');
+                            div.scrollIntoView({ behavior: "smooth", block: "center" });
+                        }
+                    } else {
+                        div.classList.remove('active');
+                    }
+                });
+            } catch(e) { console.error("Erreur UI Synchro", e); }
+        }
+
+        // --- LECTURE ---
+        function play() { 
+            audio.play().then(() => {
+                isPlaying=true; 
+                document.getElementById('playIcon').className = 'fas fa-pause';
+            }).catch(e => console.error("Erreur play", e));
+        }
+        function pause() { audio.pause(); isPlaying=false; document.getElementById('playIcon').className = 'fas fa-play'; }
+        
+        async function handleNext() {
+            console.log("Next / Radio...");
+            isRadioActive = true;
+            document.getElementById('radioBadge').style.display = 'block';
+            const cur = tracks[currentIndex];
+            try {
+                const res = await fetch(`${API_BASE}/recommend?artist=${encodeURIComponent(cur.performer.name)}&current_id=${cur.id}`);
+                const raw = await res.json();
+                if(raw && raw.id) {
+                    let hd = (raw.album.image.large||'').replace('_300','_600');
+                    const newTrack = {
+                        id: raw.id, title: raw.title, performer: { name: raw.performer.name },
+                        album: { image: { large: hd }, genre: raw.album.genre },
+                        duration: raw.duration, maximum_bit_depth: raw.maximum_bit_depth
+                    };
+                    tracks.push(newTrack);
+                    loadTrack(tracks.length - 1);
+                    
+                    const grid = document.getElementById('trackGrid');
+                    const div = document.createElement('div');
+                    div.className = 'track-card';
+                    div.style.borderColor = 'var(--primary)';
+                    div.innerHTML = `<img src="${hd}"><h3>${newTrack.title}</h3><p style="color:var(--primary)">Radio: ${newTrack.performer.name}</p>`;
+                    div.onclick = () => loadTrack(tracks.length-1);
+                    grid.appendChild(div);
+                }
+            } catch(e) { if(currentIndex < tracks.length-1) loadTrack(currentIndex+1); }
+        }
+
+        // --- EVENTS ---
+        document.addEventListener('DOMContentLoaded', () => {
+            const btnSearch = document.getElementById('btnSearch');
+            if(btnSearch) btnSearch.addEventListener('click', performSearch);
+
+            const searchInput = document.getElementById('searchInput');
+            if(searchInput) searchInput.addEventListener('keypress', (e) => { if(e.key==='Enter') performSearch(); });
+
+            const btnPlay = document.getElementById('btnPlay');
+            if(btnPlay) btnPlay.addEventListener('click', () => isPlaying ? pause() : play());
+
+            const btnNext = document.getElementById('btnNext');
+            if(btnNext) btnNext.addEventListener('click', handleNext);
+
+            const btnPrev = document.getElementById('btnPrev');
+            if(btnPrev) btnPrev.addEventListener('click', () => {
+                if(audio.currentTime > 3) audio.currentTime=0; 
+                else if(currentIndex > 0) loadTrack(currentIndex-1);
+            });
+            
+            const progressBar = document.getElementById('progressBar');
+            if(progressBar) progressBar.addEventListener('click', (e) => {
+                if(!audio.duration) return;
+                const w = progressBar.clientWidth;
+                const pct = e.offsetX / w;
+                audio.currentTime = pct * audio.duration;
+            });
+        });
+
+        audio.ontimeupdate = () => {
+            if(audio.duration) {
+                const pct = (audio.currentTime/audio.duration)*100;
+                const fill = document.getElementById('progressFill');
+                if(fill) fill.style.width = pct+'%';
+                
+                const currTime = document.getElementById('currTime');
+                if(currTime) currTime.innerText = fmtTime(audio.currentTime);
+                
+                syncLyricsUI(); 
+            }
+        };
+        audio.onended = handleNext;
+    </script>
+</body>
+</html>
