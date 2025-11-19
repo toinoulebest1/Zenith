@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Zenith Ultimate Fixed</title>
+    <title>Zenith Ultimate Mobile</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;500;700;800&display=swap" rel="stylesheet">
     
@@ -160,7 +160,7 @@
         .play-btn { width: 40px; height: 40px; background: white; color: black; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; transition: 0.2s; }
         .play-btn:hover { transform: scale(1.05); background: var(--primary); }
 
-        /* Timeline styles */
+        /* TIMELINE (PC) */
         .timeline-box { width: 100%; display: flex; align-items: center; gap: 10px; font-size: 10px; color: #666; }
         .progress-bg { flex: 1; height: 4px; background: #333; border-radius: 2px; cursor: pointer; position: relative; }
         .progress-fill { width: 0%; height: 100%; background: var(--primary); border-radius: 2px; }
@@ -177,7 +177,7 @@
             display: none;
         }
 
-        /* --- MOBILE RESPONSIVE FIX --- */
+        /* --- MOBILE RESPONSIVE --- */
         @media (max-width: 768px) {
             .app-layout {
                 display: flex; flex-direction: column; padding: 10px;
@@ -186,6 +186,7 @@
             
             .right-panel { display: none; }
 
+            /* MENU EN BAS */
             .sidebar {
                 position: fixed; bottom: 0; left: 0; width: 100%; height: 60px;
                 flex-direction: row; justify-content: space-around; padding: 0;
@@ -193,27 +194,32 @@
                 z-index: 200;
             }
 
-            .main-feed { padding-bottom: 220px; } /* Plus d'espace pour le scroll */
+            /* ESPACE POUR LE SCROLL */
+            .main-feed { padding-bottom: 250px; }
             .bento-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
 
-            /* MOBILE PLAYER */
+            /* LECTEUR MOBILE (CORRIGÉ) */
             .player-capsule {
                 width: 96%; 
-                height: auto; /* Hauteur auto pour tout contenir */
-                bottom: 75px; /* Au dessus du menu */
-                flex-direction: column; gap: 12px; padding: 15px;
-                background: rgba(20, 20, 25, 0.95);
+                height: auto;
+                min-height: 130px; /* Hauteur forcée pour tout afficher */
+                bottom: 85px; /* Décollé du menu */
+                flex-direction: column; 
+                justify-content: center;
+                padding: 15px;
+                gap: 10px;
+                background: rgba(20, 20, 25, 0.98);
             }
             
             .cap-info { width: 100%; }
-            .cap-center { width: 100%; gap: 12px; }
+            .cap-center { width: 100%; gap: 15px; margin-top: 5px; }
             .cap-right { display: none; } /* Pas de volume sur mobile */
             
-            .controls { width: 100%; justify-content: space-between; padding: 0 10px; }
+            .controls { width: 100%; justify-content: space-around; }
             
             /* TIMELINE MOBILE VISIBLE */
-            .timeline-box { display: flex; width: 100%; justify-content: space-between; margin-top: 5px; }
-            .progress-bg { height: 6px; } /* Plus gros pour le doigt */
+            .timeline-box { display: flex !important; width: 100%; justify-content: space-between; margin-top: 0px; }
+            .progress-bg { height: 6px; } /* Plus gros */
             
             .search-container { flex-wrap: wrap; }
             .search-input { width: 100%; margin-top: 5px; order: 3; }
@@ -467,7 +473,7 @@
             document.getElementById('introContainer').style.display = 'none';
             document.getElementById('lyricsView').innerHTML = '<p style="margin-top:50px; color:#666;">Chargement...</p>';
 
-            // MEDIA SESSION (POUR MOBILE LOCK SCREEN)
+            // MEDIA SESSION (MOBILE LOCK SCREEN)
             if ('mediaSession' in navigator) {
                 navigator.mediaSession.metadata = new MediaMetadata({
                     title: t.title,
