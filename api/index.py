@@ -54,31 +54,42 @@ def home():
     try: return send_file('../index.html')
     except: return "Erreur: index.html introuvable"
 
-# --- MODIFICATION : RECHERCHE MIXTE (Tracks + Albums) ---
+# --- MODIFICATION : RECHERCHE AVEC FILTRE ---
 @app.route('/search')
 def search_tracks():
     if not client: return jsonify({"error": "Client not initialized"}), 500
+    
     query = request.args.get('q')
+    search_type = request.args.get('type', 'all') # 'track', 'album', ou 'all'
+
+    tracks_results = []
+    albums_results = []
+
     try:
-        # 1. Chercher les pistes
-        tracks_resp = client.api_call("track/search", query=query, limit=20)
-        # 2. Chercher les albums
-        albums_resp = client.api_call("album/search", query=query, limit=10)
+        # Si on veut des titres ou tout
+        if search_type in ['track', 'all']:
+            limit = 30 if search_type == 'track' else 20
+            tracks_resp = client.api_call("track/search", query=query, limit=limit)
+            tracks_results = tracks_resp.get('tracks', {}).get('items', [])
+
+        # Si on veut des albums ou tout
+        if search_type in ['album', 'all']:
+            limit = 30 if search_type == 'album' else 10
+            albums_resp = client.api_call("album/search", query=query, limit=limit)
+            albums_results = albums_resp.get('albums', {}).get('items', [])
         
         return jsonify({
-            "tracks": tracks_resp.get('tracks', {}).get('items', []),
-            "albums": albums_resp.get('albums', {}).get('items', [])
+            "tracks": tracks_results,
+            "albums": albums_results
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# --- NOUVEAU : RECUPERER LES PISTES D'UN ALBUM ---
 @app.route('/album')
 def get_album():
     if not client: return jsonify({"error": "Client not initialized"}), 500
     album_id = request.args.get('id')
     try:
-        # Récupère les infos de l'album et ses pistes
         meta = client.get_album_meta(album_id)
         return jsonify(meta)
     except Exception as e:

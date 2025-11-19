@@ -3,14 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Zenith Albums</title>
+    <title>Zenith Filter</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;500;700;800&display=swap" rel="stylesheet">
     
     <style>
         :root {
             --primary: #00d2ff;
-            --secondary: #ff0055; /* Couleur pour les albums */
             --glass-bg: rgba(20, 20, 30, 0.85);
             --glass-border: rgba(255, 255, 255, 0.1);
             --text-main: #ffffff;
@@ -52,12 +51,22 @@
             overflow: hidden; position: relative; 
         }
 
+        /* SEARCH CONTAINER AVEC FILTRE */
         .search-container {
-            display: flex; gap: 10px; background: rgba(255,255,255,0.05); padding: 15px; border-radius: 18px; 
-            border: 1px solid var(--glass-border); flex-shrink: 0;
+            display: flex; gap: 10px; background: rgba(255,255,255,0.05); padding: 10px 15px; border-radius: 18px; 
+            border: 1px solid var(--glass-border); flex-shrink: 0; align-items: center;
         }
+        
+        /* Le sélecteur de filtre */
+        .search-select {
+            background: transparent; color: var(--primary); border: none; font-weight: 700;
+            outline: none; cursor: pointer; text-transform: uppercase; font-size: 12px;
+            padding-right: 10px; border-right: 1px solid rgba(255,255,255,0.1);
+        }
+        .search-select option { background: #000; color: white; padding: 10px; }
+
         .search-input { flex: 1; background: transparent; border: none; color: white; font-size: 16px; outline: none; }
-        .search-btn { background: var(--primary); border: none; padding: 0 25px; border-radius: 10px; color: #000; font-weight: 700; cursor: pointer; }
+        .search-btn { background: var(--primary); border: none; padding: 8px 20px; border-radius: 10px; color: #000; font-weight: 700; cursor: pointer; }
         .search-btn:active { transform: scale(0.95); }
 
         /* GRID VIEW */
@@ -81,7 +90,7 @@
             color: #000;
         }
         .badge-hires { background: var(--primary); box-shadow: 0 0 10px var(--primary); }
-        .badge-album { background: var(--secondary); box-shadow: 0 0 10px var(--secondary); color: white; }
+        .badge-album { background: #ff0055; box-shadow: 0 0 10px #ff0055; color: white; }
 
         /* LYRICS VIEW */
         .lyrics-view {
@@ -102,16 +111,13 @@
         }
 
         /* CHRONO INTRO STYLE */
-        .intro-timer {
-            position: fixed; top: 40%; left: 45%; transform: translate(-50%, -50%);
-            font-size: 60px; font-weight: 800; color: var(--primary);
-            text-shadow: 0 0 30px rgba(0, 210, 255, 0.6);
-            display: none; pointer-events: none; z-index: 50;
-            background: rgba(0,0,0,0.8); padding: 20px 40px; border-radius: 30px;
-            border: 1px solid var(--primary);
-            animation: pulseTimer 1s infinite;
+        .intro-container {
+            position: fixed; top: 40%; left: 47%; transform: translate(-50%, -50%);
+            width: 350px; display: none; pointer-events: none; z-index: 50; text-align: center;
         }
-        @keyframes pulseTimer { 0% { transform: translate(-50%, -50%) scale(1); } 50% { transform: translate(-50%, -50%) scale(1.05); } 100% { transform: translate(-50%, -50%) scale(1); } }
+        .intro-text { font-size: 14px; color: var(--primary); font-weight: 700; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 2px; text-shadow: 0 0 15px rgba(0, 210, 255, 0.5); }
+        .intro-bar-bg { width: 100%; height: 6px; background: rgba(255,255,255,0.1); border-radius: 10px; overflow: hidden; border: 1px solid rgba(255,255,255,0.1); }
+        .intro-bar-fill { height: 100%; width: 0%; background: var(--primary); box-shadow: 0 0 20px var(--primary); border-radius: 10px; transition: width 0.1s linear; }
 
         /* RIGHT PANEL */
         .right-panel { 
@@ -165,15 +171,6 @@
         }
         .lyrics-btn.active { color: var(--primary); text-shadow: 0 0 10px var(--primary); }
 
-        /* BARRE INTRO */
-        .intro-container {
-            position: fixed; top: 40%; left: 47%; transform: translate(-50%, -50%);
-            width: 350px; display: none; pointer-events: none; z-index: 50; text-align: center;
-        }
-        .intro-text { font-size: 14px; color: var(--primary); font-weight: 700; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 2px; text-shadow: 0 0 15px rgba(0, 210, 255, 0.5); }
-        .intro-bar-bg { width: 100%; height: 6px; background: rgba(255,255,255,0.1); border-radius: 10px; overflow: hidden; border: 1px solid rgba(255,255,255,0.1); }
-        .intro-bar-fill { height: 100%; width: 0%; background: var(--primary); box-shadow: 0 0 20px var(--primary); border-radius: 10px; transition: width 0.1s linear; }
-
     </style>
 </head>
 <body>
@@ -192,7 +189,12 @@
 
         <main class="main-feed">
             <div class="search-container">
-                <input type="text" id="searchInput" class="search-input" placeholder="Artiste, titre...">
+                <select id="searchType" class="search-select">
+                    <option value="all">Tout</option>
+                    <option value="track">Titres</option>
+                    <option value="album">Albums</option>
+                </select>
+                <input type="text" id="searchInput" class="search-input" placeholder="Rechercher...">
                 <button class="search-btn" id="btnSearch">GO</button>
             </div>
 
@@ -251,9 +253,8 @@
     </div>
 
     <script>
-        const API_BASE = ''; // Pour Vercel (vide). Pour local, mettre 'http://127.0.0.1:5000'
+        const API_BASE = ''; // Pour Vercel. Pour local: 'http://127.0.0.1:5000'
         let tracks = [];
-        let searchResults = []; // Garde les résultats de recherche
         let currentIndex = 0;
         let audio = new Audio();
         let isPlaying = false;
@@ -292,6 +293,7 @@
 
         async function performSearch() {
             const q = document.getElementById('searchInput').value;
+            const type = document.getElementById('searchType').value; // Recupère le filtre
             if(!q) return;
             
             isRadioActive = false;
@@ -300,23 +302,18 @@
             document.getElementById('trackGrid').innerHTML = '<p style="text-align:center; margin-top:50px;">Chargement...</p>';
 
             try {
-                const res = await fetch(`${API_BASE}/search?q=${encodeURIComponent(q)}`);
+                const res = await fetch(`${API_BASE}/search?q=${encodeURIComponent(q)}&type=${type}`);
                 if(!res.ok) throw new Error("Err");
                 const data = await res.json();
                 
-                // Fusionner albums et tracks pour l'affichage
                 const combined = [];
-                if(data.albums) {
-                    data.albums.forEach(a => combined.push({...a, type: 'album'}));
-                }
-                if(data.tracks) {
-                    data.tracks.forEach(t => combined.push({...t, type: 'track'}));
-                }
+                if(data.albums) data.albums.forEach(a => combined.push({...a, type: 'album'}));
+                if(data.tracks) data.tracks.forEach(t => combined.push({...t, type: 'track'}));
                 
-                searchResults = combined; // On garde ça pour l'affichage
-                // On prépare la liste de lecture uniquement avec les tracks
-                tracks = data.tracks || [];
-                
+                // Si on a filtré par titre, la liste de lecture est prête
+                if(type !== 'album') tracks = data.tracks || [];
+                else tracks = []; // Si que albums, pas de liste de lecture par défaut
+
                 renderGrid(combined);
             } catch(e) {
                 document.getElementById('trackGrid').innerHTML = '<p style="text-align:center; color:red;">Erreur API.</p>';
@@ -327,12 +324,14 @@
             const grid = document.getElementById('trackGrid');
             grid.innerHTML = '';
             
+            if(items.length === 0) {
+                grid.innerHTML = '<p style="grid-column:1/-1; text-align:center;">Aucun résultat.</p>';
+                return;
+            }
+
             items.forEach((item, i) => {
                 const isAlbum = item.type === 'album';
-                // Gestion image
-                let imgUrl = '';
-                if(isAlbum) imgUrl = item.image.large;
-                else imgUrl = item.album.image.large;
+                let imgUrl = isAlbum ? item.image.large : item.album.image.large;
                 if(imgUrl) imgUrl = imgUrl.replace('_300','_600');
 
                 const div = document.createElement('div');
@@ -350,8 +349,6 @@
                     if(isAlbum) {
                         openAlbum(item.id);
                     } else {
-                        // C'est un track, on le joue
-                        // Il faut trouver son index dans la liste 'tracks' (pas searchResults)
                         const trackIdx = tracks.findIndex(t => t.id === item.id);
                         isRadioActive = false;
                         document.getElementById('radioBadge').style.display = 'none';
@@ -363,16 +360,13 @@
         }
 
         async function openAlbum(id) {
-            document.getElementById('trackGrid').innerHTML = '<p style="text-align:center;">Chargement Album...</p>';
+            document.getElementById('trackGrid').innerHTML = '<p style="text-align:center; margin-top:50px;">Chargement Album...</p>';
             try {
                 const res = await fetch(`${API_BASE}/album?id=${id}`);
                 const data = await res.json();
                 if(data.tracks && data.tracks.items) {
-                    // On remplace la playlist par l'album
                     tracks = data.tracks.items;
-                    // On affiche seulement les tracks
                     renderGrid(tracks.map(t => ({...t, type: 'track', album: {image: data.image}}))); 
-                    // On lance la première
                     loadTrack(0);
                 }
             } catch(e) { console.error(e); }
@@ -386,8 +380,6 @@
             
             let img = '';
             if(t.album && t.album.image) img = t.album.image.large;
-            // Si on est dans un album, l'image est parfois au niveau supérieur (géré par le renderGrid, mais ici pour le player)
-            // On fait simple : on garde l'image du render précédent si possible, sinon placeholder
             if(img) img = img.replace('_300','_600');
             else img = document.querySelector('.track-card img')?.src || '';
 
@@ -455,7 +447,6 @@
         }
 
         function syncLyricsUI() {
-            // BARRE INTRO
             const container = document.getElementById('introContainer');
             const barFill = document.getElementById('introBarFill');
             const textSpan = document.getElementById('introText');
@@ -469,7 +460,6 @@
                 } else container.style.display = 'none';
             } else container.style.display = 'none';
 
-            // DEFILEMENT
             if (!isLyricsMode || lyricsData.length === 0) return;
             const cur = audio.currentTime;
             let activeIdx = -1;
@@ -499,7 +489,7 @@
                 const raw = await res.json();
                 if(raw && raw.id) {
                     let hd = (raw.album.image.large||'').replace('_300','_600');
-                    const newTrack = { ...raw, img: hd, type: 'track' }; // Ensure structure
+                    const newTrack = { ...raw, img: hd, type: 'track' };
                     tracks.push(newTrack);
                     loadTrack(tracks.length - 1);
                 }
