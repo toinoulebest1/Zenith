@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Zenith Ultimate UI</title>
+    <title>Zenith Ultimate</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;500;700;800&display=swap" rel="stylesheet">
     
@@ -80,13 +80,12 @@
         }
         .track-card:hover { background: rgba(255,255,255,0.1); transform: translateY(-3px); border-color: var(--primary); }
         
-        /* --- STYLE POUR LA MUSIQUE SÉLECTIONNÉE --- */
+        /* ACTIVE TRACK STYLE */
         .track-card.active-track {
             border-color: var(--primary);
-            background: rgba(0, 210, 255, 0.1); /* Fond bleuté */
+            background: rgba(0, 210, 255, 0.1);
             box-shadow: 0 0 20px rgba(0, 210, 255, 0.2);
         }
-        /* Petit indicateur animé "En lecture" */
         .playing-indicator {
             position: absolute; bottom: 15px; right: 15px;
             font-size: 12px; color: var(--primary); font-weight: bold;
@@ -116,7 +115,7 @@
         .lyric-line:hover { color: rgba(255,255,255,0.8); }
         .lyric-line.active { color: var(--active-lyric); transform: scale(1.1); text-shadow: 0 0 20px rgba(255,255,255,0.3); }
 
-        /* CHRONO INTRO */
+        /* INTRO */
         .intro-container {
             position: fixed; top: 40%; left: 47%; transform: translate(-50%, -50%);
             width: 350px; display: none; pointer-events: none; z-index: 50; text-align: center;
@@ -131,7 +130,22 @@
             display: flex; flex-direction: column; align-items: center; text-align: center; 
             border: 1px solid var(--glass-border);
         }
-        .album-art-xl { width: 100%; border-radius: 20px; margin-bottom: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); max-width: 300px; aspect-ratio: 1/1; object-fit: cover; }
+        /* Nouveau conteneur pour l'image et le badge */
+        .xl-image-wrapper {
+            position: relative; width: 100%; max-width: 300px; margin-bottom: 20px;
+        }
+        .album-art-xl { 
+            width: 100%; border-radius: 20px; aspect-ratio: 1/1; object-fit: cover;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+        /* Le badge Hi-Res du panel droit */
+        .xl-badge {
+            position: absolute; top: 15px; right: 15px;
+            background: var(--primary); color: #000;
+            font-size: 11px; font-weight: 900; padding: 4px 8px; border-radius: 6px;
+            box-shadow: 0 0 15px var(--primary);
+            z-index: 10; display: none; /* Caché par défaut */
+        }
 
         /* PLAYER CAPSULE */
         .player-capsule {
@@ -217,7 +231,11 @@
         </main>
 
         <aside class="right-panel">
-            <img src="https://via.placeholder.com/600/222/222" id="xlArt" class="album-art-xl">
+            <div class="xl-image-wrapper">
+                <div id="xlBadge" class="xl-badge">HI-RES</div>
+                <img src="https://via.placeholder.com/600/222/222" id="xlArt" class="album-art-xl">
+            </div>
+
             <h2 id="xlTitle" style="font-size: 1.2rem; margin-bottom: 5px;">Prêt</h2>
             <p id="xlArtist" style="color: var(--primary); font-size: 1rem;">...</p>
         </aside>
@@ -265,7 +283,7 @@
         let isLyricsMode = false;
         let lyricsData = [];
         let firstLineTime = null;
-        let currentTrackId = null; // STOCK L'ID DE LA MUSIQUE EN COURS
+        let currentTrackId = null;
         audio.volume = 1;
 
         function fmtTime(s) {
@@ -300,7 +318,6 @@
             const type = document.getElementById('searchType').value;
             if(!q) return;
             
-            // On ne change pas l'état de lecture ni le badge radio ici
             showTracks();
             document.getElementById('trackGrid').innerHTML = '<p style="text-align:center; margin-top:50px;">Chargement...</p>';
 
@@ -322,24 +339,18 @@
             }
         }
 
-        // NOUVEAU : Fonction pour mettre à jour visuellement la carte active
         function updateActiveCard() {
-            // 1. Nettoyer les anciennes cartes
             document.querySelectorAll('.track-card').forEach(el => {
                 el.classList.remove('active-track');
                 const indicator = el.querySelector('.playing-indicator');
                 if(indicator) indicator.remove();
             });
 
-            // 2. Si aucune musique, stop
             if (!currentTrackId) return;
 
-            // 3. Trouver la carte qui a le bon ID (via dataset)
             const activeCard = document.querySelector(`.track-card[data-id="${currentTrackId}"]`);
-            
             if (activeCard) {
                 activeCard.classList.add('active-track');
-                // Ajouter le petit texte "En lecture"
                 const indicator = document.createElement('div');
                 indicator.className = 'playing-indicator';
                 indicator.innerHTML = '<i class="fas fa-volume-up"></i>';
@@ -363,7 +374,6 @@
 
                 const div = document.createElement('div');
                 div.className = 'track-card';
-                // IMPORTANT : On stocke l'ID dans le HTML pour le retrouver plus tard
                 div.dataset.id = item.id;
                 
                 let badges = '';
@@ -388,7 +398,6 @@
                 grid.appendChild(div);
             });
 
-            // Après avoir dessiné la grille, on réapplique la surbrillance si une musique joue
             updateActiveCard();
         }
 
@@ -399,9 +408,8 @@
                 const data = await res.json();
                 if(data.tracks && data.tracks.items) {
                     tracks = data.tracks.items;
-                    // On affiche les tracks
                     renderGrid(tracks.map(t => ({...t, type: 'track', album: {image: data.image}}))); 
-                    // On ne charge pas auto la première, on laisse l'utilisateur choisir
+                    // On ne lance pas auto
                 }
             } catch(e) { console.error(e); }
         }
@@ -410,8 +418,6 @@
             if(index < 0 || index >= tracks.length) return;
             currentIndex = index;
             const t = tracks[index];
-            
-            // STOCKAGE DE L'ID ACTUEL
             currentTrackId = t.id;
 
             audio.src = `${API_BASE}/stream/${t.id}`;
@@ -429,11 +435,18 @@
             document.getElementById('capArtist').innerText = t.performer ? t.performer.name : 'Artiste';
             document.getElementById('totTime').innerText = fmtTime(t.duration);
             
+            // BADGE HI-RES SUR LE LECTEUR DROIT
+            const badge = document.getElementById('xlBadge');
+            if (t.maximum_bit_depth > 16) {
+                badge.style.display = 'block';
+            } else {
+                badge.style.display = 'none';
+            }
+            
             lyricsData = []; firstLineTime = null;
             document.getElementById('introContainer').style.display = 'none';
             document.getElementById('lyricsView').innerHTML = '<p style="margin-top:50px; color:#666;">Chargement...</p>';
 
-            // MISE A JOUR VISUELLE DE LA GRILLE
             updateActiveCard();
 
             play();
@@ -533,18 +546,15 @@
                     const newTrack = { ...raw, img: hd, type: 'track' };
                     tracks.push(newTrack);
                     
-                    // On ajoute visuellement la carte Radio
                     const grid = document.getElementById('trackGrid');
                     const div = document.createElement('div');
                     div.className = 'track-card';
-                    div.dataset.id = newTrack.id; // ID POUR LA SURBRILLANCE
+                    div.dataset.id = newTrack.id;
                     div.innerHTML = `<div class="badges-container"><div class="type-badge" style="background:var(--primary)">RADIO</div></div><img src="${hd}"><h3>${newTrack.title}</h3><p style="color:var(--primary)">${newTrack.performer.name}</p>`;
                     div.onclick = () => loadTrack(tracks.length-1);
                     grid.appendChild(div);
                     
                     loadTrack(tracks.length - 1);
-                    
-                    // Scroll vers la radio
                     setTimeout(() => div.scrollIntoView({behavior: "smooth", block: "center"}), 100);
                 }
             } catch(e) { if(currentIndex < tracks.length-1) loadTrack(currentIndex+1); }
