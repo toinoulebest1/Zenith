@@ -1,121 +1,79 @@
-/* magic.css - Le style de la magie */
+/* magic.css - Édition Réaliste */
 
-/* Conteneur global de l'animation */
+/* Conteneur global */
 .wand-container {
     position: absolute;
-    bottom: -400px; /* Caché en bas au début */
+    bottom: -500px; /* Caché plus bas */
     left: 50%;
     transform: translateX(-50%);
-    width: 60px;
-    height: 400px;
+    width: 300px; /* Plus large pour l'image */
+    height: 500px;
     z-index: 5;
-    transition: bottom 2s cubic-bezier(0.175, 0.885, 0.32, 1.275); /* Montée fluide */
-    display: flex;
-    flex-direction: column;
-    align-items: center;
+    transition: bottom 3s cubic-bezier(0.19, 1, 0.22, 1); /* Montée majestueuse */
     pointer-events: none;
+    display: flex;
+    justify-content: center;
+    align-items: flex-end;
 }
 
-/* État actif : La main monte */
+/* État Actif : La main monte */
 .wand-container.active {
-    bottom: -20px;
+    bottom: -50px; /* On laisse dépasser un peu le bas */
 }
 
-/* La Baguette */
-.magic-wand {
-    width: 6px;
-    height: 250px;
-    background: linear-gradient(to right, #3e2723, #5d4037, #3e2723);
-    border-radius: 3px 3px 0 0;
-    position: relative;
-    z-index: 2;
-    box-shadow: 2px 5px 10px rgba(0,0,0,0.5);
+/* L'IMAGE DE LA MAIN + BAGUETTE */
+.wand-image {
+    width: 100%;
+    height: auto;
+    /* Image d'une main tenant la baguette de sureau (Elder Wand) */
+    /* C'est une image PNG transparente de haute qualité */
+    content: url('https://png.pngtree.com/png-vector/20240129/ourmid/pngtree-wizard-hand-holding-magic-wand-png-image_11563893.png');
+    filter: drop-shadow(0 10px 20px rgba(0,0,0,0.8));
 }
 
-/* La Lumière (Lumos) */
+/* La Lumière (Lumos) - Positionnée au bout de la baguette de l'image */
 .wand-light {
-    width: 10px;
-    height: 10px;
+    width: 15px;
+    height: 15px;
     background: #fff;
     border-radius: 50%;
     position: absolute;
-    top: -5px;
-    left: 50%;
+    /* Ajustement précis pour correspondre au bout de la baguette de l'image */
+    top: 40px; 
+    left: 50%; 
     transform: translateX(-50%) scale(0);
+    
     box-shadow: 0 0 0px #fff;
-    transition: all 0.5s ease 2.2s; /* S'allume APRES la montée */
-    z-index: 3;
+    transition: all 0.5s ease 2.5s; /* S'allume APRES la montée */
+    z-index: 10;
 }
 
 /* État actif de la lumière */
 .wand-container.active .wand-light {
-    transform: translateX(-50%) scale(1.5);
+    transform: translateX(-50%) scale(1);
     box-shadow: 
-        0 0 20px 10px #fff, 
-        0 0 50px 20px var(--primary), 
-        0 0 80px 40px rgba(0, 210, 255, 0.3);
+        0 0 30px 10px #fff, 
+        0 0 60px 30px var(--primary), 
+        0 0 120px 60px rgba(0, 210, 255, 0.4);
+    animation: flicker 0.1s infinite alternate;
 }
 
-/* LA MAIN (Dessinée en CSS) */
-.hand-wrapper {
-    position: absolute;
-    bottom: 0;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 50px;
-    height: 90px;
-    z-index: 3;
+/* Scintillement magique */
+@keyframes flicker {
+    0% { opacity: 0.9; transform: translateX(-50%) scale(1); }
+    100% { opacity: 1; transform: translateX(-50%) scale(1.1); }
 }
 
-/* La paume / base de la main */
-.hand-base {
-    width: 100%;
-    height: 100%;
-    background: #1a1a1a; /* Gant noir */
-    border-radius: 10px;
-    position: relative;
-    box-shadow: inset -5px 0 10px rgba(0,0,0,0.5);
-}
-
-/* Les doigts (qui entourent la baguette) */
-.finger {
-    position: absolute;
-    width: 55px;
-    height: 12px;
-    background: #222;
-    border-radius: 10px;
-    left: -2px;
-    box-shadow: 2px 2px 5px rgba(0,0,0,0.5);
-    z-index: 4; /* Devant la baguette */
-}
-
-.finger.f1 { top: 10px; transform: rotate(-5deg); }
-.finger.f2 { top: 24px; transform: rotate(-2deg); }
-.finger.f3 { top: 38px; transform: rotate(0deg); }
-.finger.f4 { top: 52px; transform: rotate(2deg); }
-
-/* Le pouce (derrière) */
-.thumb {
-    position: absolute;
-    width: 20px;
-    height: 40px;
-    background: #1a1a1a;
-    right: -5px;
-    top: 20px;
-    border-radius: 10px;
-    transform: rotate(10deg);
-    z-index: 1; /* Derrière la baguette */
-}
-
-/* Particules flottantes */
+/* Particules d'ambiance */
 .particle {
     position: absolute;
     bottom: 0;
-    background: white;
+    background: radial-gradient(circle, #fff, transparent);
     border-radius: 50%;
     opacity: 0;
     pointer-events: none;
     animation: rise 4s infinite ease-in;
+    box-shadow: 0 0 10px var(--primary);
 }
 
 @keyframes rise {
