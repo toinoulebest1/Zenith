@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Zenith Mobile Fix</title>
+    <title>Zenith Mobile Optimized</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;500;700;800&display=swap" rel="stylesheet">
     
@@ -194,25 +194,25 @@
             }
 
             /* ESPACE SCROLL */
-            .main-feed { padding-bottom: 250px; }
+            .main-feed { padding-bottom: 220px; /* Réduit un peu le padding pour laisser de la place au player */ }
             .bento-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
 
-            /* LECTEUR MOBILE (MODIFIÉ) */
+            /* LECTEUR MOBILE (OPTIMISÉ) */
             .player-capsule {
                 width: 96%; 
                 height: auto;
-                min-height: 145px; /* Agrandissement */
-                bottom: 90px;      /* Plus haut pour dégager le menu */
+                min-height: 120px; /* Réduit la hauteur minimale */
+                bottom: 80px;      /* Remonte un peu */
                 flex-direction: column; 
                 justify-content: center;
-                padding: 20px 15px;
-                gap: 15px;         /* Plus d'espace entre les éléments */
+                padding: 15px;     /* Réduit le padding interne */
+                gap: 10px;         /* Réduit l'espace entre les éléments */
                 background: rgba(20, 20, 25, 0.98);
                 border: 1px solid rgba(255,255,255,0.1);
             }
             
             .cap-info { width: 100%; }
-            .cap-center { width: 100%; gap: 15px; margin-top: 5px; }
+            .cap-center { width: 100%; gap: 10px; /* Réduit l'espace entre les controls et la timeline */ margin-top: 5px; }
             .cap-right { display: none; } 
             
             .controls { width: 100%; justify-content: space-around; }
@@ -515,111 +515,4 @@
                 if (match) {
                     const min = parseInt(match[1]);
                     const sec = parseInt(match[2]);
-                    const ms = parseInt(match[3]);
-                    const time = min * 60 + sec + (ms / 1000);
-                    const text = match[4].trim();
-                    if (text) lyricsData.push({ time, text });
-                }
-            });
-            if(lyricsData.length > 0) firstLineTime = lyricsData[0].time;
-        }
-
-        function renderSyncedLyrics() {
-            if(!isLyricsMode || lyricsData.length === 0) return;
-            const container = document.getElementById('lyricsView');
-            container.innerHTML = '';
-            const spacerTop = document.createElement('div'); spacerTop.style.height = "40vh"; container.appendChild(spacerTop);
-            lyricsData.forEach((line, i) => {
-                const div = document.createElement('div');
-                div.className = 'lyric-line';
-                div.id = `line-${i}`;
-                div.innerText = line.text;
-                div.onclick = () => { audio.currentTime = line.time; play(); };
-                container.appendChild(div);
-            });
-            const spacerBot = document.createElement('div'); spacerBot.style.height = "40vh"; container.appendChild(spacerBot);
-        }
-
-        function syncLyricsUI() {
-            const container = document.getElementById('introContainer');
-            const barFill = document.getElementById('introBarFill');
-            const textSpan = document.getElementById('introText');
-            if (isLyricsMode && firstLineTime !== null && firstLineTime > 0) {
-                const timeLeft = firstLineTime - audio.currentTime;
-                if (timeLeft > 0.5) {
-                    container.style.display = 'block';
-                    const pct = (audio.currentTime / firstLineTime) * 100;
-                    barFill.style.width = pct + '%';
-                    textSpan.innerText = `Début dans ${timeLeft.toFixed(1)}s`;
-                } else container.style.display = 'none';
-            } else container.style.display = 'none';
-
-            if (!isLyricsMode || lyricsData.length === 0) return;
-            const cur = audio.currentTime;
-            let activeIdx = -1;
-            for (let i = 0; i < lyricsData.length; i++) {
-                if (cur >= lyricsData[i].time) activeIdx = i; else break;
-            }
-            document.querySelectorAll('.lyric-line').forEach((div, i) => {
-                if (i === activeIdx) {
-                    if(!div.classList.contains('active')) {
-                        div.classList.add('active');
-                        div.scrollIntoView({ behavior: "smooth", block: "center" });
-                    }
-                } else div.classList.remove('active');
-            });
-        }
-
-        function play() { audio.play().then(() => { isPlaying=true; document.getElementById('playIcon').className = 'fas fa-pause'; }).catch(e=>{}); }
-        function pause() { audio.pause(); isPlaying=false; document.getElementById('playIcon').className = 'fas fa-play'; }
-        
-        async function handleNext() {
-            isRadioActive = true;
-            document.getElementById('radioBadge').style.display = 'block';
-            const cur = tracks[currentIndex];
-            const artist = cur.performer ? cur.performer.name : cur.artist;
-            try {
-                const res = await fetch(`${API_BASE}/recommend?artist=${encodeURIComponent(artist)}&current_id=${cur.id}`);
-                const raw = await res.json();
-                if(raw && raw.id) {
-                    let hd = (raw.album.image.large||'').replace('_300','_600');
-                    const newTrack = { ...raw, img: hd, type: 'track' };
-                    tracks.push(newTrack);
-                    
-                    const grid = document.getElementById('trackGrid');
-                    const div = document.createElement('div');
-                    div.className = 'track-card';
-                    div.dataset.id = newTrack.id;
-                    div.innerHTML = `<div class="badges-container"><div class="type-badge" style="background:var(--primary)">RADIO</div></div><img src="${hd}"><h3>${newTrack.title}</h3><p style="color:var(--primary)">${newTrack.performer.name}</p>`;
-                    div.onclick = () => loadTrack(tracks.length-1);
-                    grid.appendChild(div);
-                    
-                    loadTrack(tracks.length - 1);
-                    setTimeout(() => div.scrollIntoView({behavior: "smooth", block: "center"}), 100);
-                }
-            } catch(e) { if(currentIndex < tracks.length-1) loadTrack(currentIndex+1); }
-        }
-
-        document.addEventListener('DOMContentLoaded', () => {
-            document.getElementById('btnSearch').addEventListener('click', performSearch);
-            document.getElementById('searchInput').addEventListener('keypress', (e) => { if(e.key==='Enter') performSearch(); });
-            document.getElementById('btnPlay').addEventListener('click', () => isPlaying ? pause() : play());
-            document.getElementById('btnNext').addEventListener('click', handleNext);
-            document.getElementById('btnPrev').addEventListener('click', () => { if(audio.currentTime > 3) audio.currentTime=0; else if(currentIndex > 0) loadTrack(currentIndex-1); });
-            document.getElementById('progressBar').addEventListener('click', (e) => {
-                if(!audio.duration) return;
-                audio.currentTime = (e.offsetX / document.getElementById('progressBar').clientWidth) * audio.duration;
-            });
-        });
-
-        audio.ontimeupdate = () => {
-            if(audio.duration) {
-                document.getElementById('progressFill').style.width = (audio.currentTime/audio.duration)*100 + '%';
-                document.getElementById('currTime').innerText = fmtTime(audio.currentTime);
-                syncLyricsUI();
-            }
-        };
-        audio.onended = handleNext;
-    </script>
-</body>
-</html>
+                    const ms = parseInt
