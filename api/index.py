@@ -54,33 +54,41 @@ def home():
     try: return send_file('../index.html')
     except: return "Erreur: index.html introuvable"
 
-# --- MODIFICATION : RECHERCHE AVEC FILTRE ---
+# --- RECHERCHE COMPLETE (Tracks, Albums, Artistes) ---
 @app.route('/search')
 def search_tracks():
     if not client: return jsonify({"error": "Client not initialized"}), 500
     
     query = request.args.get('q')
-    search_type = request.args.get('type', 'all') # 'track', 'album', ou 'all'
+    search_type = request.args.get('type', 'all')
 
     tracks_results = []
     albums_results = []
+    artists_results = []
 
     try:
-        # Si on veut des titres ou tout
+        # 1. PISTES
         if search_type in ['track', 'all']:
-            limit = 75 if search_type == 'track' else 20
+            limit = 50 if search_type == 'track' else 20
             tracks_resp = client.api_call("track/search", query=query, limit=limit)
             tracks_results = tracks_resp.get('tracks', {}).get('items', [])
 
-        # Si on veut des albums ou tout
+        # 2. ALBUMS
         if search_type in ['album', 'all']:
-            limit = 30 if search_type == 'album' else 10
+            limit = 50 if search_type == 'album' else 10
             albums_resp = client.api_call("album/search", query=query, limit=limit)
             albums_results = albums_resp.get('albums', {}).get('items', [])
+
+        # 3. ARTISTES (Nouveau)
+        if search_type in ['artist', 'all']:
+            limit = 50 if search_type == 'artist' else 5
+            artists_resp = client.api_call("artist/search", query=query, limit=limit)
+            artists_results = artists_resp.get('artists', {}).get('items', [])
         
         return jsonify({
             "tracks": tracks_results,
-            "albums": albums_results
+            "albums": albums_results,
+            "artists": artists_results
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -91,6 +99,18 @@ def get_album():
     album_id = request.args.get('id')
     try:
         meta = client.get_album_meta(album_id)
+        return jsonify(meta)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# --- NOUVEAU : INFO ARTISTE (Récupère ses albums) ---
+@app.route('/artist')
+def get_artist():
+    if not client: return jsonify({"error": "Client not initialized"}), 500
+    artist_id = request.args.get('id')
+    try:
+        # On demande les infos de l'artiste + ses albums
+        meta = client.api_call("artist/get", id=artist_id, extra="albums", limit=20)
         return jsonify(meta)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
