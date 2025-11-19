@@ -2,15 +2,15 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Zenith Ultimate</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Zenith Mobile</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;500;700;800&display=swap" rel="stylesheet">
     
     <style>
         :root {
-            --primary: #00d2ff;       /* Cyan */
-            --secondary: #ff0055;     /* Rose */
+            --primary: #00d2ff;
+            --secondary: #ff0055;
             --glass-bg: rgba(20, 20, 30, 0.85);
             --glass-border: rgba(255, 255, 255, 0.1);
             --text-main: #ffffff;
@@ -19,7 +19,7 @@
             --inactive-lyric: rgba(255, 255, 255, 0.3);
         }
 
-        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Outfit', sans-serif; }
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Outfit', sans-serif; -webkit-tap-highlight-color: transparent; }
 
         body {
             background: #0a0a0a;
@@ -42,6 +42,7 @@
         .sidebar { 
             background: var(--glass-bg); border-radius: 24px; border: 1px solid var(--glass-border);
             display: flex; flex-direction: column; align-items: center; padding: 40px 0; gap: 40px; 
+            z-index: 200;
         }
         .nav-item { font-size: 22px; color: var(--text-dim); cursor: pointer; transition: 0.2s; } 
         .nav-item:hover, .nav-item.active { color: var(--primary); text-shadow: 0 0 10px var(--primary); }
@@ -64,7 +65,7 @@
         }
         .search-select option { background: #000; color: white; padding: 10px; }
 
-        .search-input { flex: 1; background: transparent; border: none; color: white; font-size: 16px; outline: none; }
+        .search-input { flex: 1; background: transparent; border: none; color: white; font-size: 16px; outline: none; min-width: 0; }
         .search-btn { background: var(--primary); border: none; padding: 8px 20px; border-radius: 10px; color: #000; font-weight: 700; cursor: pointer; }
         .search-btn:active { transform: scale(0.95); }
 
@@ -80,7 +81,6 @@
         }
         .track-card:hover { background: rgba(255,255,255,0.1); transform: translateY(-3px); border-color: var(--primary); }
         
-        /* ACTIVE TRACK STYLE */
         .track-card.active-track {
             border-color: var(--primary);
             background: rgba(0, 210, 255, 0.1);
@@ -112,7 +112,6 @@
         .lyrics-view::-webkit-scrollbar { display: none; }
         
         .lyric-line { font-size: 24px; font-weight: 700; margin: 20px 0; color: var(--inactive-lyric); transition: 0.3s; cursor: pointer; }
-        .lyric-line:hover { color: rgba(255,255,255,0.8); }
         .lyric-line.active { color: var(--active-lyric); transform: scale(1.1); text-shadow: 0 0 20px rgba(255,255,255,0.3); }
 
         /* INTRO */
@@ -130,21 +129,14 @@
             display: flex; flex-direction: column; align-items: center; text-align: center; 
             border: 1px solid var(--glass-border);
         }
-        /* Nouveau conteneur pour l'image et le badge */
-        .xl-image-wrapper {
-            position: relative; width: 100%; max-width: 300px; margin-bottom: 20px;
-        }
-        .album-art-xl { 
-            width: 100%; border-radius: 20px; aspect-ratio: 1/1; object-fit: cover;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-        }
-        /* Le badge Hi-Res du panel droit */
+        .xl-image-wrapper { position: relative; width: 100%; max-width: 300px; margin-bottom: 20px; }
+        .album-art-xl { width: 100%; border-radius: 20px; aspect-ratio: 1/1; object-fit: cover; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
         .xl-badge {
             position: absolute; top: 15px; right: 15px;
             background: var(--primary); color: #000;
             font-size: 11px; font-weight: 900; padding: 4px 8px; border-radius: 6px;
             box-shadow: 0 0 15px var(--primary);
-            z-index: 10; display: none; /* Caché par défaut */
+            z-index: 10; display: none; 
         }
 
         /* PLAYER CAPSULE */
@@ -165,10 +157,7 @@
         .controls { display: flex; align-items: center; gap: 20px; }
         .ctrl-btn { background: none; border: none; color: #888; font-size: 16px; cursor: pointer; transition: 0.2s; }
         .ctrl-btn:hover, .ctrl-btn.active { color: white; }
-        .play-btn { 
-            width: 40px; height: 40px; background: white; color: black; border-radius: 50%; 
-            display: flex; align-items: center; justify-content: center; font-size: 16px; transition: 0.2s;
-        }
+        .play-btn { width: 40px; height: 40px; background: white; color: black; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; transition: 0.2s; }
         .play-btn:hover { transform: scale(1.05); background: var(--primary); }
 
         .timeline-box { width: 100%; display: flex; align-items: center; gap: 10px; font-size: 10px; color: #666; }
@@ -186,8 +175,50 @@
             font-size: 10px; font-weight: bold; box-shadow: 0 0 15px rgba(0, 210, 255, 0.4);
             display: none;
         }
-        .lyrics-btn.active { color: var(--primary); text-shadow: 0 0 10px var(--primary); }
 
+        /* --- MOBILE RESPONSIVE --- */
+        @media (max-width: 768px) {
+            .app-layout {
+                display: flex; flex-direction: column; padding: 10px;
+                width: 100%; height: 100%; border-radius: 0; border: none;
+            }
+            
+            /* Masquer panel droit sur mobile */
+            .right-panel { display: none; }
+
+            /* Sidebar devient menu du bas */
+            .sidebar {
+                position: fixed; bottom: 0; left: 0; width: 100%; height: 60px;
+                flex-direction: row; justify-content: space-around; padding: 0;
+                background: #000; border-top: 1px solid var(--glass-border); border-radius: 0;
+                z-index: 200;
+            }
+
+            /* Main feed s'adapte */
+            .main-feed { padding-bottom: 160px; }
+            .bento-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+
+            /* Lecteur s'adapte */
+            .player-capsule {
+                width: 95%; height: auto; bottom: 70px;
+                flex-direction: column; gap: 10px; padding: 15px;
+            }
+            .cap-center { width: 100%; }
+            .cap-right { display: none; } /* Cache volume sur mobile */
+            .cap-info { width: 100%; }
+            .controls { width: 100%; justify-content: space-between; }
+            
+            /* Ajustement recherche */
+            .search-container { flex-wrap: wrap; }
+            .search-input { width: 100%; margin-top: 5px; order: 3; }
+            .search-select { order: 1; }
+            .search-btn { order: 2; margin-left: auto; }
+            
+            /* Ajustement Lyrics */
+            .lyrics-view { padding: 20px; }
+            .lyric-line { font-size: 18px; }
+            .intro-container { width: 90%; left: 50%; }
+        }
     </style>
 </head>
 <body>
@@ -235,7 +266,6 @@
                 <div id="xlBadge" class="xl-badge">HI-RES</div>
                 <img src="https://via.placeholder.com/600/222/222" id="xlArt" class="album-art-xl">
             </div>
-
             <h2 id="xlTitle" style="font-size: 1.2rem; margin-bottom: 5px;">Prêt</h2>
             <p id="xlArtist" style="color: var(--primary); font-size: 1rem;">...</p>
         </aside>
@@ -274,7 +304,7 @@
     </div>
 
     <script>
-        const API_BASE = ''; 
+        const API_BASE = ''; // Vercel
         let tracks = [];
         let currentIndex = 0;
         let audio = new Audio();
@@ -345,9 +375,7 @@
                 const indicator = el.querySelector('.playing-indicator');
                 if(indicator) indicator.remove();
             });
-
             if (!currentTrackId) return;
-
             const activeCard = document.querySelector(`.track-card[data-id="${currentTrackId}"]`);
             if (activeCard) {
                 activeCard.classList.add('active-track');
@@ -361,17 +389,14 @@
         function renderGrid(items) {
             const grid = document.getElementById('trackGrid');
             grid.innerHTML = '';
-            
             if(items.length === 0) {
                 grid.innerHTML = '<p style="grid-column:1/-1; text-align:center;">Aucun résultat.</p>';
                 return;
             }
-
             items.forEach((item, i) => {
                 const isAlbum = item.type === 'album';
                 let imgUrl = isAlbum ? item.image.large : item.album.image.large;
                 if(imgUrl) imgUrl = imgUrl.replace('_300','_600');
-
                 const div = document.createElement('div');
                 div.className = 'track-card';
                 div.dataset.id = item.id;
@@ -382,13 +407,10 @@
                 let badgeHTML = `<div class="badges-container">${badges}</div>`;
                 
                 let artistName = isAlbum ? item.artist.name : item.performer.name;
-
                 div.innerHTML = `${badgeHTML}<img src="${imgUrl}"><h3>${item.title}</h3><p>${artistName}</p>`;
-                
                 div.onclick = () => {
-                    if(isAlbum) {
-                        openAlbum(item.id);
-                    } else {
+                    if(isAlbum) openAlbum(item.id);
+                    else {
                         const trackIdx = tracks.findIndex(t => t.id === item.id);
                         isRadioActive = false;
                         document.getElementById('radioBadge').style.display = 'none';
@@ -397,7 +419,6 @@
                 };
                 grid.appendChild(div);
             });
-
             updateActiveCard();
         }
 
@@ -409,7 +430,6 @@
                 if(data.tracks && data.tracks.items) {
                     tracks = data.tracks.items;
                     renderGrid(tracks.map(t => ({...t, type: 'track', album: {image: data.image}}))); 
-                    // On ne lance pas auto
                 }
             } catch(e) { console.error(e); }
         }
@@ -419,7 +439,6 @@
             currentIndex = index;
             const t = tracks[index];
             currentTrackId = t.id;
-
             audio.src = `${API_BASE}/stream/${t.id}`;
             
             let img = '';
@@ -435,20 +454,15 @@
             document.getElementById('capArtist').innerText = t.performer ? t.performer.name : 'Artiste';
             document.getElementById('totTime').innerText = fmtTime(t.duration);
             
-            // BADGE HI-RES SUR LE LECTEUR DROIT
             const badge = document.getElementById('xlBadge');
-            if (t.maximum_bit_depth > 16) {
-                badge.style.display = 'block';
-            } else {
-                badge.style.display = 'none';
-            }
+            if (t.maximum_bit_depth > 16) badge.style.display = 'block';
+            else badge.style.display = 'none';
             
             lyricsData = []; firstLineTime = null;
             document.getElementById('introContainer').style.display = 'none';
             document.getElementById('lyricsView').innerHTML = '<p style="margin-top:50px; color:#666;">Chargement...</p>';
 
             updateActiveCard();
-
             play();
             fetchLyrics(t);
         }
