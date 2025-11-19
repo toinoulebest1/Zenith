@@ -3,13 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Zenith Lyrics Pro</title>
+    <title>Zenith Albums</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;500;700;800&display=swap" rel="stylesheet">
     
     <style>
         :root {
             --primary: #00d2ff;
+            --secondary: #ff0055; /* Couleur pour les albums */
             --glass-bg: rgba(20, 20, 30, 0.85);
             --glass-border: rgba(255, 255, 255, 0.1);
             --text-main: #ffffff;
@@ -74,12 +75,13 @@
         .track-card h3 { font-weight: 600; margin-bottom: 4px; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .track-card p { font-size: 12px; color: var(--text-dim); }
         
-        .hires-badge {
+        .type-badge {
             position: absolute; top: 10px; right: 10px;
-            background: var(--primary); color: #000;
             font-size: 10px; font-weight: 800; padding: 2px 6px; border-radius: 4px;
-            box-shadow: 0 0 10px var(--primary);
+            color: #000;
         }
+        .badge-hires { background: var(--primary); box-shadow: 0 0 10px var(--primary); }
+        .badge-album { background: var(--secondary); box-shadow: 0 0 10px var(--secondary); color: white; }
 
         /* LYRICS VIEW */
         .lyrics-view {
@@ -99,33 +101,17 @@
             text-shadow: 0 0 20px rgba(255,255,255,0.3);
         }
 
-        /* NOUVEAU STYLE INTRO BAR */
-        .intro-container {
-            position: fixed; top: 40%; left: 47%; transform: translate(-50%, -50%);
-            width: 350px;
+        /* CHRONO INTRO STYLE */
+        .intro-timer {
+            position: fixed; top: 40%; left: 45%; transform: translate(-50%, -50%);
+            font-size: 60px; font-weight: 800; color: var(--primary);
+            text-shadow: 0 0 30px rgba(0, 210, 255, 0.6);
             display: none; pointer-events: none; z-index: 50;
-            text-align: center;
+            background: rgba(0,0,0,0.8); padding: 20px 40px; border-radius: 30px;
+            border: 1px solid var(--primary);
+            animation: pulseTimer 1s infinite;
         }
-        
-        .intro-text {
-            font-size: 14px; color: var(--primary); font-weight: 700; margin-bottom: 10px;
-            text-transform: uppercase; letter-spacing: 2px;
-            text-shadow: 0 0 15px rgba(0, 210, 255, 0.5);
-        }
-
-        .intro-bar-bg {
-            width: 100%; height: 6px; background: rgba(255,255,255,0.1);
-            border-radius: 10px; overflow: hidden;
-            border: 1px solid rgba(255,255,255,0.1);
-        }
-
-        .intro-bar-fill {
-            height: 100%; width: 0%;
-            background: var(--primary);
-            box-shadow: 0 0 20px var(--primary);
-            border-radius: 10px;
-            transition: width 0.1s linear;
-        }
+        @keyframes pulseTimer { 0% { transform: translate(-50%, -50%) scale(1); } 50% { transform: translate(-50%, -50%) scale(1.05); } 100% { transform: translate(-50%, -50%) scale(1); } }
 
         /* RIGHT PANEL */
         .right-panel { 
@@ -179,19 +165,24 @@
         }
         .lyrics-btn.active { color: var(--primary); text-shadow: 0 0 10px var(--primary); }
 
+        /* BARRE INTRO */
+        .intro-container {
+            position: fixed; top: 40%; left: 47%; transform: translate(-50%, -50%);
+            width: 350px; display: none; pointer-events: none; z-index: 50; text-align: center;
+        }
+        .intro-text { font-size: 14px; color: var(--primary); font-weight: 700; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 2px; text-shadow: 0 0 15px rgba(0, 210, 255, 0.5); }
+        .intro-bar-bg { width: 100%; height: 6px; background: rgba(255,255,255,0.1); border-radius: 10px; overflow: hidden; border: 1px solid rgba(255,255,255,0.1); }
+        .intro-bar-fill { height: 100%; width: 0%; background: var(--primary); box-shadow: 0 0 20px var(--primary); border-radius: 10px; transition: width 0.1s linear; }
+
     </style>
 </head>
 <body>
-
     <div id="introContainer" class="intro-container">
         <div id="introText" class="intro-text">Début des paroles</div>
-        <div class="intro-bar-bg">
-            <div id="introBarFill" class="intro-bar-fill"></div>
-        </div>
+        <div class="intro-bar-bg"><div id="introBarFill" class="intro-bar-fill"></div></div>
     </div>
 
     <div class="app-layout">
-        
         <nav class="sidebar">
             <div style="font-size: 24px; color: white;"><i class="fas fa-infinity"></i></div>
             <div class="nav-item active" onclick="showTracks()"><i class="fas fa-search"></i></div>
@@ -235,7 +226,6 @@
                     <div id="capArtist" class="cap-artist">Artiste</div>
                 </div>
             </div>
-
             <div class="cap-center">
                 <div class="controls">
                     <button class="ctrl-btn" id="btnShuffle"><i class="fas fa-random"></i></button>
@@ -253,7 +243,6 @@
                     <span id="totTime">0:00</span>
                 </div>
             </div>
-
             <div class="cap-right">
                 <i class="fas fa-volume-up" style="color:#888; font-size:12px;"></i>
                 <input type="range" class="vol-slider" min="0" max="1" step="0.01" value="1" oninput="audio.volume=this.value">
@@ -262,8 +251,9 @@
     </div>
 
     <script>
-        const API_BASE = '';
+        const API_BASE = ''; // Pour Vercel (vide). Pour local, mettre 'http://127.0.0.1:5000'
         let tracks = [];
+        let searchResults = []; // Garde les résultats de recherche
         let currentIndex = 0;
         let audio = new Audio();
         let isPlaying = false;
@@ -271,10 +261,8 @@
         let isLyricsMode = false;
         let lyricsData = [];
         let firstLineTime = null;
-
-        // Initialisation sécurisée
         audio.volume = 1;
-        
+
         function fmtTime(s) {
             if(!s || isNaN(s) || !isFinite(s)) return "0:00";
             let m = Math.floor(s/60);
@@ -282,7 +270,6 @@
             return m + ":" + (sec<10?"0":"") + sec;
         }
 
-        // --- GESTION VUES ---
         function showTracks() {
             document.getElementById('trackView').style.display = 'block';
             document.getElementById('lyricsView').style.display = 'none';
@@ -303,9 +290,7 @@
             }
         }
 
-        // --- RECHERCHE ---
         async function performSearch() {
-            console.log("Lancement recherche...");
             const q = document.getElementById('searchInput').value;
             if(!q) return;
             
@@ -316,58 +301,107 @@
 
             try {
                 const res = await fetch(`${API_BASE}/search?q=${encodeURIComponent(q)}`);
-                if(!res.ok) throw new Error("Erreur serveur");
+                if(!res.ok) throw new Error("Err");
                 const data = await res.json();
-                if(data.tracks && data.tracks.items) {
-                    tracks = data.tracks.items;
-                    renderGrid();
-                } else {
-                    document.getElementById('trackGrid').innerHTML = '<p style="text-align:center;">Aucun résultat.</p>';
+                
+                // Fusionner albums et tracks pour l'affichage
+                const combined = [];
+                if(data.albums) {
+                    data.albums.forEach(a => combined.push({...a, type: 'album'}));
                 }
+                if(data.tracks) {
+                    data.tracks.forEach(t => combined.push({...t, type: 'track'}));
+                }
+                
+                searchResults = combined; // On garde ça pour l'affichage
+                // On prépare la liste de lecture uniquement avec les tracks
+                tracks = data.tracks || [];
+                
+                renderGrid(combined);
             } catch(e) {
-                console.error("Erreur recherche:", e);
-                document.getElementById('trackGrid').innerHTML = '<p style="text-align:center; color:red;">Erreur : Vérifiez que server.py est lancé.</p>';
+                document.getElementById('trackGrid').innerHTML = '<p style="text-align:center; color:red;">Erreur API.</p>';
             }
         }
 
-        function renderGrid() {
+        function renderGrid(items) {
             const grid = document.getElementById('trackGrid');
             grid.innerHTML = '';
-            tracks.forEach((t, i) => {
-                let hd = (t.album.image.large||'').replace('_300','_600');
+            
+            items.forEach((item, i) => {
+                const isAlbum = item.type === 'album';
+                // Gestion image
+                let imgUrl = '';
+                if(isAlbum) imgUrl = item.image.large;
+                else imgUrl = item.album.image.large;
+                if(imgUrl) imgUrl = imgUrl.replace('_300','_600');
+
                 const div = document.createElement('div');
                 div.className = 'track-card';
-                let badge = (t.maximum_bit_depth > 16) ? '<div class="hires-badge">HI-RES</div>' : '';
-                div.innerHTML = `${badge}<img src="${hd}"><h3>${t.title}</h3><p>${t.performer.name}</p>`;
+                
+                let badge = '';
+                if(isAlbum) badge = '<div class="type-badge badge-album">ALBUM</div>';
+                else if(item.maximum_bit_depth > 16) badge = '<div class="type-badge badge-hires">HI-RES</div>';
+                
+                let artistName = isAlbum ? item.artist.name : item.performer.name;
+
+                div.innerHTML = `${badge}<img src="${imgUrl}"><h3>${item.title}</h3><p>${artistName}</p>`;
+                
                 div.onclick = () => {
-                    isRadioActive = false;
-                    document.getElementById('radioBadge').style.display = 'none';
-                    loadTrack(i);
+                    if(isAlbum) {
+                        openAlbum(item.id);
+                    } else {
+                        // C'est un track, on le joue
+                        // Il faut trouver son index dans la liste 'tracks' (pas searchResults)
+                        const trackIdx = tracks.findIndex(t => t.id === item.id);
+                        isRadioActive = false;
+                        document.getElementById('radioBadge').style.display = 'none';
+                        loadTrack(trackIdx !== -1 ? trackIdx : 0);
+                    }
                 };
                 grid.appendChild(div);
             });
         }
 
+        async function openAlbum(id) {
+            document.getElementById('trackGrid').innerHTML = '<p style="text-align:center;">Chargement Album...</p>';
+            try {
+                const res = await fetch(`${API_BASE}/album?id=${id}`);
+                const data = await res.json();
+                if(data.tracks && data.tracks.items) {
+                    // On remplace la playlist par l'album
+                    tracks = data.tracks.items;
+                    // On affiche seulement les tracks
+                    renderGrid(tracks.map(t => ({...t, type: 'track', album: {image: data.image}}))); 
+                    // On lance la première
+                    loadTrack(0);
+                }
+            } catch(e) { console.error(e); }
+        }
+
         async function loadTrack(index) {
+            if(index < 0 || index >= tracks.length) return;
             currentIndex = index;
             const t = tracks[index];
             audio.src = `${API_BASE}/stream/${t.id}`;
             
-            let img = (t.album.image.large||'').replace('_300','_600');
+            let img = '';
+            if(t.album && t.album.image) img = t.album.image.large;
+            // Si on est dans un album, l'image est parfois au niveau supérieur (géré par le renderGrid, mais ici pour le player)
+            // On fait simple : on garde l'image du render précédent si possible, sinon placeholder
+            if(img) img = img.replace('_300','_600');
+            else img = document.querySelector('.track-card img')?.src || '';
+
             document.getElementById('xlArt').src = img;
             document.getElementById('xlTitle').innerText = t.title;
-            document.getElementById('xlArtist').innerText = t.performer.name;
-            
+            document.getElementById('xlArtist').innerText = t.performer ? t.performer.name : 'Artiste';
             document.getElementById('capArt').src = img;
             document.getElementById('capTitle').innerText = t.title;
-            document.getElementById('capArtist').innerText = t.performer.name;
+            document.getElementById('capArtist').innerText = t.performer ? t.performer.name : 'Artiste';
             document.getElementById('totTime').innerText = fmtTime(t.duration);
             
-            // Reset Lyrics & Timer
-            lyricsData = [];
-            firstLineTime = null;
+            lyricsData = []; firstLineTime = null;
             document.getElementById('introContainer').style.display = 'none';
-            document.getElementById('lyricsView').innerHTML = '<p style="margin-top:50px; color:#666;">Chargement paroles...</p>';
+            document.getElementById('lyricsView').innerHTML = '<p style="margin-top:50px; color:#666;">Chargement...</p>';
 
             play();
             fetchLyrics(t);
@@ -375,21 +409,14 @@
 
         async function fetchLyrics(track) {
             try {
-                const res = await fetch(`${API_BASE}/lyrics?artist=${encodeURIComponent(track.performer.name)}&title=${encodeURIComponent(track.title)}&duration=${track.duration}`);
+                const artist = track.performer ? track.performer.name : '';
+                const res = await fetch(`${API_BASE}/lyrics?artist=${encodeURIComponent(artist)}&title=${encodeURIComponent(track.title)}&duration=${track.duration}`);
                 if(!res.ok) throw new Error();
                 const data = await res.json();
-
-                if (data.type === 'synced') {
-                    parseLRC(data.lyrics);
-                    renderSyncedLyrics();
-                } else if (data.type === 'plain') {
-                    document.getElementById('lyricsView').innerHTML = `<div style="white-space: pre-line; font-size:18px; line-height:1.6;">${data.lyrics}</div>`;
-                } else {
-                    document.getElementById('lyricsView').innerHTML = '<p style="margin-top:50px;">Paroles non trouvées.</p>';
-                }
-            } catch (e) {
-                document.getElementById('lyricsView').innerHTML = '<p style="margin-top:50px;">Paroles indisponibles.</p>';
-            }
+                if (data.type === 'synced') { parseLRC(data.lyrics); renderSyncedLyrics(); } 
+                else if (data.type === 'plain') document.getElementById('lyricsView').innerHTML = `<div style="white-space: pre-line; font-size:18px; line-height:1.6;">${data.lyrics}</div>`;
+                else document.getElementById('lyricsView').innerHTML = '<p style="margin-top:50px;">Non trouvé.</p>';
+            } catch (e) { document.getElementById('lyricsView').innerHTML = '<p style="margin-top:50px;">Indisponible.</p>'; }
         }
 
         function parseLRC(lrc) {
@@ -415,11 +442,7 @@
             if(!isLyricsMode || lyricsData.length === 0) return;
             const container = document.getElementById('lyricsView');
             container.innerHTML = '';
-            
-            const spacerTop = document.createElement('div');
-            spacerTop.style.height = "40vh";
-            container.appendChild(spacerTop);
-
+            const spacerTop = document.createElement('div'); spacerTop.style.height = "40vh"; container.appendChild(spacerTop);
             lyricsData.forEach((line, i) => {
                 const div = document.createElement('div');
                 div.className = 'lyric-line';
@@ -428,136 +451,78 @@
                 div.onclick = () => { audio.currentTime = line.time; play(); };
                 container.appendChild(div);
             });
-            
-            const spacerBot = document.createElement('div');
-            spacerBot.style.height = "40vh";
-            container.appendChild(spacerBot);
+            const spacerBot = document.createElement('div'); spacerBot.style.height = "40vh"; container.appendChild(spacerBot);
         }
 
         function syncLyricsUI() {
-            try {
-                // GESTION BARRE DE CHARGEMENT INTRO
-                const container = document.getElementById('introContainer');
-                const barFill = document.getElementById('introBarFill');
-                const textSpan = document.getElementById('introText');
-                
-                if (isLyricsMode && firstLineTime !== null && !isNaN(firstLineTime) && firstLineTime > 0) {
-                    const timeLeft = firstLineTime - audio.currentTime;
-                    
-                    // On affiche la barre si on est avant les paroles
-                    if (timeLeft > 0.5) {
-                        container.style.display = 'block';
-                        
-                        // Calcul du pourcentage : 0s = 0%, firstLineTime = 100%
-                        const pct = (audio.currentTime / firstLineTime) * 100;
-                        barFill.style.width = pct + '%';
-                        
-                        textSpan.innerText = `Début des paroles dans ${timeLeft.toFixed(1)}s`;
-                    } else {
-                        // Une fois le temps écoulé, on cache la barre
-                        container.style.display = 'none';
-                    }
-                } else {
-                    container.style.display = 'none';
-                }
+            // BARRE INTRO
+            const container = document.getElementById('introContainer');
+            const barFill = document.getElementById('introBarFill');
+            const textSpan = document.getElementById('introText');
+            if (isLyricsMode && firstLineTime !== null && firstLineTime > 0) {
+                const timeLeft = firstLineTime - audio.currentTime;
+                if (timeLeft > 0.5) {
+                    container.style.display = 'block';
+                    const pct = (audio.currentTime / firstLineTime) * 100;
+                    barFill.style.width = pct + '%';
+                    textSpan.innerText = `Début dans ${timeLeft.toFixed(1)}s`;
+                } else container.style.display = 'none';
+            } else container.style.display = 'none';
 
-                // DEFILEMENT PAROLES (Reste inchangé)
-                if (!isLyricsMode || lyricsData.length === 0) return;
-                const cur = audio.currentTime;
-                let activeIdx = -1;
-                for (let i = 0; i < lyricsData.length; i++) {
-                    if (cur >= lyricsData[i].time) activeIdx = i; else break;
-                }
-                document.querySelectorAll('.lyric-line').forEach((div, i) => {
-                    if (i === activeIdx) {
-                        if(!div.classList.contains('active')) {
-                            div.classList.add('active');
-                            div.scrollIntoView({ behavior: "smooth", block: "center" });
-                        }
-                    } else {
-                        div.classList.remove('active');
+            // DEFILEMENT
+            if (!isLyricsMode || lyricsData.length === 0) return;
+            const cur = audio.currentTime;
+            let activeIdx = -1;
+            for (let i = 0; i < lyricsData.length; i++) {
+                if (cur >= lyricsData[i].time) activeIdx = i; else break;
+            }
+            document.querySelectorAll('.lyric-line').forEach((div, i) => {
+                if (i === activeIdx) {
+                    if(!div.classList.contains('active')) {
+                        div.classList.add('active');
+                        div.scrollIntoView({ behavior: "smooth", block: "center" });
                     }
-                });
-            } catch(e) { console.error("Erreur UI Synchro", e); }
+                } else div.classList.remove('active');
+            });
         }
 
-        // --- LECTURE ---
-        function play() { 
-            audio.play().then(() => {
-                isPlaying=true; 
-                document.getElementById('playIcon').className = 'fas fa-pause';
-            }).catch(e => console.error("Erreur play", e));
-        }
+        function play() { audio.play().then(() => { isPlaying=true; document.getElementById('playIcon').className = 'fas fa-pause'; }).catch(e=>{}); }
         function pause() { audio.pause(); isPlaying=false; document.getElementById('playIcon').className = 'fas fa-play'; }
         
         async function handleNext() {
-            console.log("Next / Radio...");
             isRadioActive = true;
             document.getElementById('radioBadge').style.display = 'block';
             const cur = tracks[currentIndex];
+            const artist = cur.performer ? cur.performer.name : cur.artist;
             try {
-                const res = await fetch(`${API_BASE}/recommend?artist=${encodeURIComponent(cur.performer.name)}&current_id=${cur.id}`);
+                const res = await fetch(`${API_BASE}/recommend?artist=${encodeURIComponent(artist)}&current_id=${cur.id}`);
                 const raw = await res.json();
                 if(raw && raw.id) {
                     let hd = (raw.album.image.large||'').replace('_300','_600');
-                    const newTrack = {
-                        id: raw.id, title: raw.title, performer: { name: raw.performer.name },
-                        album: { image: { large: hd }, genre: raw.album.genre },
-                        duration: raw.duration, maximum_bit_depth: raw.maximum_bit_depth
-                    };
+                    const newTrack = { ...raw, img: hd, type: 'track' }; // Ensure structure
                     tracks.push(newTrack);
                     loadTrack(tracks.length - 1);
-                    
-                    const grid = document.getElementById('trackGrid');
-                    const div = document.createElement('div');
-                    div.className = 'track-card';
-                    div.style.borderColor = 'var(--primary)';
-                    div.innerHTML = `<img src="${hd}"><h3>${newTrack.title}</h3><p style="color:var(--primary)">Radio: ${newTrack.performer.name}</p>`;
-                    div.onclick = () => loadTrack(tracks.length-1);
-                    grid.appendChild(div);
                 }
             } catch(e) { if(currentIndex < tracks.length-1) loadTrack(currentIndex+1); }
         }
 
-        // --- EVENTS ---
         document.addEventListener('DOMContentLoaded', () => {
-            const btnSearch = document.getElementById('btnSearch');
-            if(btnSearch) btnSearch.addEventListener('click', performSearch);
-
-            const searchInput = document.getElementById('searchInput');
-            if(searchInput) searchInput.addEventListener('keypress', (e) => { if(e.key==='Enter') performSearch(); });
-
-            const btnPlay = document.getElementById('btnPlay');
-            if(btnPlay) btnPlay.addEventListener('click', () => isPlaying ? pause() : play());
-
-            const btnNext = document.getElementById('btnNext');
-            if(btnNext) btnNext.addEventListener('click', handleNext);
-
-            const btnPrev = document.getElementById('btnPrev');
-            if(btnPrev) btnPrev.addEventListener('click', () => {
-                if(audio.currentTime > 3) audio.currentTime=0; 
-                else if(currentIndex > 0) loadTrack(currentIndex-1);
-            });
-            
-            const progressBar = document.getElementById('progressBar');
-            if(progressBar) progressBar.addEventListener('click', (e) => {
+            document.getElementById('btnSearch').addEventListener('click', performSearch);
+            document.getElementById('searchInput').addEventListener('keypress', (e) => { if(e.key==='Enter') performSearch(); });
+            document.getElementById('btnPlay').addEventListener('click', () => isPlaying ? pause() : play());
+            document.getElementById('btnNext').addEventListener('click', handleNext);
+            document.getElementById('btnPrev').addEventListener('click', () => { if(audio.currentTime > 3) audio.currentTime=0; else if(currentIndex > 0) loadTrack(currentIndex-1); });
+            document.getElementById('progressBar').addEventListener('click', (e) => {
                 if(!audio.duration) return;
-                const w = progressBar.clientWidth;
-                const pct = e.offsetX / w;
-                audio.currentTime = pct * audio.duration;
+                audio.currentTime = (e.offsetX / document.getElementById('progressBar').clientWidth) * audio.duration;
             });
         });
 
         audio.ontimeupdate = () => {
             if(audio.duration) {
-                const pct = (audio.currentTime/audio.duration)*100;
-                const fill = document.getElementById('progressFill');
-                if(fill) fill.style.width = pct+'%';
-                
-                const currTime = document.getElementById('currTime');
-                if(currTime) currTime.innerText = fmtTime(audio.currentTime);
-                
-                syncLyricsUI(); 
+                document.getElementById('progressFill').style.width = (audio.currentTime/audio.duration)*100 + '%';
+                document.getElementById('currTime').innerText = fmtTime(audio.currentTime);
+                syncLyricsUI();
             }
         };
         audio.onended = handleNext;

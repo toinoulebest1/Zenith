@@ -1,6 +1,5 @@
 from flask import Flask, jsonify, redirect, request, send_file
 from flask_cors import CORS
-# Note les points devant les imports pour dire "dans ce dossier"
 from .qobuz_api import QobuzClient, get_app_credentials
 from .lyrics_search import LyricsSearcher 
 import logging
@@ -40,7 +39,6 @@ class TokenQobuzClient(QobuzClient):
         })
         return s
 
-# Initialisation globale pour le Serverless
 client = None
 try:
     logger.info("Init Qobuz...")
@@ -51,24 +49,38 @@ except Exception as e:
     logger.error(f"Init Error: {e}")
 
 
-# --- ROUTES ---
-
-# Route racine : sert le fichier HTML qui est à la racine du projet
 @app.route('/')
 def home():
-    # Sur Vercel, on lit le fichier depuis le dossier parent
-    try:
-        return send_file('../index.html')
-    except:
-        return "Erreur: index.html introuvable"
+    try: return send_file('../index.html')
+    except: return "Erreur: index.html introuvable"
 
+# --- MODIFICATION : RECHERCHE MIXTE (Tracks + Albums) ---
 @app.route('/search')
 def search_tracks():
     if not client: return jsonify({"error": "Client not initialized"}), 500
     query = request.args.get('q')
     try:
-        resp = client.api_call("track/search", query=query, limit=30)
-        return jsonify(resp)
+        # 1. Chercher les pistes
+        tracks_resp = client.api_call("track/search", query=query, limit=20)
+        # 2. Chercher les albums
+        albums_resp = client.api_call("album/search", query=query, limit=10)
+        
+        return jsonify({
+            "tracks": tracks_resp.get('tracks', {}).get('items', []),
+            "albums": albums_resp.get('albums', {}).get('items', [])
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# --- NOUVEAU : RECUPERER LES PISTES D'UN ALBUM ---
+@app.route('/album')
+def get_album():
+    if not client: return jsonify({"error": "Client not initialized"}), 500
+    album_id = request.args.get('id')
+    try:
+        # Récupère les infos de l'album et ses pistes
+        meta = client.get_album_meta(album_id)
+        return jsonify(meta)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -82,7 +94,6 @@ def get_lyrics():
     except: duration = 0
     
     plain, synced = lyrics_engine.search_lyrics(artist, title, album, duration)
-    
     if synced: return jsonify({"type": "synced", "lyrics": synced})
     elif plain: return jsonify({"type": "plain", "lyrics": plain})
     else: return jsonify({"type": "none", "lyrics": None}), 404
@@ -132,5 +143,3 @@ def stream_track(track_id):
         if 'url' in url_data: return redirect(url_data['url'])
         else: return jsonify({"error": "No URL found"}), 404
     except Exception as e: return jsonify({"error": str(e)}), 500
-
-# Note : Plus besoin de "if __name__ == '__main__': app.run()" pour Vercel
