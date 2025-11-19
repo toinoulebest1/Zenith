@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Zenith Mobile</title>
+    <title>Zenith Ultimate</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;500;700;800&display=swap" rel="stylesheet">
     
@@ -183,10 +183,8 @@
                 width: 100%; height: 100%; border-radius: 0; border: none;
             }
             
-            /* Masquer panel droit sur mobile */
             .right-panel { display: none; }
 
-            /* Sidebar devient menu du bas */
             .sidebar {
                 position: fixed; bottom: 0; left: 0; width: 100%; height: 60px;
                 flex-direction: row; justify-content: space-around; padding: 0;
@@ -194,27 +192,26 @@
                 z-index: 200;
             }
 
-            /* Main feed s'adapte */
             .main-feed { padding-bottom: 160px; }
             .bento-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
 
-            /* Lecteur s'adapte */
+            /* CORRECTION MOBILE : REMONTER LE LECTEUR */
             .player-capsule {
-                width: 95%; height: auto; bottom: 70px;
+                width: 95%; 
+                height: auto; 
+                bottom: 85px; /* Remonté pour l'espace */
                 flex-direction: column; gap: 10px; padding: 15px;
             }
             .cap-center { width: 100%; }
-            .cap-right { display: none; } /* Cache volume sur mobile */
+            .cap-right { display: none; }
             .cap-info { width: 100%; }
             .controls { width: 100%; justify-content: space-between; }
             
-            /* Ajustement recherche */
             .search-container { flex-wrap: wrap; }
             .search-input { width: 100%; margin-top: 5px; order: 3; }
             .search-select { order: 1; }
             .search-btn { order: 2; margin-left: auto; }
             
-            /* Ajustement Lyrics */
             .lyrics-view { padding: 20px; }
             .lyric-line { font-size: 18px; }
             .intro-container { width: 90%; left: 50%; }
@@ -304,7 +301,7 @@
     </div>
 
     <script>
-        const API_BASE = ''; // Vercel
+        const API_BASE = ''; // Vercel compliant
         let tracks = [];
         let currentIndex = 0;
         let audio = new Audio();
@@ -461,6 +458,26 @@
             lyricsData = []; firstLineTime = null;
             document.getElementById('introContainer').style.display = 'none';
             document.getElementById('lyricsView').innerHTML = '<p style="margin-top:50px; color:#666;">Chargement...</p>';
+
+            // MEDIA SESSION API INTEGRATION
+            if ('mediaSession' in navigator) {
+                navigator.mediaSession.metadata = new MediaMetadata({
+                    title: t.title,
+                    artist: t.performer.name,
+                    album: t.album.title,
+                    artwork: [
+                        { src: img, sizes: '512x512', type: 'image/jpeg' }
+                    ]
+                });
+
+                navigator.mediaSession.setActionHandler('play', () => { play(); });
+                navigator.mediaSession.setActionHandler('pause', () => { pause(); });
+                navigator.mediaSession.setActionHandler('previoustrack', () => {
+                    if(audio.currentTime > 3) audio.currentTime = 0;
+                    else if(currentIndex > 0) loadTrack(currentIndex - 1);
+                });
+                navigator.mediaSession.setActionHandler('nexttrack', () => { handleNext(); });
+            }
 
             updateActiveCard();
             play();
