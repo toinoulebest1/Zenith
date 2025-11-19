@@ -3,15 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Zenith Ultimate</title>
+    <title>Zenith Ultimate Fixed</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;500;700;800&display=swap" rel="stylesheet">
     
     <style>
         :root {
-            --primary: #00d2ff;       /* Cyan */
-            --secondary: #ff0055;     /* Rose */
-            --tertiary: #9d4edd;      /* Violet (Artiste) */
+            --primary: #00d2ff;
+            --secondary: #ff0055;
             --glass-bg: rgba(20, 20, 30, 0.85);
             --glass-border: rgba(255, 255, 255, 0.1);
             --text-main: #ffffff;
@@ -95,22 +94,18 @@
         }
         @keyframes pulseText { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }
 
-        .track-card img { width: 100%; border-radius: 12px; aspect-ratio: 1/1; object-fit: cover; margin-bottom: 10px; }
-        
-        /* STYLE SPECIAL POUR ARTISTE (ROND) */
         .track-card.artist-card img { border-radius: 50%; aspect-ratio: 1/1; width: 80%; margin: 0 auto 15px auto; display: block; }
         .track-card.artist-card { text-align: center; }
-        .track-card.artist-card h3 { font-size: 16px; margin-bottom: 0; }
 
+        .track-card img { width: 100%; border-radius: 12px; aspect-ratio: 1/1; object-fit: cover; margin-bottom: 10px; }
         .track-card h3 { font-weight: 600; margin-bottom: 4px; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .track-card p { font-size: 12px; color: var(--text-dim); }
         
         .badges-container { position: absolute; top: 10px; right: 10px; display: flex; flex-direction: column; gap: 4px; align-items: flex-end; }
         .type-badge { font-size: 9px; font-weight: 800; padding: 2px 6px; border-radius: 4px; color: #000; width: fit-content; }
-        
         .badge-hires { background: var(--primary); box-shadow: 0 0 10px var(--primary); }
         .badge-album { background: var(--secondary); box-shadow: 0 0 10px var(--secondary); color: white; }
-        .badge-artist { background: var(--tertiary); box-shadow: 0 0 10px var(--tertiary); color: white; }
+        .badge-artist { background: #9d4edd; box-shadow: 0 0 10px #9d4edd; color: white; }
 
         /* LYRICS VIEW */
         .lyrics-view {
@@ -191,22 +186,17 @@
                 display: flex; flex-direction: column; padding: 10px;
                 width: 100%; height: 100%; border-radius: 0; border: none;
             }
-            
             .right-panel { display: none; }
-
-            /* MENU EN BAS */
             .sidebar {
                 position: fixed; bottom: 0; left: 0; width: 100%; height: 60px;
                 flex-direction: row; justify-content: space-around; padding: 0;
                 background: #000; border-top: 1px solid var(--glass-border); border-radius: 0;
                 z-index: 200;
             }
-
-            /* ESPACE SCROLL */
             .main-feed { padding-bottom: 250px; }
             .bento-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
 
-            /* LECTEUR MOBILE (OPTIMISÉ) */
+            /* LECTEUR MOBILE OPTIMISÉ */
             .player-capsule {
                 width: 96%; 
                 height: auto;
@@ -219,23 +209,16 @@
                 background: rgba(20, 20, 25, 0.98);
                 border: 1px solid rgba(255,255,255,0.1);
             }
-            
             .cap-info { width: 100%; }
             .cap-center { width: 100%; gap: 15px; margin-top: 5px; }
             .cap-right { display: none; } 
-            
             .controls { width: 100%; justify-content: space-around; }
-            
-            /* TIMELINE MOBILE */
             .timeline-box { display: flex !important; width: 100%; justify-content: space-between; margin-top: 0px; }
             .progress-bg { height: 6px; } 
-            
-            /* Recherche mobile */
             .search-container { flex-wrap: wrap; }
             .search-input { width: 100%; margin-top: 5px; order: 3; }
             .search-select { order: 1; }
             .search-btn { order: 2; margin-left: auto; }
-            
             .lyrics-view { padding: 20px; }
             .lyric-line { font-size: 18px; }
             .intro-container { width: 90%; left: 50%; }
@@ -262,7 +245,8 @@
                     <option value="all">Tout</option>
                     <option value="track">Titres</option>
                     <option value="album">Albums</option>
-                    <option value="artist">Artistes</option> </select>
+                    <option value="artist">Artistes</option>
+                </select>
                 <input type="text" id="searchInput" class="search-input" placeholder="Rechercher...">
                 <button class="search-btn" id="btnSearch">GO</button>
             </div>
@@ -325,7 +309,7 @@
     </div>
 
     <script>
-        const API_BASE = ''; // Vercel compliant
+        const API_BASE = ''; 
         let tracks = [];
         let currentIndex = 0;
         let audio = new Audio();
@@ -363,6 +347,17 @@
                 showTracks();
             }
         }
+        
+        // --- FONCTION POUR FIXER LA NOTIF ANDROID ---
+        function updateMediaSessionState() {
+            if ('mediaSession' in navigator && audio.duration && !isNaN(audio.duration)) {
+                navigator.mediaSession.setPositionState({
+                    duration: audio.duration,
+                    playbackRate: audio.playbackRate,
+                    position: audio.currentTime
+                });
+            }
+        }
 
         async function performSearch() {
             const q = document.getElementById('searchInput').value;
@@ -378,7 +373,6 @@
                 const data = await res.json();
                 
                 const combined = [];
-                // ORDRE : ARTISTES -> ALBUMS -> TRACKS
                 if(data.artists) data.artists.forEach(a => combined.push({...a, type: 'artist'}));
                 if(data.albums) data.albums.forEach(a => combined.push({...a, type: 'album'}));
                 if(data.tracks) data.tracks.forEach(t => combined.push({...t, type: 'track'}));
@@ -426,23 +420,22 @@
                 else imgUrl = item.album.image.large;
                 
                 if(imgUrl) imgUrl = imgUrl.replace('_300','_600');
-                else imgUrl = 'https://via.placeholder.com/300'; // Fallback
+                else imgUrl = 'https://via.placeholder.com/300';
 
                 const div = document.createElement('div');
                 div.className = 'track-card';
-                if(isArtist) div.classList.add('artist-card'); // Style rond
+                if(isArtist) div.classList.add('artist-card');
                 div.dataset.id = item.id;
                 
                 let badges = '';
                 if(isArtist) badges += '<div class="type-badge badge-artist">ARTISTE</div>';
                 else if(isAlbum) badges += '<div class="type-badge badge-album">ALBUM</div>';
                 else if(item.maximum_bit_depth > 16) badges += '<div class="type-badge badge-hires">HI-RES</div>';
-                
                 let badgeHTML = `<div class="badges-container">${badges}</div>`;
                 
-                let title = item.title || item.name;
+                let title = item.name || item.title;
                 let sub = '';
-                if(isArtist) sub = '';
+                if(isArtist) sub = 'Artiste';
                 else if(isAlbum) sub = item.artist.name;
                 else sub = item.performer.name;
 
@@ -463,15 +456,13 @@
             updateActiveCard();
         }
 
-        // --- OUVRIR UN ARTISTE ---
         async function openArtist(id) {
             document.getElementById('trackGrid').innerHTML = '<p style="text-align:center; margin-top:50px;">Chargement Artiste...</p>';
             try {
                 const res = await fetch(`${API_BASE}/artist?id=${id}`);
                 const data = await res.json();
                 if(data.albums && data.albums.items) {
-                    // On affiche les albums de l'artiste
-                    const albums = data.albums.items.map(a => ({...a, type: 'album'}));
+                    const albums = data.albums.items.map(a => ({...a, type: 'album', artist: {name: data.name}}));
                     renderGrid(albums); 
                 } else {
                     document.getElementById('trackGrid').innerHTML = '<p style="text-align:center;">Aucun album trouvé.</p>';
@@ -519,6 +510,7 @@
             document.getElementById('introContainer').style.display = 'none';
             document.getElementById('lyricsView').innerHTML = '<p style="margin-top:50px; color:#666;">Chargement...</p>';
 
+            // MEDIA SESSION SETUP
             if ('mediaSession' in navigator) {
                 navigator.mediaSession.metadata = new MediaMetadata({
                     title: t.title,
@@ -530,6 +522,12 @@
                 navigator.mediaSession.setActionHandler('pause', pause);
                 navigator.mediaSession.setActionHandler('previoustrack', () => { if(audio.currentTime>3) audio.currentTime=0; else if(currentIndex>0) loadTrack(currentIndex-1); });
                 navigator.mediaSession.setActionHandler('nexttrack', handleNext);
+                navigator.mediaSession.setActionHandler('seekto', (details) => {
+                    if (details.seekTime && audio.duration) {
+                        audio.currentTime = details.seekTime;
+                        updateMediaSessionState();
+                    }
+                });
             }
 
             updateActiveCard();
@@ -614,8 +612,21 @@
             });
         }
 
-        function play() { audio.play().then(() => { isPlaying=true; document.getElementById('playIcon').className = 'fas fa-pause'; }).catch(e=>{}); }
-        function pause() { audio.pause(); isPlaying=false; document.getElementById('playIcon').className = 'fas fa-play'; }
+        function play() { 
+            audio.play().then(() => { 
+                isPlaying=true; 
+                document.getElementById('playIcon').className = 'fas fa-pause';
+                updateMediaSessionState(); 
+                if ('mediaSession' in navigator) navigator.mediaSession.playbackState = "playing";
+            }).catch(e=>{}); 
+        }
+        
+        function pause() { 
+            audio.pause(); 
+            isPlaying=false; 
+            document.getElementById('playIcon').className = 'fas fa-play'; 
+            if ('mediaSession' in navigator) navigator.mediaSession.playbackState = "paused";
+        }
         
         async function handleNext() {
             isRadioActive = true;
@@ -653,8 +664,14 @@
             document.getElementById('progressBar').addEventListener('click', (e) => {
                 if(!audio.duration) return;
                 audio.currentTime = (e.offsetX / document.getElementById('progressBar').clientWidth) * audio.duration;
+                updateMediaSessionState();
             });
         });
+
+        // Initialisation durée correcte pour Media Session
+        audio.onloadedmetadata = () => {
+            updateMediaSessionState();
+        };
 
         audio.ontimeupdate = () => {
             if(audio.duration) {
