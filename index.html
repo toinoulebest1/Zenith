@@ -3,9 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Zenith Magic Edition</title>
+    <title>Zenith Ultimate</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;500;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="magic.css"> 
     
     <style>
         :root {
@@ -15,6 +16,8 @@
             --glass-border: rgba(255, 255, 255, 0.1);
             --text-main: #ffffff;
             --text-dim: #888;
+            --active-lyric: #ffffff;
+            --inactive-lyric: rgba(255, 255, 255, 0.3);
         }
 
         * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Outfit', sans-serif; -webkit-tap-highlight-color: transparent; }
@@ -48,31 +51,22 @@
         /* MAIN FEED */
         .main-feed { display: flex; flex-direction: column; gap: 20px; overflow: hidden; position: relative; }
 
-        .search-container {
-            display: flex; gap: 10px; background: rgba(255,255,255,0.05); padding: 10px 15px; border-radius: 18px; 
-            border: 1px solid var(--glass-border); flex-shrink: 0; align-items: center;
-        }
-        .search-select {
-            background: transparent; color: var(--primary); border: none; font-weight: 700;
-            outline: none; cursor: pointer; text-transform: uppercase; font-size: 12px;
-            padding-right: 10px; border-right: 1px solid rgba(255,255,255,0.1);
-        }
+        .search-container { display: flex; gap: 10px; background: rgba(255,255,255,0.05); padding: 10px 15px; border-radius: 18px; border: 1px solid var(--glass-border); flex-shrink: 0; align-items: center; }
+        .search-select { background: transparent; color: var(--primary); border: none; font-weight: 700; outline: none; cursor: pointer; text-transform: uppercase; font-size: 12px; padding-right: 10px; border-right: 1px solid rgba(255,255,255,0.1); }
         .search-select option { background: #000; color: white; padding: 10px; }
         .search-input { flex: 1; background: transparent; border: none; color: white; font-size: 16px; outline: none; min-width: 0; }
         .search-btn { background: var(--primary); border: none; padding: 8px 20px; border-radius: 10px; color: #000; font-weight: 700; cursor: pointer; }
+        .search-btn:active { transform: scale(0.95); }
 
         /* GRID VIEW */
         .track-view { overflow-y: auto; flex: 1; display: block; }
         .track-view::-webkit-scrollbar { display: none; }
         .bento-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 15px; padding-bottom: 120px; }
-        
-        .track-card { 
-            background: rgba(255,255,255,0.03); border-radius: 16px; padding: 15px; cursor: pointer; transition: 0.2s; 
-            border: 1px solid var(--glass-border); position: relative; overflow: hidden;
-        }
+        .track-card { background: rgba(255,255,255,0.03); border-radius: 16px; padding: 15px; cursor: pointer; transition: 0.2s; border: 1px solid var(--glass-border); position: relative; overflow: hidden; }
         .track-card:hover { background: rgba(255,255,255,0.1); transform: translateY(-3px); border-color: var(--primary); }
         .track-card.active-track { border-color: var(--primary); background: rgba(0, 210, 255, 0.1); box-shadow: 0 0 20px rgba(0, 210, 255, 0.2); }
-        
+        .playing-indicator { position: absolute; bottom: 15px; right: 15px; font-size: 12px; color: var(--primary); font-weight: bold; animation: pulseText 1.5s infinite; background: rgba(0,0,0,0.6); padding: 2px 6px; border-radius: 4px; }
+        @keyframes pulseText { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }
         .track-card img { width: 100%; border-radius: 12px; aspect-ratio: 1/1; object-fit: cover; margin-bottom: 10px; }
         .track-card h3 { font-weight: 600; margin-bottom: 4px; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .track-card p { font-size: 12px; color: var(--text-dim); }
@@ -81,13 +75,12 @@
         .type-badge { font-size: 9px; font-weight: 800; padding: 2px 6px; border-radius: 4px; color: #000; width: fit-content; }
         .badge-hires { background: var(--primary); box-shadow: 0 0 10px var(--primary); }
         .badge-album { background: var(--secondary); box-shadow: 0 0 10px var(--secondary); color: white; }
-        .badge-artist { background: #9d4edd; box-shadow: 0 0 10px #9d4edd; color: white; }
 
         /* LYRICS VIEW */
         .lyrics-view { display: none; flex: 1; overflow-y: auto; text-align: center; padding: 20px 50px 120px 50px; scroll-behavior: smooth; position: relative; }
         .lyrics-view::-webkit-scrollbar { display: none; }
-        .lyric-line { font-size: 24px; font-weight: 700; margin: 20px 0; color: rgba(255,255,255,0.3); transition: 0.3s; cursor: pointer; }
-        .lyric-line.active { color: #fff; transform: scale(1.1); text-shadow: 0 0 20px rgba(255,255,255,0.3); }
+        .lyric-line { font-size: 24px; font-weight: 700; margin: 20px 0; color: var(--inactive-lyric); transition: 0.3s; cursor: pointer; }
+        .lyric-line.active { color: var(--active-lyric); transform: scale(1.1); text-shadow: 0 0 20px rgba(255,255,255,0.3); }
 
         /* INTRO */
         .intro-container { position: fixed; top: 40%; left: 47%; transform: translate(-50%, -50%); width: 350px; display: none; pointer-events: none; z-index: 50; text-align: center; }
@@ -95,75 +88,15 @@
         .intro-bar-bg { width: 100%; height: 6px; background: rgba(255,255,255,0.1); border-radius: 10px; overflow: hidden; border: 1px solid rgba(255,255,255,0.1); }
         .intro-bar-fill { height: 100%; width: 0%; background: var(--primary); box-shadow: 0 0 20px var(--primary); border-radius: 10px; transition: width 0.1s linear; }
 
-        /* RIGHT PANEL (Conteneur Magique) */
-        .right-panel { 
-            background: var(--glass-bg); border-radius: 24px; padding: 30px; 
-            display: flex; flex-direction: column; align-items: center; text-align: center; 
-            border: 1px solid var(--glass-border);
-            position: relative; overflow: hidden; /* Pour contenir la baguette */
-        }
-        .xl-image-wrapper { position: relative; width: 100%; max-width: 300px; margin-bottom: 20px; z-index: 2; }
+        /* RIGHT PANEL */
+        .right-panel { background: var(--glass-bg); border-radius: 24px; padding: 30px; display: flex; flex-direction: column; align-items: center; text-align: center; border: 1px solid var(--glass-border); position: relative; overflow: hidden; }
+        .xl-image-wrapper { position: relative; width: 100%; max-width: 300px; margin-bottom: 20px; z-index: 10; }
         .album-art-xl { width: 100%; border-radius: 20px; aspect-ratio: 1/1; object-fit: cover; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
         .xl-badge { position: absolute; top: 15px; right: 15px; background: var(--primary); color: #000; font-size: 11px; font-weight: 900; padding: 4px 8px; border-radius: 6px; box-shadow: 0 0 15px var(--primary); z-index: 10; display: none; }
-        
-        .xl-title, .xl-artist { z-index: 2; position: relative; }
-
-        /* --- ANIMATION BAGUETTE DUMBLEDORE --- */
-        .wand-container {
-            position: absolute; bottom: -400px; left: 50%; transform: translateX(-50%);
-            width: 20px; height: 350px;
-            z-index: 1; /* Derrière le texte mais devant le fond */
-            transition: bottom 3s cubic-bezier(0.19, 1, 0.22, 1); /* Montée fluide */
-            display: flex; flex-direction: column; align-items: center;
-        }
-        /* La baguette elle-même */
-        .magic-wand {
-            width: 6px; height: 100%; 
-            background: linear-gradient(to right, #2e1a0f, #5d4037, #2e1a0f);
-            border-radius: 5px 5px 0 0;
-            box-shadow: 0 0 10px rgba(0,0,0,0.8);
-            position: relative;
-        }
-        /* La manche (suggère une main) */
-        .magic-wand::after {
-            content: ''; position: absolute; bottom: 0; left: -5px; width: 16px; height: 80px;
-            background: #1a1a1a; border-radius: 4px;
-            box-shadow: inset 0 0 5px black;
-        }
-        /* La lumière au bout */
-        .wand-light {
-            width: 10px; height: 10px; background: #fff; border-radius: 50%;
-            position: absolute; top: -5px; left: 50%; transform: translateX(-50%) scale(0);
-            box-shadow: 0 0 0px #fff, 0 0 0px var(--primary);
-            transition: all 2s ease 2s; /* S'allume après la montée */
-        }
-
-        /* État Actif (Quand Dumbledore joue) */
-        .wand-container.active { bottom: -50px; }
-        .wand-container.active .wand-light {
-            transform: translateX(-50%) scale(1.5);
-            box-shadow: 0 0 30px 10px #fff, 0 0 60px 20px var(--primary), 0 0 100px 40px rgba(255, 255, 255, 0.5);
-        }
-
-        /* Particules d'ambiance */
-        .particle {
-            position: absolute; bottom: 0; background: white; border-radius: 50%;
-            opacity: 0; pointer-events: none;
-            animation: rise 4s infinite ease-in;
-        }
-        @keyframes rise {
-            0% { bottom: 0; opacity: 0; transform: scale(0.2); }
-            50% { opacity: 0.8; }
-            100% { bottom: 100%; opacity: 0; transform: scale(0); }
-        }
+        .xl-title, .xl-artist { z-index: 10; position: relative; }
 
         /* PLAYER CAPSULE */
-        .player-capsule {
-            position: absolute; bottom: 25px; left: 50%; transform: translateX(-50%);
-            width: 750px; height: 100px; 
-            background: #141416; border-radius: 25px; display: flex; align-items: center; justify-content: space-between; padding: 0 30px;
-            box-shadow: 0 20px 50px rgba(0,0,0,0.9); border: 1px solid rgba(255,255,255,0.15); z-index: 100;
-        }
+        .player-capsule { position: absolute; bottom: 25px; left: 50%; transform: translateX(-50%); width: 750px; height: 100px; background: #141416; border-radius: 25px; display: flex; align-items: center; justify-content: space-between; padding: 0 30px; box-shadow: 0 20px 50px rgba(0,0,0,0.9); border: 1px solid rgba(255,255,255,0.15); z-index: 100; }
         .cap-info { display: flex; align-items: center; gap: 15px; width: 200px; }
         .cap-img { width: 60px; height: 60px; border-radius: 10px; object-fit: cover; background: #222; }
         .cap-text { display: flex; flex-direction: column; overflow: hidden; }
@@ -184,7 +117,7 @@
         .vol-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 10px; height: 10px; background: white; border-radius: 50%; cursor: pointer; }
         .radio-badge { position: absolute; top: -12px; left: 50%; transform: translateX(-50%); background: var(--primary); color: black; padding: 2px 10px; border-radius: 10px; font-size: 10px; font-weight: bold; box-shadow: 0 0 15px rgba(0, 210, 255, 0.4); display: none; }
 
-        /* MOBILE FIX */
+        /* MOBILE RESPONSIVE */
         @media (max-width: 768px) {
             .app-layout { display: flex; flex-direction: column; padding: 10px; width: 100%; height: 100%; border-radius: 0; border: none; }
             .right-panel { display: none; }
@@ -228,7 +161,6 @@
                     <option value="all">Tout</option>
                     <option value="track">Titres</option>
                     <option value="album">Albums</option>
-                    <option value="artist">Artistes</option>
                 </select>
                 <input type="text" id="searchInput" class="search-input" placeholder="Rechercher...">
                 <button class="search-btn" id="btnSearch">GO</button>
@@ -260,6 +192,14 @@
             <div class="wand-container" id="wandContainer">
                 <div class="wand-light"></div>
                 <div class="magic-wand"></div>
+                <div class="hand-wrapper">
+                    <div class="hand-base"></div>
+                    <div class="finger f1"></div>
+                    <div class="finger f2"></div>
+                    <div class="finger f3"></div>
+                    <div class="finger f4"></div>
+                    <div class="thumb"></div>
+                </div>
             </div>
         </aside>
 
@@ -296,6 +236,8 @@
         </div>
     </div>
 
+    <script src="magic.js"></script>
+
     <script>
         const API_BASE = ''; 
         let tracks = [];
@@ -307,7 +249,6 @@
         let lyricsData = [];
         let firstLineTime = null;
         let currentTrackId = null;
-        let particleInterval = null;
         audio.volume = 1;
 
         function fmtTime(s) {
@@ -347,45 +288,6 @@
             }
         }
 
-        // --- FONCTIONS MAGIQUES ---
-        function checkMagic(title, artist) {
-            const t = title.toLowerCase();
-            const a = artist.toLowerCase();
-            const wand = document.getElementById('wandContainer');
-            
-            // Détection large : Dumbledore OU Harry Potter
-            if (t.includes("dumbledore") || t.includes("farewell") || t.includes("harry potter")) {
-                wand.classList.add('active');
-                startParticles();
-            } else {
-                wand.classList.remove('active');
-                stopParticles();
-            }
-        }
-
-        function startParticles() {
-            if(particleInterval) return;
-            const panel = document.querySelector('.right-panel');
-            particleInterval = setInterval(() => {
-                const p = document.createElement('div');
-                p.className = 'particle';
-                p.style.left = Math.random() * 100 + '%';
-                p.style.width = (2 + Math.random() * 4) + 'px';
-                p.style.height = p.style.width;
-                p.style.animationDuration = (3 + Math.random() * 2) + 's';
-                panel.appendChild(p);
-                setTimeout(() => p.remove(), 5000);
-            }, 300);
-        }
-
-        function stopParticles() {
-            if(particleInterval) {
-                clearInterval(particleInterval);
-                particleInterval = null;
-            }
-            document.querySelectorAll('.particle').forEach(p => p.remove());
-        }
-
         async function performSearch() {
             const q = document.getElementById('searchInput').value;
             const type = document.getElementById('searchType').value;
@@ -400,11 +302,10 @@
                 const data = await res.json();
                 
                 const combined = [];
-                if(data.artists) data.artists.forEach(a => combined.push({...a, type: 'artist'}));
                 if(data.albums) data.albums.forEach(a => combined.push({...a, type: 'album'}));
                 if(data.tracks) data.tracks.forEach(t => combined.push({...t, type: 'track'}));
                 
-                if(type === 'track' || type === 'all') tracks = data.tracks || [];
+                if(type !== 'album') tracks = data.tracks || [];
                 else tracks = [];
 
                 renderGrid(combined);
@@ -439,38 +340,21 @@
             }
             items.forEach((item, i) => {
                 const isAlbum = item.type === 'album';
-                const isArtist = item.type === 'artist';
-                
-                let imgUrl = '';
-                if(isArtist) imgUrl = item.image.large;
-                else if(isAlbum) imgUrl = item.image.large;
-                else imgUrl = item.album.image.large;
-                
+                let imgUrl = isAlbum ? item.image.large : item.album.image.large;
                 if(imgUrl) imgUrl = imgUrl.replace('_300','_600');
-                else imgUrl = 'https://via.placeholder.com/300';
-
                 const div = document.createElement('div');
                 div.className = 'track-card';
-                if(isArtist) div.classList.add('artist-card');
                 div.dataset.id = item.id;
                 
                 let badges = '';
-                if(isArtist) badges += '<div class="type-badge badge-artist">ARTISTE</div>';
-                else if(isAlbum) badges += '<div class="type-badge badge-album">ALBUM</div>';
-                else if(item.maximum_bit_depth > 16) badges += '<div class="type-badge badge-hires">HI-RES</div>';
+                if(isAlbum) badges += '<div class="type-badge badge-album">ALBUM</div>';
+                if(item.maximum_bit_depth > 16) badges += '<div class="type-badge badge-hires">HI-RES</div>';
                 let badgeHTML = `<div class="badges-container">${badges}</div>`;
                 
-                let title = item.name || item.title;
-                let sub = '';
-                if(isArtist) sub = 'Artiste';
-                else if(isAlbum) sub = item.artist.name;
-                else sub = item.performer.name;
-
-                div.innerHTML = `${badgeHTML}<img src="${imgUrl}"><h3>${title}</h3><p>${sub}</p>`;
-                
+                let artistName = isAlbum ? item.artist.name : item.performer.name;
+                div.innerHTML = `${badgeHTML}<img src="${imgUrl}"><h3>${item.title}</h3><p>${artistName}</p>`;
                 div.onclick = () => {
-                    if(isArtist) openArtist(item.id);
-                    else if(isAlbum) openAlbum(item.id);
+                    if(isAlbum) openAlbum(item.id);
                     else {
                         const trackIdx = tracks.findIndex(t => t.id === item.id);
                         isRadioActive = false;
@@ -483,34 +367,23 @@
             updateActiveCard();
         }
 
-        async function openArtist(id) {
-            document.getElementById('trackGrid').innerHTML = '<p style="text-align:center; margin-top:50px;">Chargement Artiste...</p>';
-            try {
-                const res = await fetch(`${API_BASE}/artist?id=${id}`);
-                const data = await res.json();
-                if(data.albums && data.albums.items) {
-                    const albums = data.albums.items.map(a => ({...a, type: 'album', artist: {name: data.name}}));
-                    renderGrid(albums); 
-                } else {
-                    document.getElementById('trackGrid').innerHTML = '<p style="text-align:center;">Aucun album trouvé.</p>';
-                }
-            } catch(e) { console.error(e); }
-        }
-
         async function openAlbum(id) {
             document.getElementById('trackGrid').innerHTML = '<p style="text-align:center; margin-top:50px;">Chargement Album...</p>';
             try {
                 const res = await fetch(`${API_BASE}/album?id=${id}`);
                 const data = await res.json();
                 if(data.tracks && data.tracks.items) {
+                    // CORRECTION : On injecte l'artiste et l'image dans les tracks
                     const albumImg = data.image.large;
                     const albumArtist = data.artist.name;
+                    
                     tracks = data.tracks.items.map(t => ({
                         ...t,
                         type: 'track',
                         performer: t.performer || { name: albumArtist },
                         album: { image: { large: albumImg }, title: data.title }
                     }));
+                    
                     renderGrid(tracks); 
                 }
             } catch(e) { console.error(e); }
@@ -544,8 +417,8 @@
             if (t.maximum_bit_depth > 16) badge.style.display = 'block';
             else badge.style.display = 'none';
             
-            // ACTIVATION MAGIE
-            checkMagic(t.title, artistName);
+            // MAGIE
+            if(typeof checkMagic === "function") checkMagic(t.title, artistName);
 
             lyricsData = []; firstLineTime = null;
             document.getElementById('introContainer').style.display = 'none';

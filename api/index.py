@@ -49,47 +49,43 @@ except Exception as e:
     logger.error(f"Init Error: {e}")
 
 
+# --- ROUTES FICHIERS STATIQUES (Important pour Vercel) ---
 @app.route('/')
 def home():
     try: return send_file('../index.html')
     except: return "Erreur: index.html introuvable"
 
-# --- RECHERCHE COMPLETE (Tracks, Albums, Artistes) ---
+@app.route('/magic.css')
+def serve_css():
+    try: return send_file('../magic.css')
+    except: return ""
+
+@app.route('/magic.js')
+def serve_js():
+    try: return send_file('../magic.js')
+    except: return ""
+
+# --- API ROUTES ---
 @app.route('/search')
 def search_tracks():
     if not client: return jsonify({"error": "Client not initialized"}), 500
-    
     query = request.args.get('q')
     search_type = request.args.get('type', 'all')
-
     tracks_results = []
     albums_results = []
-    artists_results = []
-
+    
     try:
-        # 1. PISTES
         if search_type in ['track', 'all']:
             limit = 50 if search_type == 'track' else 20
             tracks_resp = client.api_call("track/search", query=query, limit=limit)
             tracks_results = tracks_resp.get('tracks', {}).get('items', [])
-
-        # 2. ALBUMS
+        
         if search_type in ['album', 'all']:
             limit = 50 if search_type == 'album' else 10
             albums_resp = client.api_call("album/search", query=query, limit=limit)
             albums_results = albums_resp.get('albums', {}).get('items', [])
-
-        # 3. ARTISTES (Nouveau)
-        if search_type in ['artist', 'all']:
-            limit = 50 if search_type == 'artist' else 5
-            artists_resp = client.api_call("artist/search", query=query, limit=limit)
-            artists_results = artists_resp.get('artists', {}).get('items', [])
         
-        return jsonify({
-            "tracks": tracks_results,
-            "albums": albums_results,
-            "artists": artists_results
-        })
+        return jsonify({ "tracks": tracks_results, "albums": albums_results })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -103,18 +99,6 @@ def get_album():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# --- NOUVEAU : INFO ARTISTE (Récupère ses albums) ---
-@app.route('/artist')
-def get_artist():
-    if not client: return jsonify({"error": "Client not initialized"}), 500
-    artist_id = request.args.get('id')
-    try:
-        # On demande les infos de l'artiste + ses albums
-        meta = client.api_call("artist/get", id=artist_id, extra="albums", limit=20)
-        return jsonify(meta)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
 @app.route('/lyrics')
 def get_lyrics():
     artist = request.args.get('artist')
@@ -123,7 +107,6 @@ def get_lyrics():
     duration = request.args.get('duration')
     try: duration = int(float(duration)) if duration else 0
     except: duration = 0
-    
     plain, synced = lyrics_engine.search_lyrics(artist, title, album, duration)
     if synced: return jsonify({"type": "synced", "lyrics": synced})
     elif plain: return jsonify({"type": "plain", "lyrics": plain})
@@ -139,19 +122,15 @@ def recommend_tracks():
         title = track_meta.get('title', '').lower()
         album = track_meta.get('album', {}).get('title', '').lower()
         genre_name = track_meta.get('album', {}).get('genre', {}).get('name')
-
         christmas_keywords = ['christmas', 'noël', 'noel', 'santa', 'merry', 'holiday', 'navidad', 'jingle', 'snow', 'hiver']
         search_query = genre_name if genre_name else original_artist
         is_context_mode = False
-
         if any(word in title for word in christmas_keywords) or any(word in album for word in christmas_keywords):
             search_query = "Christmas Music"
             is_context_mode = True
-
         resp = client.api_call("track/search", query=search_query, limit=100)
         items = resp.get('tracks', {}).get('items', [])
         random.shuffle(items)
-        
         recommendation = None
         for item in items:
             if str(item['id']) == str(track_id): continue
@@ -159,11 +138,9 @@ def recommend_tracks():
                 if item['performer']['name'].lower() == original_artist.lower(): continue
             recommendation = item
             break
-        
         if not recommendation and items: recommendation = items[0]
         if recommendation: return jsonify(recommendation)
         else: return jsonify({"error": "No recommendation found"}), 404
-
     except Exception as e: return jsonify({"error": str(e)}), 500
 
 @app.route('/stream/<track_id>')
