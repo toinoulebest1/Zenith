@@ -3,13 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Zenith Filter</title>
+    <title>Zenith Ultimate</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;500;700;800&display=swap" rel="stylesheet">
     
     <style>
         :root {
-            --primary: #00d2ff;
+            --primary: #00d2ff;       /* Cyan (Hi-Res / Actions) */
+            --secondary: #ff0055;     /* Rose (Albums) */
             --glass-bg: rgba(20, 20, 30, 0.85);
             --glass-border: rgba(255, 255, 255, 0.1);
             --text-main: #ffffff;
@@ -51,13 +52,11 @@
             overflow: hidden; position: relative; 
         }
 
-        /* SEARCH CONTAINER AVEC FILTRE */
         .search-container {
             display: flex; gap: 10px; background: rgba(255,255,255,0.05); padding: 10px 15px; border-radius: 18px; 
             border: 1px solid var(--glass-border); flex-shrink: 0; align-items: center;
         }
         
-        /* Le sélecteur de filtre */
         .search-select {
             background: transparent; color: var(--primary); border: none; font-weight: 700;
             outline: none; cursor: pointer; text-transform: uppercase; font-size: 12px;
@@ -77,20 +76,24 @@
         
         .track-card { 
             background: rgba(255,255,255,0.03); border-radius: 16px; padding: 15px; cursor: pointer; transition: 0.2s; 
-            border: 1px solid var(--glass-border); position: relative;
+            border: 1px solid var(--glass-border); position: relative; overflow: hidden;
         }
         .track-card:hover { background: rgba(255,255,255,0.1); transform: translateY(-3px); border-color: var(--primary); }
         .track-card img { width: 100%; border-radius: 12px; aspect-ratio: 1/1; object-fit: cover; margin-bottom: 10px; }
         .track-card h3 { font-weight: 600; margin-bottom: 4px; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .track-card p { font-size: 12px; color: var(--text-dim); }
         
-        .type-badge {
+        /* GESTION DES BADGES MULTIPLES */
+        .badges-container {
             position: absolute; top: 10px; right: 10px;
-            font-size: 10px; font-weight: 800; padding: 2px 6px; border-radius: 4px;
-            color: #000;
+            display: flex; flex-direction: column; gap: 4px; align-items: flex-end;
+        }
+        .type-badge {
+            font-size: 9px; font-weight: 800; padding: 2px 6px; border-radius: 4px;
+            color: #000; width: fit-content;
         }
         .badge-hires { background: var(--primary); box-shadow: 0 0 10px var(--primary); }
-        .badge-album { background: #ff0055; box-shadow: 0 0 10px #ff0055; color: white; }
+        .badge-album { background: var(--secondary); box-shadow: 0 0 10px var(--secondary); color: white; }
 
         /* LYRICS VIEW */
         .lyrics-view {
@@ -110,7 +113,7 @@
             text-shadow: 0 0 20px rgba(255,255,255,0.3);
         }
 
-        /* CHRONO INTRO STYLE */
+        /* CHRONO INTRO */
         .intro-container {
             position: fixed; top: 40%; left: 47%; transform: translate(-50%, -50%);
             width: 350px; display: none; pointer-events: none; z-index: 50; text-align: center;
@@ -253,7 +256,7 @@
     </div>
 
     <script>
-        const API_BASE = ''; // Pour Vercel. Pour local: 'http://127.0.0.1:5000'
+        const API_BASE = ''; // Vercel compliant
         let tracks = [];
         let currentIndex = 0;
         let audio = new Audio();
@@ -293,7 +296,7 @@
 
         async function performSearch() {
             const q = document.getElementById('searchInput').value;
-            const type = document.getElementById('searchType').value; // Recupère le filtre
+            const type = document.getElementById('searchType').value;
             if(!q) return;
             
             isRadioActive = false;
@@ -310,9 +313,8 @@
                 if(data.albums) data.albums.forEach(a => combined.push({...a, type: 'album'}));
                 if(data.tracks) data.tracks.forEach(t => combined.push({...t, type: 'track'}));
                 
-                // Si on a filtré par titre, la liste de lecture est prête
                 if(type !== 'album') tracks = data.tracks || [];
-                else tracks = []; // Si que albums, pas de liste de lecture par défaut
+                else tracks = [];
 
                 renderGrid(combined);
             } catch(e) {
@@ -337,13 +339,16 @@
                 const div = document.createElement('div');
                 div.className = 'track-card';
                 
-                let badge = '';
-                if(isAlbum) badge = '<div class="type-badge badge-album">ALBUM</div>';
-                else if(item.maximum_bit_depth > 16) badge = '<div class="type-badge badge-hires">HI-RES</div>';
+                // GESTION DOUBLE BADGE
+                let badges = '';
+                if(isAlbum) badges += '<div class="type-badge badge-album">ALBUM</div>';
+                if(item.maximum_bit_depth > 16) badges += '<div class="type-badge badge-hires">HI-RES</div>';
+                // On enveloppe dans un conteneur
+                let badgeHTML = `<div class="badges-container">${badges}</div>`;
                 
                 let artistName = isAlbum ? item.artist.name : item.performer.name;
 
-                div.innerHTML = `${badge}<img src="${imgUrl}"><h3>${item.title}</h3><p>${artistName}</p>`;
+                div.innerHTML = `${badgeHTML}<img src="${imgUrl}"><h3>${item.title}</h3><p>${artistName}</p>`;
                 
                 div.onclick = () => {
                     if(isAlbum) {
