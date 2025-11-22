@@ -137,7 +137,7 @@
                 </div>
             </div>
 
-            <button class="login-btn" style="background:transparent; color:#888; margin-top:10px; border:1px solid #444; width:auto; align-self:center; padding:10px 30px;" onclick="document.getElementById('partyModal').style.display='none'">Fermer</button>
+            <button class="login-btn" style="background:transparent; color:#888; margin-top:10px; border:1px solid #444; width:auto; align-self:center; padding:10px 30px;" onclick="Party.closeModal()">Fermer</button>
         </div>
     </div>
 
@@ -1000,24 +1000,33 @@
         function copyLink() { if(!currentTrackId) return; const t=tracks[currentIndex]; navigator.clipboard.writeText(`${window.location.origin}/?track=${t.id}&source=${t.source}`).then(()=>showToast('Lien copié !')); }
         
         async function toggleLike() {
-            const t = tracks[currentIndex];
-            if(!t) return;
-            const { data: { user } } = await supabaseClient.auth.getUser();
-            if(!user) { showToast("Connectez-vous pour liker !"); return; }
-            const idx = favorites.findIndex(f => String(f.id) === String(t.id));
             const btn = document.getElementById('btnLike');
-            if (idx === -1) {
-                favorites.push(t);
-                btn.innerHTML = '<i class="fas fa-heart"></i>';
-                btn.style.color = 'var(--secondary)';
-                showToast('Liké ❤️');
-                try { await supabaseClient.from('favorites').insert({ user_id: user.id, track_id: String(t.id), track_data: t }); } catch(e) { console.error(e); }
-            } else {
-                favorites.splice(idx, 1);
-                btn.innerHTML = '<i class="far fa-heart"></i>';
-                btn.style.color = 'var(--text-dim)';
-                showToast('Disliké 💔');
-                try { await supabaseClient.from('favorites').delete().match({ user_id: user.id, track_id: String(t.id) }); } catch(e) { console.error(e); }
+            if(btn.disabled) return;
+            btn.disabled = true; 
+            
+            try {
+                const t = tracks[currentIndex];
+                if(!t) return;
+                const { data: { user } } = await supabaseClient.auth.getUser();
+                if(!user) { showToast("Connectez-vous pour liker !"); return; }
+                
+                const idx = favorites.findIndex(f => String(f.id) === String(t.id));
+                
+                if (idx === -1) {
+                    favorites.push(t);
+                    btn.innerHTML = '<i class="fas fa-heart"></i>';
+                    btn.style.color = 'var(--secondary)';
+                    showToast('Liké ❤️');
+                    try { await supabaseClient.from('favorites').insert({ user_id: user.id, track_id: String(t.id), track_data: t }); } catch(e) { console.error(e); }
+                } else {
+                    favorites.splice(idx, 1);
+                    btn.innerHTML = '<i class="far fa-heart"></i>';
+                    btn.style.color = 'var(--text-dim)';
+                    showToast('Disliké 💔');
+                    try { await supabaseClient.from('favorites').delete().match({ user_id: user.id, track_id: String(t.id) }); } catch(e) { console.error(e); }
+                }
+            } finally {
+                btn.disabled = false;
             }
         }
 
@@ -1123,13 +1132,15 @@
         function showFavorites(){ 
             showTracks(); 
             document.getElementById('searchBarContainer').style.display='none'; 
-            renderGrid(favorites, true, "Vous n'avez pas encore de favoris.<br>Likez des titres pour les retrouver ici !"); 
+            // Utilisation de [...favorites] pour créer une COPIE du tableau
+            renderGrid([...favorites], true, "Vous n'avez pas encore de favoris.<br>Likez des titres pour les retrouver ici !"); 
             document.getElementById('viewTitle').innerText="Mes Favoris ❤️"; 
         }
         function showHistory(){ 
             showTracks(); 
             document.getElementById('searchBarContainer').style.display='none'; 
-            renderGrid(history, true, "Aucun historique disponible."); 
+            // Copie de l'historique
+            renderGrid([...history], true, "Aucun historique disponible."); 
             document.getElementById('viewTitle').innerText="Historique 🕒";
         }
         function showPlaylists(){
