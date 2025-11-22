@@ -104,8 +104,8 @@
 
     <!-- MODAL PARTY MODE (NOUVEAU) -->
     <div id="partyModal" class="login-screen" style="display:none; z-index:2000; background:rgba(0,0,0,0.8);">
-        <div class="login-card">
-            <h2 style="margin-bottom: 20px;">Party Mode 🎉</h2>
+        <div class="login-card" style="height: 80vh; justify-content: flex-start;">
+            <h2 style="margin-bottom: 10px;">Party Mode 🎉</h2>
             
             <div id="partySetupContainer">
                 <p style="color:#ccc; margin-bottom:20px;">Écoutez de la musique en synchro avec vos amis.</p>
@@ -116,16 +116,28 @@
             </div>
 
             <div id="partyActiveContainer" style="display:none;">
-                <p id="partyStatusText" style="margin-bottom:20px; font-size:18px;">Connecté</p>
-                <div style="background:rgba(255,255,255,0.1); padding:20px; border-radius:12px; margin-bottom:20px;">
-                    <div style="font-size:12px; color:#888; margin-bottom:5px;">CODE DE LA ROOM</div>
-                    <div id="partyCodeDisplay" style="font-size:32px; font-weight:800; color:var(--primary); letter-spacing:5px;">ABCD</div>
+                <div style="display:flex; justify-content:space-between; align-items:center; width:100%; margin-bottom:10px;">
+                    <div style="text-align:left;">
+                        <span style="font-size:10px; color:#888;">ROOM</span>
+                        <div id="partyCodeDisplay" style="font-size:20px; font-weight:800; color:var(--primary); letter-spacing:2px;">ABCD</div>
+                    </div>
+                    <div>
+                         <button class="action-btn-mini" onclick="Party.copyLink()" title="Copier lien"><i class="fas fa-link"></i></button>
+                         <button class="action-btn-mini" style="color:#ff0055;" onclick="Party.leaveRoom()" title="Quitter"><i class="fas fa-power-off"></i></button>
+                    </div>
                 </div>
-                <button class="login-btn" onclick="Party.copyLink()">Copier le lien d'invitation 🔗</button>
-                <button class="login-btn" style="background:#ff0055; color:white; margin-top:10px;" onclick="Party.leaveRoom()">Quitter</button>
+
+                <div class="chat-box-container" id="partyChatList">
+                    <!-- Messages will appear here -->
+                </div>
+
+                <div class="chat-input-area">
+                    <input type="text" id="partyChatInput" class="chat-input" placeholder="Votre message..." onkeypress="if(event.key==='Enter') Party.sendChat()">
+                    <button class="chat-send-btn" onclick="Party.sendChat()"><i class="fas fa-paper-plane"></i></button>
+                </div>
             </div>
 
-            <button class="login-btn" style="background:transparent; color:#888; margin-top:20px; border:1px solid #444;" onclick="document.getElementById('partyModal').style.display='none'">Fermer</button>
+            <button class="login-btn" style="background:transparent; color:#888; margin-top:10px; border:1px solid #444; width:auto; align-self:center; padding:10px 30px;" onclick="document.getElementById('partyModal').style.display='none'">Fermer</button>
         </div>
     </div>
 
