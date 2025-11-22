@@ -137,7 +137,7 @@
                 </div>
             </div>
 
-            <button class="login-btn" style="background:transparent; color:#888; margin-top:10px; border:1px solid #444; width:auto; align-self:center; padding:10px 30px;" onclick="document.getElementById('partyModal').style.display='none'">Fermer</button>
+            <button class="login-btn" style="background:transparent; color:#888; margin-top:10px; border:1px solid #444; width:auto; align-self:center; padding:10px 30px;" onclick="Party.closeModal()">Fermer</button>
         </div>
     </div>
 
@@ -157,8 +157,11 @@
             <div class="nav-item lyrics-btn" onclick="toggleLyrics()" title="Paroles (V)"><i class="fas fa-microphone-alt"></i></div>
             <div class="nav-item" onclick="startBlindTest()" title="Blind Test"><i class="fas fa-gamepad"></i></div>
             
-            <!-- PARTY BUTTON -->
-            <div class="nav-item" id="btnPartyMenu" onclick="document.getElementById('partyModal').style.display='flex'" title="Party Mode"><i class="fas fa-users"></i></div>
+            <!-- PARTY BUTTON (Modifié avec badge) -->
+            <div class="nav-item" id="btnPartyMenu" onclick="Party.openModal()" title="Party Mode">
+                <i class="fas fa-users"></i>
+                <div id="partyBadge" class="nav-badge">0</div>
+            </div>
 
             <div class="nav-item" onclick="toggleEQ()" title="Audio FX"><i class="fas fa-sliders-h"></i></div>
             <div class="nav-item" onclick="showProfileSettings()" title="Mon Compte"><i class="fas fa-user"></i></div>
