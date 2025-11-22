@@ -137,7 +137,7 @@
                 </div>
             </div>
 
-            <button class="login-btn" style="background:transparent; color:#888; margin-top:10px; border:1px solid #444; width:auto; align-self:center; padding:10px 30px;" onclick="Party.closeModal()">Fermer</button>
+            <button class="login-btn" style="background:transparent; color:#888; margin-top:10px; border:1px solid #444; width:auto; align-self:center; padding:10px 30px;" onclick="document.getElementById('partyModal').style.display='none'">Fermer</button>
         </div>
     </div>
 
@@ -321,7 +321,7 @@
             </div>
             <button class="limiter-btn active" id="limiterBtn" onclick="toggleLimiter()"><i class="fas fa-compress-arrows-alt"></i> NORMALISATEUR / LIMITER</button>
             <button class="orbit-btn" id="orbitBtn" onclick="toggleOrbit()"><i class="fas fa-globe-americas"></i> AUDIO ORBIT 8D</button>
-            <button class="karaoke-btn" id="karaokeBtn" onclick="toggleKaraoke()"><i class="fas fa-microphone-slash"></i> NO VOCAL (BETA)</button>
+            <button class="karaoke-btn" id="karaokeBtn" onclick="toggleKaraoke()"><i class="fas fa-microphone-slash"></i> NO VOCAL PRO (DYNAMIC)</button>
             <button class="eq-reset-btn" onclick="resetEQ()">Réinitialiser EQ</button>
         </div>
 
@@ -407,7 +407,8 @@
         let audioCtx; let sourceA, sourceB; let eqFilters = [];
         const eqFrequencies = [60, 230, 910, 4000, 14000]; 
         let isOrbitOn = false; let orbitPanner = null; let orbitInterval = null; let orbitAngle = 0; let orbitTimeout = null; 
-        let isKaraokeOn = false; let karaokeNodes = { split:null, merger:null, inv:null, dry:null, wet:null, bassFilter:null, vocalFilter:null };
+        let isKaraokeOn = false; 
+        let karaokeNodes = { dry: null, wet: null, lowLp: null, highHp: null, midHp: null, midLp: null, compressor: null, midGain: null };
         let isLimiterOn = true; let compressorNode = null; let makeupGainNode = null;
 
         // Settings
@@ -526,32 +527,64 @@
                 let preMix = audioCtx.createGain(); preMix.gain.value = 1.0;
                 sourceA.connect(preMix); sourceB.connect(preMix);
                 
-                karaokeNodes.split = audioCtx.createChannelSplitter(2);
-                karaokeNodes.merger = audioCtx.createChannelMerger(2);
-                karaokeNodes.inv = audioCtx.createGain(); karaokeNodes.inv.gain.value = -1; 
-                karaokeNodes.dry = audioCtx.createGain(); karaokeNodes.dry.gain.value = 1; 
-                karaokeNodes.wet = audioCtx.createGain(); karaokeNodes.wet.gain.value = 0; 
-                karaokeNodes.bassFilter = audioCtx.createBiquadFilter();
-                karaokeNodes.bassFilter.type = 'lowpass';
-                karaokeNodes.bassFilter.frequency.value = 150; 
-                karaokeNodes.vocalFilter = audioCtx.createBiquadFilter();
-                karaokeNodes.vocalFilter.type = 'highpass';
-                karaokeNodes.vocalFilter.frequency.value = 150;
+                // --- VOCAL REMOVER PRO (DYNAMIC EQ) ---
+                karaokeNodes.dry = audioCtx.createGain(); karaokeNodes.dry.gain.value = 1;
+                karaokeNodes.wet = audioCtx.createGain(); karaokeNodes.wet.gain.value = 0;
+
+                // 1. LOW PATH (<250Hz)
+                karaokeNodes.lowLp = audioCtx.createBiquadFilter();
+                karaokeNodes.lowLp.type = 'lowpass';
+                karaokeNodes.lowLp.frequency.value = 250;
+
+                // 2. HIGH PATH (>4000Hz)
+                karaokeNodes.highHp = audioCtx.createBiquadFilter();
+                karaokeNodes.highHp.type = 'highpass';
+                karaokeNodes.highHp.frequency.value = 4000;
+
+                // 3. VOCAL PATH (250Hz - 4000Hz) -> COMPRESSED
+                karaokeNodes.midHp = audioCtx.createBiquadFilter();
+                karaokeNodes.midHp.type = 'highpass';
+                karaokeNodes.midHp.frequency.value = 250;
+                
+                karaokeNodes.midLp = audioCtx.createBiquadFilter();
+                karaokeNodes.midLp.type = 'lowpass';
+                karaokeNodes.midLp.frequency.value = 4000;
+
+                karaokeNodes.compressor = audioCtx.createDynamicsCompressor();
+                karaokeNodes.compressor.threshold.value = -30; // Très sensible
+                karaokeNodes.compressor.knee.value = 5;
+                karaokeNodes.compressor.ratio.value = 3; // Ratio 3:1 demandé
+                karaokeNodes.compressor.attack.value = 0.005; // 5ms demandé
+                karaokeNodes.compressor.release.value = 0.08; // 80ms demandé
+
+                karaokeNodes.midGain = audioCtx.createGain();
+                karaokeNodes.midGain.value = 0.25; // -12dB atténuation
+
+                // ROUTING KARAOKE
+                // Dry
                 preMix.connect(karaokeNodes.dry);
-                preMix.connect(karaokeNodes.bassFilter);
-                karaokeNodes.bassFilter.connect(karaokeNodes.wet);
-                preMix.connect(karaokeNodes.vocalFilter);
-                karaokeNodes.vocalFilter.connect(karaokeNodes.split);
-                karaokeNodes.split.connect(karaokeNodes.merger, 0, 0); 
-                karaokeNodes.split.connect(karaokeNodes.merger, 0, 1); 
-                karaokeNodes.split.connect(karaokeNodes.inv, 1);       
-                karaokeNodes.inv.connect(karaokeNodes.merger, 0, 0);   
-                karaokeNodes.inv.connect(karaokeNodes.merger, 0, 1);   
-                karaokeNodes.merger.connect(karaokeNodes.wet);
+
+                // Wet (Low)
+                preMix.connect(karaokeNodes.lowLp);
+                karaokeNodes.lowLp.connect(karaokeNodes.wet);
+
+                // Wet (High)
+                preMix.connect(karaokeNodes.highHp);
+                karaokeNodes.highHp.connect(karaokeNodes.wet);
+
+                // Wet (Mid/Vocal)
+                preMix.connect(karaokeNodes.midHp);
+                karaokeNodes.midHp.connect(karaokeNodes.midLp);
+                karaokeNodes.midLp.connect(karaokeNodes.compressor);
+                karaokeNodes.compressor.connect(karaokeNodes.midGain);
+                karaokeNodes.midGain.connect(karaokeNodes.wet);
+
+                // SORTIE
                 let postKaraoke = audioCtx.createGain();
                 karaokeNodes.dry.connect(postKaraoke);
                 karaokeNodes.wet.connect(postKaraoke);
 
+                // --- SUITE CHAINE AUDIO (LIMITER & EQ) ---
                 compressorNode = audioCtx.createDynamicsCompressor();
                 compressorNode.threshold.setValueAtTime(0, audioCtx.currentTime);
                 compressorNode.knee.setValueAtTime(40, audioCtx.currentTime);       
