@@ -176,6 +176,14 @@ body.zen-active .player-capsule:hover {
 .nav-item { font-size: 22px; color: var(--text-dim); cursor: pointer; transition: 0.2s; } 
 .nav-item:hover, .nav-item.active { color: var(--primary); text-shadow: 0 0 10px var(--primary); }
 
+/* ACTIVE PARTY INDICATOR */
+.active-party {
+    color: #00ff88 !important;
+    text-shadow: 0 0 15px #00ff88;
+    animation: pulseParty 2s infinite;
+}
+@keyframes pulseParty { 0% { opacity: 0.8; } 50% { opacity: 1; transform: scale(1.1); } 100% { opacity: 0.8; } }
+
 
 /* PLAYLIST SELECT MODAL ITEMS */
 .playlist-select-item {

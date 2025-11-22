@@ -70,7 +70,7 @@
         </div>
     </div>
 
-    <!-- MODAL EDIT PLAYLIST (NOUVEAU) -->
+    <!-- MODAL EDIT PLAYLIST -->
     <div id="editPlaylistModal" class="login-screen" style="display:none; z-index:2000; background:rgba(0,0,0,0.8);">
         <div class="login-card">
             <h2 style="margin-bottom: 20px;">Modifier Playlist</h2>
@@ -102,6 +102,33 @@
         </div>
     </div>
 
+    <!-- MODAL PARTY MODE (NOUVEAU) -->
+    <div id="partyModal" class="login-screen" style="display:none; z-index:2000; background:rgba(0,0,0,0.8);">
+        <div class="login-card">
+            <h2 style="margin-bottom: 20px;">Party Mode 🎉</h2>
+            
+            <div id="partySetupContainer">
+                <p style="color:#ccc; margin-bottom:20px;">Écoutez de la musique en synchro avec vos amis.</p>
+                <button class="login-btn" onclick="Party.createRoom()">Créer une Room</button>
+                <div style="margin:15px 0; color:#555;">- OU -</div>
+                <input type="text" id="partyJoinCode" class="login-input" placeholder="Code de la room (ex: A4Z9)" style="text-transform:uppercase;">
+                <button class="login-btn" style="background:#333; color:white; margin-top:10px;" onclick="Party.joinRoom(document.getElementById('partyJoinCode').value)">Rejoindre</button>
+            </div>
+
+            <div id="partyActiveContainer" style="display:none;">
+                <p id="partyStatusText" style="margin-bottom:20px; font-size:18px;">Connecté</p>
+                <div style="background:rgba(255,255,255,0.1); padding:20px; border-radius:12px; margin-bottom:20px;">
+                    <div style="font-size:12px; color:#888; margin-bottom:5px;">CODE DE LA ROOM</div>
+                    <div id="partyCodeDisplay" style="font-size:32px; font-weight:800; color:var(--primary); letter-spacing:5px;">ABCD</div>
+                </div>
+                <button class="login-btn" onclick="Party.copyLink()">Copier le lien d'invitation 🔗</button>
+                <button class="login-btn" style="background:#ff0055; color:white; margin-top:10px;" onclick="Party.leaveRoom()">Quitter</button>
+            </div>
+
+            <button class="login-btn" style="background:transparent; color:#888; margin-top:20px; border:1px solid #444;" onclick="document.getElementById('partyModal').style.display='none'">Fermer</button>
+        </div>
+    </div>
+
     <div id="introContainer" class="intro-container">
         <div id="introText" class="intro-text">Début des paroles</div>
         <div class="intro-bar-bg"><div id="introBarFill" class="intro-bar-fill"></div></div>
@@ -117,6 +144,10 @@
 
             <div class="nav-item lyrics-btn" onclick="toggleLyrics()" title="Paroles (V)"><i class="fas fa-microphone-alt"></i></div>
             <div class="nav-item" onclick="startBlindTest()" title="Blind Test"><i class="fas fa-gamepad"></i></div>
+            
+            <!-- PARTY BUTTON -->
+            <div class="nav-item" id="btnPartyMenu" onclick="document.getElementById('partyModal').style.display='flex'" title="Party Mode"><i class="fas fa-users"></i></div>
+
             <div class="nav-item" onclick="toggleEQ()" title="Audio FX"><i class="fas fa-sliders-h"></i></div>
             <div class="nav-item" onclick="showProfileSettings()" title="Mon Compte"><i class="fas fa-user"></i></div>
             <div class="nav-item" onclick="ZenithCast.triggerMenu()" title="Caster sur TV"><i class="fab fa-chromecast" id="castBtnIcon"></i></div>
@@ -323,6 +354,9 @@
     <script src="playlists.js"></script> 
     <script src="magic.js"></script>
     <script src="blindtest.js"></script>
+    
+    <!-- SCRIPT PARTY MODE -->
+    <script src="party.js"></script>
     
     <script>
         if ('serviceWorker' in navigator) {
@@ -637,6 +671,9 @@
             const nextAudio = (activeAudio === playerA) ? playerB : playerA; 
             const prevAudio = activeAudio;
             
+            // PARTY BROADCAST
+            if (typeof broadcastTrackChange === 'function') broadcastTrackChange(nextTrack);
+
             // RESET LYRICS ICI
             resetLyricsState();
 
@@ -884,8 +921,32 @@
         function toggleEQ() { const v=document.getElementById('eqView'); if(!audioCtx)initAudioContext(); if(v.style.display==='flex'){v.classList.remove('active');setTimeout(()=>v.style.display='none',300);}else{v.style.display='flex';setTimeout(()=>v.classList.add('active'),10);} }
         function updateEQ(i,v) { if(audioCtx && eqFilters[i]) eqFilters[i].gain.value = parseFloat(v); }
         function resetEQ() { document.querySelectorAll('.eq-range').forEach((s, i) => { s.value=0; updateEQ(i, 0); }); }
-        function play() { if(audioCtx && audioCtx.state === 'suspended') audioCtx.resume(); activeAudio.play().then(() => { isPlaying = true; document.getElementById('playIcon').className = 'fas fa-pause'; updateMediaSessionState(); if('mediaSession' in navigator) navigator.mediaSession.playbackState = "playing"; }).catch(e => {}); }
-        function pause() { playerA.pause(); playerB.pause(); isPlaying = false; document.getElementById('playIcon').className = 'fas fa-play'; if('mediaSession' in navigator) navigator.mediaSession.playbackState = "paused"; }
+        
+        // --- MODIFICATION PARTY MODE ---
+        function play() { 
+            if(audioCtx && audioCtx.state === 'suspended') audioCtx.resume(); 
+            activeAudio.play().then(() => { 
+                isPlaying = true; 
+                document.getElementById('playIcon').className = 'fas fa-pause'; 
+                updateMediaSessionState(); 
+                if('mediaSession' in navigator) navigator.mediaSession.playbackState = "playing"; 
+                
+                // BROADCAST
+                if (typeof broadcastPlay === 'function') broadcastPlay();
+
+            }).catch(e => {}); 
+        }
+        
+        function pause() { 
+            playerA.pause(); playerB.pause(); 
+            isPlaying = false; 
+            document.getElementById('playIcon').className = 'fas fa-play'; 
+            if('mediaSession' in navigator) navigator.mediaSession.playbackState = "paused"; 
+            
+            // BROADCAST
+            if (typeof broadcastPause === 'function') broadcastPause();
+        }
+        
         function fmtTime(s) { if(!s || isNaN(s)) return "0:00"; let m=Math.floor(s/60), sec=Math.floor(s%60); return m+":"+(sec<10?"0":"")+sec; }
         function showToast(msg) { const t=document.getElementById('toast'); t.innerText=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),2000); }
         function copyLink() { if(!currentTrackId) return; const t=tracks[currentIndex]; navigator.clipboard.writeText(`${window.location.origin}/?track=${t.id}&source=${t.source}`).then(()=>showToast('Lien copié !')); }
@@ -1131,7 +1192,7 @@
                 if(t.source === 'subsonic') img = `${API_BASE}/get_subsonic_cover/${t.album.image.large}`;
                 else if(t.album && t.album.image) img = t.album.image.large.replace('_300','_600');
                 navigator.mediaSession.metadata = new MediaMetadata({ title: t.title, artist: t.performer ? t.performer.name : 'Artiste', album: t.album ? t.album.title : '', artwork: [{ src: img, sizes: '512x512', type: 'image/jpeg' }] });
-                navigator.mediaSession.setActionHandler('play', play); navigator.mediaSession.setActionHandler('pause', pause); navigator.mediaSession.setActionHandler('previoustrack', () => { if(activeAudio.currentTime>3) activeAudio.currentTime=0; else if(currentIndex>0) loadTrack(currentIndex-1); }); navigator.mediaSession.setActionHandler('nexttrack', handleNext); navigator.mediaSession.setActionHandler('seekto', (d) => { if(d.seekTime) { activeAudio.currentTime = d.seekTime; updateMediaSessionState(); } });
+                navigator.mediaSession.setActionHandler('play', play); navigator.mediaSession.setActionHandler('pause', pause); navigator.mediaSession.setActionHandler('previoustrack', () => { if(activeAudio.currentTime>3) activeAudio.currentTime=0; else if(currentIndex>0) loadTrack(currentIndex-1); }); navigator.mediaSession.setActionHandler('nexttrack', handleNext); navigator.mediaSession.setActionHandler('seekto', (d) => { if(d.seekTime) { activeAudio.currentTime = d.seekTime; updateMediaSessionState(); if(typeof broadcastSeek === 'function') broadcastSeek(); } });
             }
         }
         // MODIFICATION: Utilisation de la durée des métadonnées si la durée audio est inconnue
@@ -1170,7 +1231,7 @@
             document.getElementById('btnPlay').addEventListener('click',()=>isPlaying?pause():play());
             document.getElementById('btnNext').addEventListener('click',handleNext);
             document.getElementById('btnPrev').addEventListener('click',()=>{if(activeAudio.currentTime>3)activeAudio.currentTime=0;else if(currentIndex>0)loadTrack(currentIndex-1);});
-            document.getElementById('progressBar').addEventListener('click',(e)=>{if(!activeAudio.duration)return;activeAudio.currentTime=(e.offsetX/document.getElementById('progressBar').clientWidth)*activeAudio.duration;updateMediaSessionState();});
+            document.getElementById('progressBar').addEventListener('click',(e)=>{if(!activeAudio.duration)return;activeAudio.currentTime=(e.offsetX/document.getElementById('progressBar').clientWidth)*activeAudio.duration;updateMediaSessionState(); if(typeof broadcastSeek === 'function') broadcastSeek();});
             document.querySelector('.vol-slider').oninput=function(){setGlobalVolume(this.value)};
         });
     </script>
