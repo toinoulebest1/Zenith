@@ -123,30 +123,19 @@ def is_garbage_content(title, artist):
     t = title.lower()
     a = artist.lower()
     
-    # Liste des termes interdits (Titres & Artistes)
     banned_terms = [
-        # Émissions TV / Concours
         "the voice", "got talent", "x factor", "idol", "audition", "battle", "incroyable talent",
         "c à vous", "tpmp", "quotidien", "taratata", "grand journal", "clash", "interview",
-        
-        # Reprises / Covers
         "cover", "reprise", "tribute", "hommage", "version guitare", "piano version",
-        
-        # Modifications Audio / DJ / Remix non officiels
         "slowed", "reverb", "sped up", "nightcore", "chipmunk", "daycore", "bass boosted",
         "remix", "mix", "mashup", "medley", "megamix", "dj ", "edit", "lofi", "type beat",
-        
-        # Contenu YouTubeur / Méta
         "react", "reaction", "review", "analise", "explication", "paroles", "lyrics", "letra",
         "guitar hero", "synthesia", "tutorial", "tuto", "lesson", "backing track", "karaoke", "instrumental",
         "8d audio", "3d audio",
-        
-        # Live (On privilégie le studio pour la radio)
         "live at", "live in", "concert", "en live", "au zénith", "stade de france", "bercy"
     ]
     
     full_str = f"{t} {a}"
-    
     for term in banned_terms:
         if term in full_str:
             return True, term
@@ -159,7 +148,6 @@ def fetch_yt_synced_lyrics(title, artist):
     logger.info(f"🔍 YT Lyrics: Recherche pour '{query}'")
     
     try:
-        # 1. Trouver la chanson (videoId)
         results = yt.search(query, filter="songs", limit=1)
         if not results:
             logger.warning(f"❌ YT Lyrics: Aucun résultat de recherche pour '{query}'")
@@ -169,7 +157,6 @@ def fetch_yt_synced_lyrics(title, artist):
         track_title = results[0].get('title', 'Inconnu')
         logger.info(f"✅ YT Lyrics: Vidéo trouvée [{video_id}] - {track_title}")
         
-        # 2. Obtenir la Watch Playlist pour avoir l'ID des paroles
         try:
             watch = yt.get_watch_playlist(video_id)
         except Exception as e:
@@ -183,228 +170,204 @@ def fetch_yt_synced_lyrics(title, artist):
         lyrics_id = watch['lyrics']
         logger.info(f"✅ YT Lyrics: ID Paroles trouvé [{lyrics_id}]")
         
-        # 3. Récupérer les paroles avec timestamps
         lyrics_data = None
-        
-        # TENTATIVE 1 : AVEC TIMESTAMPS=TRUE
         try:
-            logger.info("ℹ️ YT Lyrics: Tentative récupération avec timestamps=True...")
             lyrics_data = yt.get_lyrics(lyrics_id, timestamps=True)
         except TypeError:
-            logger.warning("⚠️ YT Lyrics: L'option timestamps=True n'est pas supportée par cette version de ytmusicapi.")
+            logger.warning("⚠️ YT Lyrics: L'option timestamps=True n'est pas supportée.")
         except Exception as e:
             logger.error(f"⚠️ YT Lyrics: Erreur avec timestamps=True: {e}")
 
-        # TENTATIVE 2 : SANS OPTION (Fallback)
         if not lyrics_data:
-            logger.info("ℹ️ YT Lyrics: Tentative récupération standard...")
             try:
                 lyrics_data = yt.get_lyrics(lyrics_id)
             except Exception as e:
                 logger.error(f"❌ YT Lyrics: Erreur fallback: {e}")
                 return None
         
-        if not lyrics_data:
-            logger.warning("❌ YT Lyrics: Données vides retournées.")
-            return None
+        if not lyrics_data: return None
 
-        # 4. ANALYSE DU RÉSULTAT
         lyrics_content = lyrics_data.get('lyrics')
-        logger.info(f"ℹ️ YT Lyrics: Type de données reçu: {type(lyrics_content)}")
 
-        # CAS A : C'est une liste (Timestamps trouvés !)
         if isinstance(lyrics_content, list):
-            logger.info("✅ YT Lyrics: Format LISTE détecté (Synchronisé !)")
-            
             lrc_lines = []
             for i, line in enumerate(lyrics_content):
                 try:
-                    # On supporte les clés 'start_time' ou 'seconds' selon les versions
                     t = None
                     txt = ""
                     is_ms = False
-
-                    # 1. Gestion Objet LyricLine (Nouveau ytmusicapi)
                     if hasattr(line, 'start_time') and hasattr(line, 'text'):
-                        t = line.start_time
-                        txt = line.text
-                        is_ms = True # LyricLine stocke en MS
-                    
-                    # 2. Gestion Dictionnaire (Vieux format ou autre endpoint)
+                        t = line.start_time; txt = line.text; is_ms = True 
                     elif isinstance(line, dict):
                         t = line.get('start_time', line.get('seconds', line.get('startTime')))
                         txt = line.get('text', line.get('line', ''))
-                        is_ms = False # Les dicts stockaient souvent en secondes
+                        is_ms = False 
                     
                     if t is not None:
                          val = float(t)
-                         # Conversion si c'était des secondes
                          final_ms = val if is_ms else (val * 1000)
                          lrc_lines.append(f"{ms_to_lrc(final_ms)} {txt}")
-                except Exception as ex:
-                    if i == 0: logger.error(f"❌ Erreur parsing ligne 1: {ex}")
-                    continue
+                except Exception as ex: continue
             
-            if lrc_lines:
-                return "\n".join(lrc_lines)
-            else:
-                logger.warning("⚠️ YT Lyrics: Liste trouvée mais pas de timestamps exploitables.")
+            if lrc_lines: return "\n".join(lrc_lines)
 
-        # CAS B : C'est une string (Plain text)
-        elif isinstance(lyrics_content, str):
-             logger.info("⚠️ YT Lyrics: Format STRING détecté (Non Synchronisé).")
-             return None 
-             
+        elif isinstance(lyrics_content, str): return None 
         return None
         
     except Exception as e:
         logger.error(f"💥 YT Lyrics: Exception non gérée: {e}")
         return None
 
-# --- RECHERCHE RECOMMENDATIONS YOUTUBE (Algorithme Utilisateur) ---
-def get_yt_recommendations(title, artist, banned_artists=set()):
-    """
-    Algorithme Radio Intelligent :
-    1. Recherche la chanson 'seed' avec précision (guillemets)
-    2. Combine:
-       - La "Watch Playlist" (File d'attente automatique YT)
-       - Les "Related Content" (Suggestions connexes)
-    3. Filtre STRICTEMENT les artistes bannis et le contenu 'garbage'
-    """
-    # Utilisation des guillemets pour forcer la distinction Titre / Artiste
-    search_query = f'"{title}" "{artist}"'
-    logger.info(f"📻 Radio YT: Recherche précise pour '{search_query}'")
-    logger.info(f"🚫 BLACKLIST (Quota dépassé): {banned_artists}")
-    
-    try:
-        # 1. Rechercher la chanson
-        search_results = yt.search(search_query, filter='songs', limit=1)
-        
-        if not search_results:
-            # Fallback sans guillemets si trop strict
-            logger.warning("⚠️ Recherche stricte échouée, tentative standard...")
-            search_results = yt.search(f"{title} {artist}", filter='songs', limit=1)
-
-        if not search_results:
-            logger.warning("❌ YT Radio: Aucune musique trouvée pour la graine.")
-            return None
-
-        target_song = search_results[0]
-        video_id = target_song['videoId']
-        logger.info(f"✅ Graine trouvée: {target_song.get('title')} (ID: {video_id})")
-
-        # 2. Obtenir la Watch Playlist ET le Related Browse ID
-        try:
-            watch_playlist = yt.get_watch_playlist(videoId=video_id)
-            related_browse_id = watch_playlist.get('related')
-            
-            # SOURCE 1: La file d'attente automatique (Souvent ~20-50 titres)
-            raw_candidates = watch_playlist.get('tracks', [])
-            logger.info(f"ℹ️ YT Radio: {len(raw_candidates)} titres trouvés dans la Watch Playlist.")
-            
-        except Exception as e:
-            logger.error(f"❌ YT Radio: Erreur watch_playlist: {e}")
-            return None
-
-        # SOURCE 2: Les contenus connexes (Si disponible)
-        if related_browse_id:
-            try:
-                related_content = yt.get_song_related(related_browse_id)
-                count_related = 0
-                for section in related_content:
-                    contents = section.get('contents')
-                    if isinstance(contents, list):
-                        raw_candidates.extend(contents)
-                        count_related += len(contents)
-                logger.info(f"ℹ️ YT Radio: {count_related} titres ajoutés depuis les contenus connexes.")
-            except Exception as e:
-                logger.warning(f"⚠️ YT Radio: Erreur lors de la récupération des contenus connexes: {e}")
-
-        candidates = []
-        
-        # 4. Filtrage et Sélection
-        # On utilise un set pour éviter les doublons car un titre peut être dans les deux listes
-        seen_ids = set()
-
-        for item in raw_candidates:
-            if 'videoId' in item and 'playlistId' not in item:
-                r_id = item.get('videoId')
-                
-                if r_id in seen_ids: continue
-                seen_ids.add(r_id)
-
-                r_title = item.get('title', 'Inconnu')
-                
-                artists = item.get('artists', [])
-                r_artist_name = artists[0]['name'] if artists else "Artiste inconnu"
-                r_artist_clean = clean_string(r_artist_name)
-                
-                # LOG SYSTÉMATIQUE
-                log_prefix = "✅"
-                rejection_reason = ""
-
-                # A. VÉRIFICATION DU BAN (QUOTA)
-                if r_artist_clean in banned_artists:
-                    log_prefix = "❌"
-                    rejection_reason = f" [REJET: Artiste Banni (Quota atteint)]"
-                
-                # B. VÉRIFICATION DOUBLON TITRE
-                elif clean_string(r_title) == clean_string(title):
-                    log_prefix = "❌"
-                    rejection_reason = " [REJET: Doublon Titre]"
-                    
-                # C. VÉRIFICATION CONTENU POUBELLE (TV, COVERS, REMIX, ETC.)
-                else:
-                    is_bad, bad_term = is_garbage_content(r_title, r_artist_name)
-                    if is_bad:
-                        log_prefix = "❌"
-                        rejection_reason = f" [REJET: Contenu de basse qualité ({bad_term})]"
-                
-                # logger.info(f"{log_prefix} Vu: {r_title} - {r_artist_name}{rejection_reason}")
-
-                if log_prefix == "❌":
-                    continue
-
-                # Image HD (Gérer les clés variables 'thumbnail' vs 'thumbnails')
-                thumbnails = item.get('thumbnails', item.get('thumbnail', []))
-                r_img = get_hq_yt_image(thumbnails[-1]['url']) if thumbnails else 'https://via.placeholder.com/300'
-                
-                # Album
-                r_album = "YouTube"
-                if 'album' in item:
-                    if isinstance(item['album'], dict): r_album = item['album'].get('name', 'YouTube')
-                    elif isinstance(item['album'], str): r_album = item['album']
-
-                candidates.append({
-                    "id": r_id,
-                    "title": r_title,
-                    "performer": { "name": r_artist_name },
-                    "album": { "title": r_album, "image": { "large": r_img } },
-                    "source": "yt_lazy",
-                    "img": r_img,
-                    "type": "track"
-                })
-        
-        if candidates:
-            logger.info(f"✅ Radio YT: {len(candidates)} candidats valides (Total analysé: {len(raw_candidates)}).")
-            selection = random.choice(candidates)
-            logger.info(f"🎵 TITRE CHOISI : {selection['title']} - {selection['performer']['name']}")
-            return selection
-        else:
-            logger.warning("❌ YT Radio: Aucun candidat après filtrage (Trop de répétitions ou mauvaise qualité).")
-            return None
-
-    except Exception as e:
-        logger.error(f"❌ Radio YT Error: {e}")
-        return None
-
-# --- API SUBSONIC ---
+# --- HELPERS SUBSONIC ---
 def get_subsonic_query_params():
     salt = ''.join(random.choices(string.ascii_letters + string.digits, k=6))
     token_str = SUBSONIC_PASSWORD + salt
     token = hashlib.md5(token_str.encode('utf-8')).hexdigest()
     return { 'u': SUBSONIC_USER, 's': salt, 't': token, 'v': SUBSONIC_VERSION, 'c': SUBSONIC_CLIENT, 'f': 'json' }
 
+def get_subsonic_track_details(track_id):
+    """Récupère les détails complets d'une musique Subsonic par ID"""
+    url = SUBSONIC_BASE + "getSong.view"
+    params = get_subsonic_query_params()
+    params['id'] = track_id
+    try:
+        res = requests.get(url, params=params).json()
+        song = res['subsonic-response']['song']
+        return {
+            'id': song['id'],
+            'title': song['title'],
+            'performer': {'name': song['artist']},
+            'album': {'title': song.get('album', 'Album'), 'image': {'large': song.get('coverArt')}},
+            'duration': song.get('duration', 0),
+            'source': 'subsonic',
+            'maximum_bit_depth': 16
+        }
+    except Exception as e:
+        logger.error(f"Subsonic Details Error: {e}")
+        return None
+
+# --- RECHERCHE RECOMMENDATIONS INTELLIGENTE (YT -> CHECK QOBUZ/SUBSONIC) ---
+def get_yt_recommendations(title, artist, banned_artists=set()):
+    """
+    Algorithme Radio Amélioré :
+    1. Récupère une liste de candidats depuis l'algo YouTube (Watch Playlist + Related).
+    2. Pour chaque candidat :
+       a. Vérifie s'il existe sur Qobuz ou Subsonic (try_resolve_track).
+       b. SI OUI : Renvoie la version Qobuz/Subsonic (Meilleure qualité + Image officielle).
+       c. SI NON : Passe au candidat suivant (car l'utilisateur veut prioriser Qobuz/Subsonic).
+    3. Si aucun candidat n'est trouvé sur les plateformes Hi-Res après X essais, renvoie None (Fallback Qobuz).
+    """
+    search_query = f'"{title}" "{artist}"'
+    logger.info(f"📻 Radio YT: Recherche graine '{search_query}'")
+    
+    try:
+        # 1. Graine
+        search_results = yt.search(search_query, filter='songs', limit=1)
+        if not search_results: search_results = yt.search(f"{title} {artist}", filter='songs', limit=1)
+        if not search_results: return None
+
+        target_song = search_results[0]
+        video_id = target_song['videoId']
+        
+        # 2. Candidats
+        raw_candidates = []
+        try:
+            watch_playlist = yt.get_watch_playlist(videoId=video_id)
+            raw_candidates.extend(watch_playlist.get('tracks', []))
+            
+            related_browse_id = watch_playlist.get('related')
+            if related_browse_id:
+                related_content = yt.get_song_related(related_browse_id)
+                for section in related_content:
+                    contents = section.get('contents')
+                    if isinstance(contents, list): raw_candidates.extend(contents)
+        except Exception as e:
+            logger.error(f"❌ YT Radio: Erreur playlist: {e}")
+            return None
+
+        # 3. Filtrage et Vérification Qobuz/Subsonic
+        seen_ids = set()
+        candidates = []
+
+        # Pré-filtrage rapide pour avoir une liste propre
+        for item in raw_candidates:
+            if 'videoId' in item and 'playlistId' not in item:
+                r_id = item.get('videoId')
+                if r_id in seen_ids: continue
+                seen_ids.add(r_id)
+                
+                r_title = item.get('title', 'Inconnu')
+                artists = item.get('artists', [])
+                r_artist_name = artists[0]['name'] if artists else "Artiste inconnu"
+                
+                # Filtres de base
+                if clean_string(r_artist_name) in banned_artists: continue
+                if clean_string(r_title) == clean_string(title): continue
+                is_bad, _ = is_garbage_content(r_title, r_artist_name)
+                if is_bad: continue
+                
+                candidates.append({'title': r_title, 'artist': r_artist_name})
+
+        # Mélange pour la variété
+        random.shuffle(candidates)
+        
+        # 4. BOUCLE DE VÉRIFICATION (Max 5 tentatives pour ne pas être trop lent)
+        max_tries = 5
+        checked_count = 0
+        
+        logger.info(f"🔍 Radio: Vérification de l'existence sur Qobuz/Subsonic pour {len(candidates)} candidats...")
+
+        for cand in candidates:
+            if checked_count >= max_tries:
+                break
+            
+            c_title = cand['title']
+            c_artist = cand['artist']
+            
+            logger.info(f"👉 Test #{checked_count+1}: {c_title} - {c_artist}")
+            
+            # Appel à la fonction qui cherche sur Qobuz/Subsonic
+            match = try_resolve_track(c_title, c_artist)
+            
+            if match:
+                source = match['source']
+                real_id = match['id']
+                
+                if source == 'qobuz' and client:
+                    try:
+                        meta = client.get_track_meta(real_id)
+                        meta['source'] = 'qobuz'
+                        fix_qobuz_title(meta)
+                        # Pour s'assurer qu'on a l'image HD
+                        if meta.get('album', {}).get('image', {}).get('large'):
+                            meta['img'] = meta['album']['image']['large'].replace('_300', '_600')
+                        
+                        logger.info(f"✅ TROUVÉ SUR QOBUZ: {meta['title']}")
+                        return meta
+                    except Exception as e:
+                        logger.error(f"Erreur fetch Qobuz meta: {e}")
+                
+                elif source == 'subsonic':
+                    try:
+                        song = get_subsonic_track_details(real_id)
+                        if song:
+                            logger.info(f"✅ TROUVÉ SUR SUBSONIC: {song['title']}")
+                            return song
+                    except Exception as e:
+                        logger.error(f"Erreur fetch Subsonic meta: {e}")
+            else:
+                logger.info("❌ Non trouvé sur les plateformes Hi-Res. Suivant...")
+
+            checked_count += 1
+            
+        logger.warning("❌ Radio: Aucun candidat YouTube n'existe sur Qobuz/Subsonic après vérification.")
+        return None # On renvoie None pour déclencher le fallback Qobuz interne
+
+    except Exception as e:
+        logger.error(f"❌ Radio YT Error: {e}")
+        return None
+
+# --- API SUBSONIC ---
 def fetch_subsonic_tracks(query: str, limit=20) -> list:
     url = SUBSONIC_BASE + "search3.view"
     params = get_subsonic_query_params()
@@ -430,8 +393,6 @@ def fetch_subsonic_tracks(query: str, limit=20) -> list:
             return found
         return []
     except: return []
-
-# --- AJOUT FONCTIONS MANQUANTES ---
 
 def fetch_subsonic_albums(query: str, limit=15) -> list:
     url = SUBSONIC_BASE + "search3.view"
@@ -475,20 +436,36 @@ def threaded_qobuz_search(query, limit=25, type='track'):
 def try_resolve_track(title, artist):
     """Tente de trouver un ID Qobuz ou Subsonic pour un titre/artiste donné"""
     search_query = f"{title} {artist}"
+    
     # 1. Qobuz
-    try:
-        q_resp = client.api_call("track/search", query=search_query, limit=1)
-        items = q_resp.get('tracks', {}).get('items', [])
-        if items:
-            rec = items[0]
-            if fuzz.ratio(clean_string(rec['title']), clean_string(title)) > 50:
-                return {'id': rec['id'], 'source': 'qobuz'}
-    except: pass
+    if client:
+        try:
+            q_resp = client.api_call("track/search", query=search_query, limit=1)
+            items = q_resp.get('tracks', {}).get('items', [])
+            if items:
+                rec = items[0]
+                
+                # Logique de matching Robuste (Fonctionne SANS RapidFuzz)
+                t1 = clean_string(rec['title'])
+                t2 = clean_string(title)
+                
+                is_match = False
+                if FUZZ_AVAILABLE:
+                    if fuzz.ratio(t1, t2) > 50: is_match = True
+                else:
+                    # Fallback si rapidfuzz manque : vérification d'inclusion simple
+                    if t2 in t1 or t1 in t2: is_match = True
+                    
+                if is_match:
+                    return {'id': rec['id'], 'source': 'qobuz'}
+        except Exception as e:
+            logger.error(f"Resolve Qobuz error: {e}")
     
     # 2. Subsonic
     subs = fetch_subsonic_tracks(search_query, limit=1)
     if subs:
         return {'id': subs[0]['id'], 'source': 'subsonic'}
+    
     return None
 
 # --- ROUTES ---
@@ -498,17 +475,12 @@ def recommend_tracks():
     original_artist = request.args.get('artist', '')
     original_title = request.args.get('title', '')
     
-    # Récupération de l'historique des artistes
     recent_artists_str = request.args.get('recent_artists', '')
-    # Nettoyage pour avoir une liste propre
     recent_artists_raw = recent_artists_str.split(',') if recent_artists_str else []
     recent_artists = [clean_string(a) for a in recent_artists_raw if a]
     
-    # --- LOGIQUE DE BANNISSEMENT : QUOTA 2 SUR 5 ---
-    # Si un artiste apparaît 2 fois ou plus dans les 5 derniers titres, il est banni.
+    # QUOTA 2 SUR 5 POUR BAN
     banned_artists = set()
-    
-    # On compte les occurrences dans l'historique récent
     artist_counts = {}
     for artist in recent_artists:
         artist_counts[artist] = artist_counts.get(artist, 0) + 1
@@ -516,25 +488,24 @@ def recommend_tracks():
     for artist, count in artist_counts.items():
         if count >= 2:
             banned_artists.add(artist)
-            logger.info(f"🚫 BANNISSEMENT ACTIVÉ: '{artist}' est apparu {count} fois récemment.")
 
-    # 1. TENTATIVE YOUTUBE MUSIC (AVEC FILTRE BANNIS + QUALITÉ)
-    yt_rec = get_yt_recommendations(original_title, original_artist, banned_artists)
-    if yt_rec:
-        return jsonify(yt_rec)
+    # 1. TENTATIVE YOUTUBE AVEC VÉRIFICATION QOBUZ/SUBSONIC
+    # Si get_yt_recommendations renvoie quelque chose, c'est désormais garanti d'être du Qobuz/Subsonic
+    # (Ou None si rien n'a été trouvé)
+    resolved_rec = get_yt_recommendations(original_title, original_artist, banned_artists)
+    if resolved_rec:
+        return jsonify(resolved_rec)
         
-    # 2. FALLBACK QOBUZ (AVEC FILTRE BANNIS)
+    # 2. FALLBACK QOBUZ (Si la vérification a échoué partout)
     if client:
         try:
             track_id = request.args.get('current_id')
             track_meta = client.get_track_meta(track_id)
             genre_name = track_meta.get('album', {}).get('genre', {}).get('name')
             
-            # Si l'artiste original est banni, on force la recherche par genre
             original_clean = clean_string(original_artist)
             if original_clean in banned_artists:
                 search_query = genre_name if genre_name else "Pop Global"
-                logger.info(f"⚠️ Fallback Qobuz: Artiste '{original_artist}' banni, recherche par Genre '{search_query}'")
             else:
                 search_query = genre_name if genre_name else original_artist
             
@@ -548,15 +519,11 @@ def recommend_tracks():
                 candidate_artist = item.get('performer', {}).get('name', 'Inconnu')
                 candidate_clean = clean_string(candidate_artist)
                 
-                # VERIFICATION STRICTE BAN (QUOTA)
-                if candidate_clean in banned_artists:
-                    logger.info(f"❌ Qobuz: Rejeté {candidate_artist} (Banni par Quota)")
-                    continue
-                
-                # Éviter doublon immédiat titre
-                if candidate_clean == clean_string(original_artist) and clean_string(item['title']) == clean_string(original_title):
-                     continue
+                if candidate_clean in banned_artists: continue
+                if candidate_clean == clean_string(original_artist) and clean_string(item['title']) == clean_string(original_title): continue
 
+                item['source'] = 'qobuz'
+                fix_qobuz_title(item)
                 return jsonify(item)
                 
         except Exception as e:
@@ -717,11 +684,9 @@ def resolve_metadata():
 def get_track_info():
     track_id = request.args.get('id'); source = request.args.get('source')
     if source == 'subsonic':
-        url = SUBSONIC_BASE + "getSong.view"; params = get_subsonic_query_params(); params['id'] = track_id
-        try:
-            res = requests.get(url, params=params).json(); song = res['subsonic-response']['song']
-            return jsonify({'id': song['id'], 'title': song['title'], 'performer': {'name': song['artist']}, 'album': {'title': song.get('album', 'Album'), 'image': {'large': song.get('coverArt')}}, 'duration': song['duration'], 'source': 'subsonic'})
-        except: return jsonify({"error": "Not found"}), 404
+        song = get_subsonic_track_details(track_id)
+        if song: return jsonify(song)
+        return jsonify({"error": "Not found"}), 404
     if not client: return jsonify({"error": "Init error"}), 500
     try: res = client.get_track_meta(track_id); res['source'] = 'qobuz'; fix_qobuz_title(res); return jsonify(res)
     except: return jsonify({"error": "Not found"}), 404

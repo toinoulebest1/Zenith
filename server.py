@@ -436,21 +436,36 @@ def threaded_qobuz_search(query, limit=25, type='track'):
 def try_resolve_track(title, artist):
     """Tente de trouver un ID Qobuz ou Subsonic pour un titre/artiste donné"""
     search_query = f"{title} {artist}"
+    
     # 1. Qobuz
-    try:
-        q_resp = client.api_call("track/search", query=search_query, limit=1)
-        items = q_resp.get('tracks', {}).get('items', [])
-        if items:
-            rec = items[0]
-            # Vérification simple du titre
-            if fuzz.ratio(clean_string(rec['title']), clean_string(title)) > 50:
-                return {'id': rec['id'], 'source': 'qobuz'}
-    except: pass
+    if client:
+        try:
+            q_resp = client.api_call("track/search", query=search_query, limit=1)
+            items = q_resp.get('tracks', {}).get('items', [])
+            if items:
+                rec = items[0]
+                
+                # Logique de matching Robuste (Fonctionne SANS RapidFuzz)
+                t1 = clean_string(rec['title'])
+                t2 = clean_string(title)
+                
+                is_match = False
+                if FUZZ_AVAILABLE:
+                    if fuzz.ratio(t1, t2) > 50: is_match = True
+                else:
+                    # Fallback si rapidfuzz manque : vérification d'inclusion simple
+                    if t2 in t1 or t1 in t2: is_match = True
+                    
+                if is_match:
+                    return {'id': rec['id'], 'source': 'qobuz'}
+        except Exception as e:
+            logger.error(f"Resolve Qobuz error: {e}")
     
     # 2. Subsonic
     subs = fetch_subsonic_tracks(search_query, limit=1)
     if subs:
         return {'id': subs[0]['id'], 'source': 'subsonic'}
+    
     return None
 
 # --- ROUTES ---
