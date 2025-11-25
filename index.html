@@ -444,7 +444,13 @@
             setupMediaSession(nextTrack); fetchLyrics(nextTrack, nextTrack.performer ? nextTrack.performer.name : 'Artiste'); updateActiveCard();
             updateLikeButtonState();
             setTimeout(() => { if(isPlaying && currentTrackId === nextTrack.id) addToHistory(nextTrack); }, 10000);
-            if (index === tracks.length - 1) { triggerRadio(true); }
+            
+            // On ne déclenche plus la radio ici immédiatement, c'est géré par le pre-load ou le onended
+            // Mais on garde une sécurité si jamais
+            if (index === tracks.length - 1 && !isFetchingRadio) { 
+                // Petite sécurité si le preload n'a pas marché
+                setTimeout(() => { if(currentIndex === tracks.length -1) triggerRadio(true); }, 5000);
+            }
         }
 
         function performCrossfade(fadeOutAudio, fadeInAudio) { isFading = true; activeAudio = fadeInAudio; fadeInAudio.volume = 0; fadeOutAudio.volume = globalVolume; fadeInAudio.play().catch(e => {}); isPlaying = true; document.getElementById('playIcon').className = 'fas fa-pause'; const steps = 40; const intervalTime = (crossfadeDuration * 1000) / steps; let step = 0; fadeInterval = setInterval(() => { step++; const ratio = step / steps; fadeInAudio.volume = ratio * globalVolume; fadeOutAudio.volume = (1 - ratio) * globalVolume; if (step >= steps) { clearInterval(fadeInterval); fadeOutAudio.pause(); fadeOutAudio.currentTime = 0; fadeOutAudio.volume = 0; fadeInAudio.volume = globalVolume; isFading = false; } }, intervalTime); }
@@ -457,6 +463,15 @@
                 } 
             };
             audioObj.ontimeupdate = () => {
+                // GESTION DU PRELOAD RADIO
+                if (isRadioActive && currentIndex === tracks.length - 1 && !isFetchingRadio) {
+                     const rem = audioObj.duration - audioObj.currentTime;
+                     if (rem < 20 && rem > 0) { // On charge 20s avant la fin
+                         console.log("Preloading radio track...");
+                         triggerRadio(true);
+                     }
+                }
+
                 if (audioObj === activeAudio && isPlaying && !isFading && crossfadeDuration > 0 && !nextTrackTriggered) {
                     let remaining = audioObj.duration - audioObj.currentTime;
                     if (remaining <= crossfadeDuration && remaining > 0.5) { nextTrackTriggered = true; handleNext(); return; }
@@ -470,8 +485,9 @@
             audioObj.onended = () => { if(audioObj === activeAudio && !isFading && !nextTrackTriggered) handleNext(); };
             audioObj.onerror = () => {
                 if(audioObj === activeAudio) {
-                    showToast("Musique indisponible ou introuvable ⚠️");
-                    isPlaying = false; document.getElementById('playIcon').className = 'fas fa-play';
+                    console.error("Audio Error, trying to recover or skip...");
+                    // Tentative de récupération : on passe au suivant si erreur fatale
+                    if(isPlaying) setTimeout(handleNext, 1000);
                 }
             };
         }
@@ -490,12 +506,10 @@
             let artistHistory = [];
             
             // On regarde les 5 dernières pistes de la playlist (y compris l'actuelle)
-            // Cela fonctionne même si on passe les titres rapidement
             const startIndex = Math.max(0, currentIndex - 4);
             const recentTracks = tracks.slice(startIndex, currentIndex + 1);
             
             recentTracks.forEach(t => {
-                 // Sécurisation extraction nom artiste
                  let a = 'Inconnu';
                  if(t.performer && t.performer.name) a = t.performer.name;
                  else if(t.artist && t.artist.name) a = t.artist.name;
@@ -503,15 +517,12 @@
             });
 
             try {
-                // On utilise le séparateur | pour éviter de couper les noms comme "Tyler, The Creator"
                 const historyStr = encodeURIComponent(artistHistory.join('|'));
                 
                 const res = await fetch(`${API_BASE}/recommend?artist=${encodeURIComponent(artist)}&title=${encodeURIComponent(cur.title)}&current_id=${cur.id}&recent_artists=${historyStr}`);
                 const raw = await res.json();
                 if(raw && raw.id) {
                     let hd = ''; if(raw.source === 'subsonic') hd = `${API_BASE}/get_subsonic_cover/${raw.album.image.large}`; else hd = (raw.album.image.large||'').replace('_300','_600');
-                    
-                    // Normalisation artiste pour éviter crash frontend
                     if(!raw.performer) raw.performer = { name: raw.artist ? raw.artist.name : 'Artiste' };
                     
                     tracks.push({ ...raw, img: hd, type: 'track', isRadio: true });
@@ -522,13 +533,21 @@
                     const div = document.createElement('div'); div.className = 'track-card'; div.dataset.id = raw.id;
                     div.innerHTML = `<div class="badges-container"><div class="type-badge" style="background:var(--primary)">RADIO</div></div><img src="${hd}"><h3>${raw.title}</h3><p style="color:var(--primary)">${raw.performer.name}</p>`;
                     
-                    // UTILISATION DE L'INDEX CAPTURÉ
+                    // UTILISATION DE L'INDEX CAPTURÉ (CORRECTIF CLIC)
                     div.onclick = () => loadTrack(specificIndex); 
                     
                     document.getElementById('trackGrid').appendChild(div);
-                    if (isBackground) {} else { loadTrack(tracks.length - 1); setTimeout(() => div.scrollIntoView({behavior: "smooth", block: "center"}), 100); }
+                    if (isBackground) {
+                        console.log("Radio track preloaded:", raw.title);
+                    } else { 
+                        loadTrack(tracks.length - 1); 
+                        setTimeout(() => div.scrollIntoView({behavior: "smooth", block: "center"}), 100); 
+                    }
                 }
-            } catch(e) { if(!isBackground && currentIndex < tracks.length-1) loadTrack(currentIndex+1); } finally { isFetchingRadio = false; }
+            } catch(e) { 
+                console.error(e);
+                if(!isBackground && currentIndex < tracks.length-1) loadTrack(currentIndex+1); 
+            } finally { isFetchingRadio = false; }
         }
 
         function updateInterfaceInfo(t) {
