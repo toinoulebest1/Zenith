@@ -480,7 +480,12 @@ def recommend_tracks():
     original_title = request.args.get('title', '')
     
     recent_artists_str = request.args.get('recent_artists', '')
-    recent_artists_raw = recent_artists_str.split(',') if recent_artists_str else []
+    # SPLIT PAR PIPE (Robustesse) ou VIRGULE (Fallback)
+    if '|' in recent_artists_str:
+        recent_artists_raw = recent_artists_str.split('|')
+    else:
+        recent_artists_raw = recent_artists_str.split(',') if recent_artists_str else []
+        
     recent_artists = [clean_string(a) for a in recent_artists_raw if a]
     
     # QUOTA 2 SUR 5 POUR BAN

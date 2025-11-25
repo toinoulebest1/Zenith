@@ -486,24 +486,34 @@
             const cur = tracks[currentIndex]; 
             const artist = cur.performer ? cur.performer.name : cur.artist;
             
-            // --- ENVOI DE L'HISTORIQUE (CORRECTION) ---
+            // --- ENVOI DE L'HISTORIQUE DE PLAYLIST (CORRECTION V2) ---
             let artistHistory = [];
-            // On ajoute le titre actuel
-            artistHistory.push(artist);
             
-            // On ajoute les 4 derniers artistes de l'historique
-            for(let i=0; i<Math.min(history.length, 4); i++) {
-                const t = history[i];
-                const a = t.performer ? t.performer.name : (t.artist ? t.artist.name : 'Inconnu');
-                artistHistory.push(a);
-            }
+            // On regarde les 5 dernières pistes de la playlist (y compris l'actuelle)
+            // Cela fonctionne même si on passe les titres rapidement
+            const startIndex = Math.max(0, currentIndex - 4);
+            const recentTracks = tracks.slice(startIndex, currentIndex + 1);
+            
+            recentTracks.forEach(t => {
+                 // Sécurisation extraction nom artiste
+                 let a = 'Inconnu';
+                 if(t.performer && t.performer.name) a = t.performer.name;
+                 else if(t.artist && t.artist.name) a = t.artist.name;
+                 artistHistory.push(a);
+            });
 
             try {
-                // CORRECTION : On envoie 'recent_artists' au lieu de 'signatures' pour être compatible avec le nouveau backend
-                const res = await fetch(`${API_BASE}/recommend?artist=${encodeURIComponent(artist)}&title=${encodeURIComponent(cur.title)}&current_id=${cur.id}&recent_artists=${encodeURIComponent(artistHistory.join(','))}`);
+                // On utilise le séparateur | pour éviter de couper les noms comme "Tyler, The Creator"
+                const historyStr = encodeURIComponent(artistHistory.join('|'));
+                
+                const res = await fetch(`${API_BASE}/recommend?artist=${encodeURIComponent(artist)}&title=${encodeURIComponent(cur.title)}&current_id=${cur.id}&recent_artists=${historyStr}`);
                 const raw = await res.json();
                 if(raw && raw.id) {
                     let hd = ''; if(raw.source === 'subsonic') hd = `${API_BASE}/get_subsonic_cover/${raw.album.image.large}`; else hd = (raw.album.image.large||'').replace('_300','_600');
+                    
+                    // Normalisation artiste pour éviter crash frontend
+                    if(!raw.performer) raw.performer = { name: raw.artist ? raw.artist.name : 'Artiste' };
+                    
                     tracks.push({ ...raw, img: hd, type: 'track', isRadio: true });
                     const div = document.createElement('div'); div.className = 'track-card'; div.dataset.id = raw.id;
                     div.innerHTML = `<div class="badges-container"><div class="type-badge" style="background:var(--primary)">RADIO</div></div><img src="${hd}"><h3>${raw.title}</h3><p style="color:var(--primary)">${raw.performer.name}</p>`;
