@@ -515,9 +515,17 @@
                     if(!raw.performer) raw.performer = { name: raw.artist ? raw.artist.name : 'Artiste' };
                     
                     tracks.push({ ...raw, img: hd, type: 'track', isRadio: true });
+                    
+                    // CAPTURE DE L'INDEX FIXE AU MOMENT DE LA CRÉATION
+                    const specificIndex = tracks.length - 1;
+                    
                     const div = document.createElement('div'); div.className = 'track-card'; div.dataset.id = raw.id;
                     div.innerHTML = `<div class="badges-container"><div class="type-badge" style="background:var(--primary)">RADIO</div></div><img src="${hd}"><h3>${raw.title}</h3><p style="color:var(--primary)">${raw.performer.name}</p>`;
-                    div.onclick = () => loadTrack(tracks.length-1); document.getElementById('trackGrid').appendChild(div);
+                    
+                    // UTILISATION DE L'INDEX CAPTURÉ
+                    div.onclick = () => loadTrack(specificIndex); 
+                    
+                    document.getElementById('trackGrid').appendChild(div);
                     if (isBackground) {} else { loadTrack(tracks.length - 1); setTimeout(() => div.scrollIntoView({behavior: "smooth", block: "center"}), 100); }
                 }
             } catch(e) { if(!isBackground && currentIndex < tracks.length-1) loadTrack(currentIndex+1); } finally { isFetchingRadio = false; }
