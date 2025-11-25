@@ -242,7 +242,7 @@ def get_subsonic_track_details(track_id):
 # --- RECHERCHE RECOMMENDATIONS INTELLIGENTE (YT -> CHECK QOBUZ/SUBSONIC) ---
 def get_yt_recommendations(title, artist, banned_artists=set()):
     """
-    Algorithme Radio Amélioré AVEC LOGS DÉTAILLÉS
+    Algorithme Radio Amélioré avec filtre "Album" (Audio Only)
     """
     search_query = f'"{title}" "{artist}"'
     logger.info(f"📻 [RADIO START] Graine: '{title}' par '{artist}'")
@@ -600,10 +600,20 @@ def search_tracks():
     if search_type in ['track', 'all']:
         sigs = set()
         for t in qobuz_tracks:
-            sig = f"{clean_string(t['title'])}_{clean_string(t['performer']['name'])}"
+            # SECURISATION DU PERFORER (CORRECTIF CRASH)
+            artist_dict = t.get('performer') or t.get('artist') or {}
+            artist_name = artist_dict.get('name', 'Inconnu')
+            
+            # Normalisation pour le frontend
+            if 'performer' not in t or not t['performer']:
+                t['performer'] = {'name': artist_name}
+                
+            sig = f"{clean_string(t.get('title', ''))}_{clean_string(artist_name)}"
             sigs.add(sig); combined_tracks.append(t)
+            
         for t in subsonic_tracks:
-            sig = f"{clean_string(t['title'])}_{clean_string(t['performer']['name'])}"
+            artist_name = t.get('performer', {}).get('name', 'Inconnu')
+            sig = f"{clean_string(t.get('title', ''))}_{clean_string(artist_name)}"
             if sig not in sigs: combined_tracks.append(t)
 
     if search_type in ['album', 'all']:

@@ -116,17 +116,23 @@ def ms_to_lrc(ms):
     rem_seconds = seconds % 60
     return f"[{minutes:02d}:{rem_seconds:05.2f}]"
 
-# (Fonction désactivée/nettoyée car remplacée par le filtre Album)
 def is_garbage_content(title, artist):
-    # On garde uniquement les trucs vraiment "cassés" ou interviews, 
-    # mais on autorise remix, edit, sped up, etc.
+    """
+    Détecte si le contenu est de "basse qualité" ou indésirable (TV, Cover, Slowed, Remix, Live, etc.)
+    """
     t = title.lower()
+    a = artist.lower()
+    
     banned_terms = [
         "interview", "react", "reaction", "review", "analise", "explication", 
         "guitar hero", "synthesia", "tutorial", "tuto", "lesson"
     ]
+    
+    full_str = f"{t} {a}"
     for term in banned_terms:
-        if term in t: return True, term
+        if term in full_str:
+            return True, term
+            
     return False, None
 
 def fetch_yt_synced_lyrics(title, artist):
@@ -594,10 +600,20 @@ def search_tracks():
     if search_type in ['track', 'all']:
         sigs = set()
         for t in qobuz_tracks:
-            sig = f"{clean_string(t['title'])}_{clean_string(t['performer']['name'])}"
+            # SECURISATION DU PERFORER (CORRECTIF CRASH)
+            artist_dict = t.get('performer') or t.get('artist') or {}
+            artist_name = artist_dict.get('name', 'Inconnu')
+            
+            # Normalisation pour le frontend
+            if 'performer' not in t or not t['performer']:
+                t['performer'] = {'name': artist_name}
+                
+            sig = f"{clean_string(t.get('title', ''))}_{clean_string(artist_name)}"
             sigs.add(sig); combined_tracks.append(t)
+            
         for t in subsonic_tracks:
-            sig = f"{clean_string(t['title'])}_{clean_string(t['performer']['name'])}"
+            artist_name = t.get('performer', {}).get('name', 'Inconnu')
+            sig = f"{clean_string(t.get('title', ''))}_{clean_string(artist_name)}"
             if sig not in sigs: combined_tracks.append(t)
 
     if search_type in ['album', 'all']:
