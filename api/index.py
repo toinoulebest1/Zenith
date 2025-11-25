@@ -124,15 +124,8 @@ def is_garbage_content(title, artist):
     a = artist.lower()
     
     banned_terms = [
-        "the voice", "got talent", "x factor", "idol", "audition", "battle", "incroyable talent",
-        "c à vous", "tpmp", "quotidien", "taratata", "grand journal", "clash", "interview",
-        "cover", "reprise", "tribute", "hommage", "version guitare", "piano version",
-        "slowed", "reverb", "sped up", "nightcore", "chipmunk", "daycore", "bass boosted",
-        "remix", "mix", "mashup", "medley", "megamix", "dj ", "edit", "lofi", "type beat",
-        "react", "reaction", "review", "analise", "explication", "paroles", "lyrics", "letra",
-        "guitar hero", "synthesia", "tutorial", "tuto", "lesson", "backing track", "karaoke", "instrumental",
-        "8d audio", "3d audio",
-        "live at", "live in", "concert", "en live", "au zénith", "stade de france", "bercy"
+        "interview", "react", "reaction", "review", "analise", "explication", 
+        "guitar hero", "synthesia", "tutorial", "tuto", "lesson"
     ]
     
     full_str = f"{t} {a}"
@@ -296,15 +289,24 @@ def get_yt_recommendations(title, artist, banned_artists=set()):
                 artists = item.get('artists', [])
                 r_artist_name = artists[0]['name'] if artists else "Artiste inconnu"
                 
-                # LOGS DE REJET
+                # --- FILTRE 1 : LE CLÉ "ALBUM" ---
+                # C'est la méthode fiable pour virer les clips vidéos
+                if 'album' not in item or not item.get('album'):
+                    logger.info(f"🚫 [REJET] Pas d'album (Probablement un Clip): {r_title}")
+                    continue
+
+                # --- AUTRES FILTRES ---
                 if clean_string(r_artist_name) in banned_artists: 
                     logger.info(f"🚫 [REJET] Artiste banni: {r_artist_name}")
                     continue
                 if clean_string(r_title) == clean_string(title): 
                     logger.info(f"🚫 [REJET] Doublon titre: {r_title}")
                     continue
+                
+                # On a retiré le filtre is_garbage_content agressif (remix, edit, etc.)
+                # On garde juste un check minimal pour les interviews
                 is_bad, reason = is_garbage_content(r_title, r_artist_name)
-                if is_bad: 
+                if is_bad:
                     logger.info(f"🚫 [REJET] Contenu indésirable ({reason}): {r_title}")
                     continue
                 
