@@ -249,16 +249,10 @@ def get_subsonic_track_details(track_id):
 # --- RECHERCHE RECOMMENDATIONS INTELLIGENTE (YT -> CHECK QOBUZ/SUBSONIC) ---
 def get_yt_recommendations(title, artist, banned_artists=set()):
     """
-    Algorithme Radio Amélioré :
-    1. Récupère une liste de candidats depuis l'algo YouTube (Watch Playlist + Related).
-    2. Pour chaque candidat :
-       a. Vérifie s'il existe sur Qobuz ou Subsonic (try_resolve_track).
-       b. SI OUI : Renvoie la version Qobuz/Subsonic (Meilleure qualité + Image officielle).
-       c. SI NON : Passe au candidat suivant (car l'utilisateur veut prioriser Qobuz/Subsonic).
-    3. Si aucun candidat n'est trouvé sur les plateformes Hi-Res après X essais, renvoie None (Fallback Qobuz).
+    Algorithme Radio Amélioré AVEC LOGS DÉTAILLÉS
     """
     search_query = f'"{title}" "{artist}"'
-    logger.info(f"📻 Radio YT: Recherche graine '{search_query}'")
+    logger.info(f"📻 [RADIO START] Graine: '{title}' par '{artist}'")
     
     try:
         # 1. Graine
@@ -288,6 +282,8 @@ def get_yt_recommendations(title, artist, banned_artists=set()):
         # 3. Filtrage et Vérification Qobuz/Subsonic
         seen_ids = set()
         candidates = []
+        
+        logger.info(f"📥 [RADIO FETCH] {len(raw_candidates)} candidats bruts trouvés.")
 
         # Pré-filtrage rapide pour avoir une liste propre
         for item in raw_candidates:
@@ -300,22 +296,29 @@ def get_yt_recommendations(title, artist, banned_artists=set()):
                 artists = item.get('artists', [])
                 r_artist_name = artists[0]['name'] if artists else "Artiste inconnu"
                 
-                # Filtres de base
-                if clean_string(r_artist_name) in banned_artists: continue
-                if clean_string(r_title) == clean_string(title): continue
-                is_bad, _ = is_garbage_content(r_title, r_artist_name)
-                if is_bad: continue
+                # LOGS DE REJET
+                if clean_string(r_artist_name) in banned_artists: 
+                    logger.info(f"🚫 [REJET] Artiste banni: {r_artist_name}")
+                    continue
+                if clean_string(r_title) == clean_string(title): 
+                    logger.info(f"🚫 [REJET] Doublon titre: {r_title}")
+                    continue
+                is_bad, reason = is_garbage_content(r_title, r_artist_name)
+                if is_bad: 
+                    logger.info(f"🚫 [REJET] Contenu indésirable ({reason}): {r_title}")
+                    continue
                 
+                logger.info(f"✨ [CANDIDAT] Retenu: {r_title} - {r_artist_name}")
                 candidates.append({'title': r_title, 'artist': r_artist_name})
 
         # Mélange pour la variété
         random.shuffle(candidates)
         
-        # 4. BOUCLE DE VÉRIFICATION (Max 5 tentatives pour ne pas être trop lent)
-        max_tries = 5
+        # 4. BOUCLE DE VÉRIFICATION
+        max_tries = 10
         checked_count = 0
         
-        logger.info(f"🔍 Radio: Vérification de l'existence sur Qobuz/Subsonic pour {len(candidates)} candidats...")
+        logger.info(f"🔍 [RADIO CHECK] Vérification existence Qobuz/Subsonic...")
 
         for cand in candidates:
             if checked_count >= max_tries:
@@ -324,7 +327,7 @@ def get_yt_recommendations(title, artist, banned_artists=set()):
             c_title = cand['title']
             c_artist = cand['artist']
             
-            logger.info(f"👉 Test #{checked_count+1}: {c_title} - {c_artist}")
+            logger.info(f"🕵️ [RESOLVING] #{checked_count+1}: {c_title} - {c_artist}")
             
             # Appel à la fonction qui cherche sur Qobuz/Subsonic
             match = try_resolve_track(c_title, c_artist)
@@ -338,11 +341,10 @@ def get_yt_recommendations(title, artist, banned_artists=set()):
                         meta = client.get_track_meta(real_id)
                         meta['source'] = 'qobuz'
                         fix_qobuz_title(meta)
-                        # Pour s'assurer qu'on a l'image HD
                         if meta.get('album', {}).get('image', {}).get('large'):
                             meta['img'] = meta['album']['image']['large'].replace('_300', '_600')
                         
-                        logger.info(f"✅ TROUVÉ SUR QOBUZ: {meta['title']}")
+                        logger.info(f"✅ [SUCCESS] TROUVÉ SUR QOBUZ: {meta['title']}")
                         return meta
                     except Exception as e:
                         logger.error(f"Erreur fetch Qobuz meta: {e}")
@@ -351,17 +353,17 @@ def get_yt_recommendations(title, artist, banned_artists=set()):
                     try:
                         song = get_subsonic_track_details(real_id)
                         if song:
-                            logger.info(f"✅ TROUVÉ SUR SUBSONIC: {song['title']}")
+                            logger.info(f"✅ [SUCCESS] TROUVÉ SUR SUBSONIC: {song['title']}")
                             return song
                     except Exception as e:
                         logger.error(f"Erreur fetch Subsonic meta: {e}")
             else:
-                logger.info("❌ Non trouvé sur les plateformes Hi-Res. Suivant...")
+                logger.info("❌ [FAIL] Non trouvé sur les plateformes Hi-Res.")
 
             checked_count += 1
             
-        logger.warning("❌ Radio: Aucun candidat YouTube n'existe sur Qobuz/Subsonic après vérification.")
-        return None # On renvoie None pour déclencher le fallback Qobuz interne
+        logger.warning("❌ [RADIO FAIL] Aucun candidat YouTube n'existe sur Qobuz/Subsonic.")
+        return None 
 
     except Exception as e:
         logger.error(f"❌ Radio YT Error: {e}")
