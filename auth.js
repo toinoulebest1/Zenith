@@ -5,7 +5,8 @@ const SUPABASE_URL = 'https://mzxfcvzqxgslyopkkaej.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im16eGZjdnpxeGdzbHlvcGtrYWVqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM3NTg2ODAsImV4cCI6MjA3OTMzNDY4MH0.xUvrW-TmUBl6eQIxRWbdItkW9xPtsalFNo0ICY-6A_o';
 
 let supabaseClient = null;
-let hasSyncedSpotifySession = false; // Drapeau pour éviter les doubles sync
+let currentUserId = null; // Pour éviter les rechargements inutiles
+let hasSyncedSpotifySession = false; 
 
 function initAuth() {
     if (typeof window.supabase === 'undefined') {
@@ -15,13 +16,13 @@ function initAuth() {
     
     supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     
-    // Vérification des erreurs dans l'URL au retour d'OAuth
     checkUrlForErrors();
 
-    // Écouter les changements d'état (Connexion, Déconnexion)
+    // Écouter les changements d'état
     supabaseClient.auth.onAuthStateChange((event, session) => {
-        // On ignore les événements TOKEN_REFRESHED pour éviter de spammer la logique
         if (event === 'TOKEN_REFRESHED') return;
+        // On ignore aussi si c'est juste un changement de focus sans changement réel de session
+        if (event === 'SIGNED_IN' && session && session.user.id === currentUserId) return;
         
         console.log("Auth Event:", event);
         handleSession(session);
@@ -30,7 +31,7 @@ function initAuth() {
 
 function checkUrlForErrors() {
     const params = new URLSearchParams(window.location.search);
-    const hashParams = new URLSearchParams(window.location.hash.substring(1)); // Supprime le #
+    const hashParams = new URLSearchParams(window.location.hash.substring(1));
     
     const error = params.get('error') || hashParams.get('error');
     const errorDesc = params.get('error_description') || hashParams.get('error_description');
@@ -38,26 +39,14 @@ function checkUrlForErrors() {
 
     if (error) {
         console.error("Auth Error Detected:", error, errorDesc);
-        
         let userMessage = "Erreur de connexion.";
-        
-        // GESTION DES ERREURS SPOTIFY COMMUNES
         if (errorCode === 'provider_email_needs_verification' || (errorDesc && errorDesc.includes('Unverified email'))) {
-            userMessage = "⚠️ Email non vérifié chez Spotify. Consultez votre boîte mail (et les spams) pour valider votre compte Spotify.";
-        } 
-        else if (error === 'server_error' && errorDesc && errorDesc.includes('user profile')) {
-            userMessage = "⚠️ Erreur Spotify Dev : Avez-vous ajouté votre email dans 'User Management' sur le Dashboard Spotify ?";
-        }
-        else if (errorDesc) {
+            userMessage = "⚠️ Email non vérifié chez Spotify. Vérifiez vos spams.";
+        } else if (errorDesc) {
             userMessage = "⚠️ " + errorDesc.replace(/\+/g, ' ');
         }
-
-        // On attend un peu que l'UI soit chargée pour afficher le toast
         setTimeout(() => {
             if (typeof showToast === 'function') showToast(userMessage);
-            else alert(userMessage);
-            
-            // Nettoyage de l'URL pour ne pas réafficher l'erreur au refresh
             window.history.replaceState({}, document.title, window.location.pathname);
         }, 1000);
     }
@@ -75,33 +64,36 @@ function handleSession(session) {
             appLayout.classList.add('layout-visible');
         }
         
-        // CHARGEMENT DES DONNÉES UTILISATEUR
-        // On le fait avant la sync Spotify pour avoir une base propre
-        if (window.loadUserFavorites) {
-            window.loadUserFavorites();
-        }
-
-        // TENTATIVE DE SYNC SPOTIFY
-        // On ne le fait qu'une seule fois par session de page
-        if (!hasSyncedSpotifySession && session.provider_token && session.user && session.user.app_metadata.provider === 'spotify') {
-            hasSyncedSpotifySession = true; // On marque comme fait
+        const userId = session.user.id;
+        
+        // Si c'est un nouvel utilisateur ou première charge
+        if (userId !== currentUserId) {
+            currentUserId = userId;
             
-            syncSpotifyProfileData(session.user);
-            syncSpotifyFavorites(session.provider_token);
+            // CHARGEMENT DES DONNÉES (Favoris + Profil)
+            if (window.loadUserFavorites) {
+                window.loadUserFavorites();
+            }
+            updateUserProfile(session.user);
+            
+            // TENTATIVE DE SYNC SPOTIFY (Une seule fois par user)
+            if (session.user.app_metadata.provider === 'spotify' && !hasSyncedSpotifySession) {
+                hasSyncedSpotifySession = true;
+                syncSpotifyProfileData(session.user);
+                if (session.provider_token) syncSpotifyFavorites(session.provider_token);
+            }
         }
         
-        updateUserProfile(session.user);
     } else {
-        // Utilisateur déconnecté
+        // Déconnexion
+        currentUserId = null;
+        hasSyncedSpotifySession = false;
+        
         if (loginScreen) loginScreen.style.display = 'flex';
-        if (appLayout) {
-            appLayout.classList.remove('layout-visible');
-        }
-        hasSyncedSpotifySession = false; // Reset du flag
+        if (appLayout) appLayout.classList.remove('layout-visible');
     }
 }
 
-// Nouvelle fonction : Sync Avatar et Pseudo depuis Spotify
 async function syncSpotifyProfileData(user) {
     try {
         const { avatar_url, full_name, name, picture } = user.user_metadata;
@@ -116,10 +108,7 @@ async function syncSpotifyProfileData(user) {
             .eq('id', user.id)
             .single();
             
-        const updates = {
-            id: user.id,
-            updated_at: new Date()
-        };
+        const updates = { id: user.id, updated_at: new Date() };
         let hasChanges = false;
 
         if (displayName && (!currentProfile || !currentProfile.username || currentProfile.username === 'Anonyme' || currentProfile.username === user.email)) {
@@ -133,22 +122,15 @@ async function syncSpotifyProfileData(user) {
         }
 
         if (hasChanges) {
-            console.log("🔄 Syncing Profile from Spotify metadata...");
+            console.log("🔄 Syncing Profile from Spotify...");
             const { error } = await supabaseClient.from('profiles').upsert(updates);
-            
-            if (!error) {
-                if (window.loadProfile) window.loadProfile();
-                showToast("Profil synchronisé avec Spotify ! 🎧");
-            } else {
-                console.error("Profile update error:", error);
-            }
+            if (!error && window.loadProfile) window.loadProfile();
         }
     } catch (e) {
         console.error("Spotify Profile Sync Error:", e);
     }
 }
 
-// Fonction d'importation Favoris Spotify
 async function syncSpotifyFavorites(token) {
     console.log("🔄 Syncing Spotify Favorites...");
     try {
@@ -183,24 +165,13 @@ async function syncSpotifyFavorites(token) {
                      if(!exists) {
                          favorites.push(st);
                          newCount++;
+                         // Note: On pourrait aussi insérer en DB ici si besoin
                      }
                 });
                 
-                // Mettre à jour l'UI si on est sur la page favoris
-                const viewTitle = document.getElementById('viewTitle');
-                if(viewTitle && viewTitle.innerText.includes('Favoris')) {
-                    if(typeof showFavorites === 'function') showFavorites();
-                }
-                
-                // IMPORTANT: On force la mise à jour de l'état du bouton "Like" 
-                // au cas où le titre en cours faisait partie de l'import
-                if(typeof updateLikeButtonState === 'function') {
-                    updateLikeButtonState();
-                }
-                
                 if(newCount > 0) {
-                    console.log(`✅ ${newCount} nouveaux titres Spotify importés.`);
                     showToast(`✅ ${newCount} titres Spotify importés !`);
+                    if(typeof updateLikeButtonState === 'function') updateLikeButtonState();
                 }
             }
         }
@@ -211,103 +182,58 @@ async function syncSpotifyFavorites(token) {
 
 async function loginWithSpotify() {
     showAuthLoading(true);
-    const redirectUrl = window.location.origin; 
-    console.log("OAuth Redirect To:", redirectUrl);
-
     const { data, error } = await supabaseClient.auth.signInWithOAuth({
         provider: 'spotify',
-        options: {
-            scopes: 'user-library-read',
-            redirectTo: redirectUrl
-        }
+        options: { scopes: 'user-library-read', redirectTo: window.location.origin }
     });
-    
-    if (error) {
-        showAuthLoading(false);
-        showAuthError(error.message);
-    }
+    if (error) { showAuthLoading(false); showAuthError(error.message); }
 }
 
 async function login(email, password) {
     showAuthLoading(true);
-    const { data, error } = await supabaseClient.auth.signInWithPassword({
-        email: email,
-        password: password,
-    });
+    const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
     showAuthLoading(false);
-    
-    if (error) {
-        showAuthError(error.message);
-    }
+    if (error) showAuthError(error.message);
 }
 
 async function signup(email, password) {
-    const usernameInput = document.getElementById('username');
-    const username = usernameInput ? usernameInput.value.trim() : "";
-
-    if (!username) {
-        showAuthError("Merci de choisir un pseudo !");
-        return;
-    }
+    const username = document.getElementById('username')?.value.trim();
+    if (!username) return showAuthError("Merci de choisir un pseudo !");
 
     showAuthLoading(true);
-    
     const { data, error } = await supabaseClient.auth.signUp({
-        email: email,
-        password: password,
-        options: {
-            data: {
-                username: username
-            }
-        }
+        email, password, options: { data: { username } }
     });
-    
     showAuthLoading(false);
 
-    if (error) {
-        showAuthError(error.message);
-    } else {
-        if (data && data.user) {
-            try {
-                await supabaseClient.from('profiles').upsert({
-                    id: data.user.id,
-                    username: username,
-                    updated_at: new Date()
-                });
-            } catch (e) {
-                console.error("Erreur save profile:", e);
-            }
+    if (error) showAuthError(error.message);
+    else {
+        if (data?.user) {
+            try { await supabaseClient.from('profiles').upsert({ id: data.user.id, username, updated_at: new Date() }); } catch (e) {}
         }
-        showAuthError("Inscription réussie ! Vérifiez vos emails si nécessaire.", true);
+        showAuthError("Inscription réussie ! Vérifiez vos emails.", true);
     }
 }
 
 async function logout() {
-    const { error } = await supabaseClient.auth.signOut();
-    if (error) console.error('Error logging out:', error);
+    await supabaseClient.auth.signOut();
+    currentUserId = null;
+    window.location.reload();
 }
 
-// UI Helpers
 function showAuthError(msg, isSuccess = false) {
     const el = document.getElementById('authMessage');
-    if (el) {
-        el.innerText = msg;
-        el.style.color = isSuccess ? '#00d2ff' : '#ff0055';
-        el.style.opacity = 1;
-    }
+    if (el) { el.innerText = msg; el.style.color = isSuccess ? '#00d2ff' : '#ff0055'; el.style.opacity = 1; }
 }
 
 function showAuthLoading(isLoading) {
     const btn = document.getElementById('btnLoginAction');
     const spotifyBtn = document.getElementById('btnSpotifyAction');
-    
     if(btn) btn.innerText = isLoading ? '...' : (isLoginMode ? 'Se connecter' : "S'inscrire");
-    if(spotifyBtn && isLoading) spotifyBtn.style.opacity = 0.5;
+    if(spotifyBtn) spotifyBtn.style.opacity = isLoading ? 0.5 : 1;
 }
 
-function updateUserProfile(user) {
-    console.log("Logged in as:", user.email);
-}
+function updateUserProfile(user) { console.log("Logged in as:", user.email); }
 
 let isLoginMode = true;
 function toggleAuthMode() {
