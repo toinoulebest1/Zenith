@@ -110,7 +110,7 @@
     </div>
 
     <div id="introContainer" class="intro-container">
-        <div id="introText" class="intro-text">Début</div>
+        <div id="introText" class="intro-text">Début des paroles</div>
         <div class="intro-bar-bg"><div id="introBarFill" class="intro-bar-fill"></div></div>
     </div>
 
@@ -260,7 +260,7 @@
                 <div class="eq-band"><input type="range" class="eq-range" min="-12" max="12" value="0" data-freq="4000" oninput="updateEQ(3, this.value)"><span>4kHz</span></div>
                 <div class="eq-band"><input type="range" class="eq-range" min="-12" max="12" value="0" data-freq="14000" oninput="updateEQ(4, this.value)"><span>14kHz</span></div>
             </div>
-            <button class="limiter-btn active" id="limiterBtn" onclick="toggleLimiter()"><i class="fas fa-compress-arrows-alt"></i> NORMALISATEUR</button>
+            <button class="limiter-btn active" id="limiterBtn" onclick="toggleLimiter()"><i class="fas fa-compress-arrows-alt"></i> NORMALISATEUR / LIMITER</button>
             <button class="orbit-btn" id="orbitBtn" onclick="toggleOrbit()"><i class="fas fa-globe-americas"></i> 8D ORBIT (WORKLET)</button>
             <button class="karaoke-btn" id="karaokeBtn" onclick="toggleKaraoke()"><i class="fas fa-microphone-slash"></i> NO VOCAL (PHASE)</button>
             <button class="eq-reset-btn" onclick="resetEQ()">Réinitialiser EQ</button>
@@ -340,6 +340,11 @@
         let audioCtx, zenithNode, sourceA, sourceB;
         let isOrbitOn = false, isKaraokeOn = false, isLimiterOn = true;
         let eqFilters = []; const eqFrequencies = [60, 230, 910, 4000, 14000];
+        // Gains pour le crossfade manuel si Worklet indisponible
+        let gainNodeA, gainNodeB, masterGain; 
+        let orbitPanner, orbitOscillator, orbitTimeout; 
+        let karaokeNodes = { dry: null, wet: null };
+        let compressorNode, makeupGainNode;
 
         let userSettings = { limiter: true, crossfade: 0, magic: true };
         let magicEnabled = true; 
@@ -392,20 +397,37 @@
                 audioCtx = new AudioContext({ latencyHint: 'playback' });
                 
                 // 2. Chargement Module
-                await audioCtx.audioWorklet.addModule('zenith-processor.js');
-                
-                // 3. Création Nœud Zenith
-                zenithNode = new AudioWorkletNode(audioCtx, 'zenith-processor', {
-                    numberOfInputs: 2,
-                    numberOfOutputs: 1,
-                    parameterData: { volume: globalVolume }
-                });
+                try {
+                    await audioCtx.audioWorklet.addModule('zenith-processor.js');
+                    // 3. Création Nœud Zenith
+                    zenithNode = new AudioWorkletNode(audioCtx, 'zenith-processor', {
+                        numberOfInputs: 2,
+                        numberOfOutputs: 1,
+                        parameterData: { volume: globalVolume }
+                    });
+                } catch (e) {
+                    console.warn("Worklet not loaded, fallback to standard WebAudio", e);
+                    // Fallback si Worklet échoue (ex: fichier manquant)
+                    // ... (Logiciel de secours classique ici si besoin, mais on suppose que le fichier existe)
+                }
 
                 // 4. Connexions Sources
                 sourceA = audioCtx.createMediaElementSource(playerA);
                 sourceB = audioCtx.createMediaElementSource(playerB);
-                sourceA.connect(zenithNode, 0, 0);
-                sourceB.connect(zenithNode, 0, 1);
+                
+                if (zenithNode) {
+                     sourceA.connect(zenithNode, 0, 0);
+                     sourceB.connect(zenithNode, 0, 1);
+                } else {
+                     // Fallback Gain Nodes
+                     gainNodeA = audioCtx.createGain(); 
+                     gainNodeB = audioCtx.createGain();
+                     gainNodeA.gain.value=1; gainNodeB.gain.value=0;
+                     sourceA.connect(gainNodeA); sourceB.connect(gainNodeB);
+                     let preMix = audioCtx.createGain();
+                     gainNodeA.connect(preMix); gainNodeB.connect(preMix);
+                     zenithNode = preMix; // Mock pour enchainer
+                }
 
                 // 5. Chaîne d'effets (EQ + Compresseur)
                 let prevNode = zenithNode;
@@ -418,16 +440,28 @@
                     return filter;
                 });
 
-                const compressor = audioCtx.createDynamicsCompressor();
-                // Paramètres rapides pour éviter le clipping
-                compressor.threshold.value = -12;
-                compressor.knee.value = 30;
-                compressor.ratio.value = 12;
-                compressor.attack.value = 0.003; 
-                compressor.release.value = 0.25;
+                // LIMITER NATIF
+                compressorNode = audioCtx.createDynamicsCompressor();
+                compressorNode.threshold.setValueAtTime(-12, audioCtx.currentTime);
+                compressorNode.knee.setValueAtTime(30, audioCtx.currentTime);
+                compressorNode.ratio.setValueAtTime(12, audioCtx.currentTime);
+                compressorNode.attack.setValueAtTime(0.003, audioCtx.currentTime); 
+                compressorNode.release.setValueAtTime(0.25, audioCtx.currentTime);
+                
+                makeupGainNode = audioCtx.createGain();
+                makeupGainNode.gain.value = 1.0;
 
-                prevNode.connect(compressor);
-                compressor.connect(audioCtx.destination);
+                prevNode.connect(compressorNode);
+                compressorNode.connect(makeupGainNode);
+                
+                // MASTER VOLUME & ORBIT (Fallback si pas de Worklet ou Orbit natif)
+                masterGain = audioCtx.createGain();
+                masterGain.gain.value = globalVolume;
+                makeupGainNode.connect(masterGain);
+                
+                orbitPanner = audioCtx.createStereoPanner();
+                masterGain.connect(orbitPanner);
+                orbitPanner.connect(audioCtx.destination);
                 
                 console.log("🚀 Moteur Zenith AudioWorklet activé");
 
@@ -436,7 +470,7 @@
 
         // Helpers Audio
         function setWorkletParam(name, val, ramp=0.1) {
-            if(zenithNode) {
+            if(zenithNode && zenithNode.parameters && zenithNode.parameters.get(name)) {
                 const p = zenithNode.parameters.get(name);
                 p.cancelScheduledValues(audioCtx.currentTime);
                 p.linearRampToValueAtTime(val, audioCtx.currentTime + ramp);
@@ -444,9 +478,22 @@
         }
 
         function toggleLimiter(forceState = null, silent = false) {
-            // Le limiter est natif dans la chaîne, ici on ne fait qu'afficher l'état
+            if (!audioCtx) initAudioContext();
             if(forceState!==null) isLimiterOn = forceState; else isLimiterOn = !isLimiterOn;
             document.getElementById('limiterBtn').classList.toggle('active', isLimiterOn);
+            
+            if (compressorNode) {
+                const now = audioCtx.currentTime;
+                if (isLimiterOn) {
+                    compressorNode.threshold.setValueAtTime(-24, now);
+                    compressorNode.ratio.setValueAtTime(12, now);
+                    makeupGainNode.gain.setTargetAtTime(1.5, now, 0.1);
+                } else {
+                    compressorNode.threshold.setValueAtTime(0, now);
+                    compressorNode.ratio.setValueAtTime(1, now);
+                    makeupGainNode.gain.setTargetAtTime(1.0, now, 0.1);
+                }
+            }
             if(!silent) showToast(isLimiterOn ? "Normalisateur Activé" : "Désactivé");
         }
 
@@ -464,6 +511,20 @@
             document.getElementById('orbitBtn').classList.toggle('active', isOrbitOn);
             setWorkletParam('orbitEnabled', isOrbitOn ? 1 : 0);
             
+            // Fallback si worklet pas chargé
+            if (!zenithNode || !zenithNode.parameters || !zenithNode.parameters.get('orbitEnabled')) {
+                if (isOrbitOn) {
+                    if (!orbitOscillator) {
+                        orbitOscillator = audioCtx.createOscillator();
+                        orbitOscillator.frequency.value = 0.1;
+                        orbitOscillator.connect(orbitPanner.pan);
+                        orbitOscillator.start();
+                    }
+                } else {
+                    if (orbitOscillator) { orbitOscillator.stop(); orbitOscillator=null; orbitPanner.pan.value=0; }
+                }
+            }
+
             const orb = document.getElementById('orbitVisual');
             if (isOrbitOn) { orb.className = 'orbit-orb'; void orb.offsetWidth; orb.classList.add('center-stage', 'orbiting'); }
             else { orb.classList.remove('orbiting', 'center-stage'); }
@@ -478,11 +539,60 @@
 
         function setGlobalVolume(val) {
             globalVolume = parseFloat(val);
-            if (zenithNode) setWorkletParam('volume', globalVolume, 0.05);
+            if (zenithNode && zenithNode.parameters) setWorkletParam('volume', globalVolume, 0.05);
+            else if (masterGain) masterGain.gain.setTargetAtTime(globalVolume, audioCtx.currentTime, 0.05);
         }
         
         function updateEQ(i,v) { if(audioCtx && eqFilters[i]) eqFilters[i].gain.value = parseFloat(v); }
         function resetEQ() { document.querySelectorAll('.eq-range').forEach((s, i) => { s.value=0; updateEQ(i, 0); }); }
+
+        // --- GESTION DES PAROLES ET UI ---
+
+        async function fetchLyrics(t, a, l) {
+            try {
+                const r = await fetch(`${API_BASE}/lyrics?artist=${encodeURIComponent(a)}&title=${encodeURIComponent(t.title)}&album=${encodeURIComponent(l||'')}&duration=${t.duration}`);
+                const d = await r.json();
+                if (d.type === 'synced') {
+                    parseLRC(d.lyrics);
+                    renderSyncedLyrics();
+                } else if (d.type === 'plain') {
+                    document.getElementById('lyricsView').innerHTML = `<div style="white-space:pre-line;font-size:18px;line-height:1.6;">${d.lyrics}</div>`;
+                } else {
+                    document.getElementById('lyricsView').innerHTML = '<p style="margin-top:50px;">Non trouvé.</p>';
+                }
+            } catch (e) {
+                document.getElementById('lyricsView').innerHTML = '<p style="margin-top:50px;">Indisponible.</p>';
+            }
+        }
+
+        function parseLRC(l) {
+            if (!l) return;
+            try {
+                const ls = l.split('\n'), rx = /^\[(\d{2}):(\d{2})[.:](\d{2,3})\](.*)/;
+                lyricsData = [];
+                ls.forEach(x => {
+                    const m = x.match(rx);
+                    if (m) {
+                        const s = parseInt(m[1]) * 60 + parseInt(m[2]) + (m[3].length === 2 ? parseInt(m[3]) / 100 : parseInt(m[3]) / 1000);
+                        lyricsData.push({ time: s, text: m[4].trim() });
+                    }
+                });
+                if (lyricsData.length > 0) firstLineTime = lyricsData[0].time;
+            } catch (e) {}
+        }
+
+        function renderSyncedLyrics() {
+            if (!isLyricsMode || !lyricsData.length) return;
+            const c = document.getElementById('lyricsView');
+            c.innerHTML = '';
+            const s = document.createElement('div'); s.style.height = "40vh"; c.appendChild(s);
+            lyricsData.forEach((l, i) => {
+                const d = document.createElement('div'); d.className = 'lyric-line'; d.id = `line-${i}`; d.innerText = l.text;
+                d.onclick = () => { activeAudio.currentTime = l.time; play(); };
+                c.appendChild(d);
+            });
+            const b = document.createElement('div'); b.style.height = "40vh"; c.appendChild(b);
+        }
 
         function resetLyricsState() { lyricsData = []; firstLineTime = null; const view = document.getElementById('lyricsView'); view.innerHTML = '<div style="margin-top: 100px; color: #888; animation: pulseText 1.5s infinite;">Recherche des paroles...</div>'; document.getElementById('introContainer').style.display = 'none'; }
 
@@ -491,7 +601,6 @@
             if(index < 0 || index >= tracks.length) return;
             
             if (typeof ZenithCast !== 'undefined' && ZenithCast.isCasting) {
-                // Mode Cast (inchangé)
                 currentIndex = index; const t = tracks[index]; currentTrackId = t.id;
                 updateInterfaceInfo(t); updateActiveCard(); fetchLyrics(t, t.performer ? t.performer.name : 'Artiste');
                 ZenithCast.loadMedia(t); pause(); isPlaying = true; document.getElementById('playIcon').className = 'fas fa-pause';
@@ -532,18 +641,33 @@
             
             if(nextTrack.source !== 'yt_lazy') safePushState({}, "", `/?track=${nextTrack.id}&source=${nextTrack.source}`);
             
-            // CROSSFADE VIA WORKLET
+            // CROSSFADE
             if (autoPlay && isPlaying && crossfadeDuration > 0) {
                 nextAudio.play().catch(e=>{});
-                if (zenithNode) {
+                if (zenithNode && zenithNode.parameters && zenithNode.parameters.get('crossfade')) {
                     const param = zenithNode.parameters.get('crossfade');
                     param.cancelScheduledValues(audioCtx.currentTime);
                     param.setValueAtTime(param.value, audioCtx.currentTime);
                     param.linearRampToValueAtTime(targetCrossfade, audioCtx.currentTime + crossfadeDuration);
+                } else {
+                    // Fallback
+                    if(gainNodeA && gainNodeB) {
+                        const activeGain = (nextAudio===playerA) ? gainNodeA : gainNodeB;
+                        const inactiveGain = (prevAudio===playerA) ? gainNodeA : gainNodeB;
+                        activeGain.gain.linearRampToValueAtTime(1, audioCtx.currentTime + crossfadeDuration);
+                        inactiveGain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + crossfadeDuration);
+                    }
                 }
                 setTimeout(() => { prevAudio.pause(); prevAudio.currentTime = 0; }, crossfadeDuration * 1000);
             } else { 
-                if (zenithNode) zenithNode.parameters.get('crossfade').setValueAtTime(targetCrossfade, audioCtx.currentTime);
+                if (zenithNode && zenithNode.parameters && zenithNode.parameters.get('crossfade')) {
+                     zenithNode.parameters.get('crossfade').setValueAtTime(targetCrossfade, audioCtx.currentTime);
+                } else {
+                     if(gainNodeA && gainNodeB) {
+                        gainNodeA.gain.value = (nextAudio===playerA) ? 1 : 0;
+                        gainNodeB.gain.value = (nextAudio===playerB) ? 1 : 0;
+                     }
+                }
                 prevAudio.pause(); prevAudio.currentTime = 0; 
                 if(autoPlay) nextAudio.play().catch(e=>{});
             }
@@ -552,7 +676,9 @@
             isPlaying = true; 
             document.getElementById('playIcon').className = 'fas fa-pause';
             
-            setupMediaSession(nextTrack); fetchLyrics(nextTrack, nextTrack.performer ? nextTrack.performer.name : 'Artiste'); updateActiveCard();
+            setupMediaSession(nextTrack); 
+            fetchLyrics(nextTrack, nextTrack.performer ? nextTrack.performer.name : 'Artiste'); 
+            updateActiveCard();
             updateLikeButtonState();
             setTimeout(() => { if(isPlaying && currentTrackId === nextTrack.id) addToHistory(nextTrack); }, 10000);
             
