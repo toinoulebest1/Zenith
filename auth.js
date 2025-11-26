@@ -5,6 +5,7 @@ const SUPABASE_URL = 'https://mzxfcvzqxgslyopkkaej.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im16eGZjdnpxeGdzbHlvcGtrYWVqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM3NTg2ODAsImV4cCI6MjA3OTMzNDY4MH0.xUvrW-TmUBl6eQIxRWbdItkW9xPtsalFNo0ICY-6A_o';
 
 let supabaseClient = null;
+let hasSyncedSpotifySession = false; // Drapeau pour éviter les doubles sync
 
 function initAuth() {
     if (typeof window.supabase === 'undefined') {
@@ -19,6 +20,9 @@ function initAuth() {
 
     // Écouter les changements d'état (Connexion, Déconnexion)
     supabaseClient.auth.onAuthStateChange((event, session) => {
+        // On ignore les événements TOKEN_REFRESHED pour éviter de spammer la logique
+        if (event === 'TOKEN_REFRESHED') return;
+        
         console.log("Auth Event:", event);
         handleSession(session);
     });
@@ -71,18 +75,19 @@ function handleSession(session) {
             appLayout.classList.add('layout-visible');
         }
         
-        // TENTATIVE DE SYNC SPOTIFY (Favoris + Profil)
-        if (session.user && session.user.app_metadata.provider === 'spotify') {
-            syncSpotifyProfileData(session.user);
-            
-            if (session.provider_token) {
-                syncSpotifyFavorites(session.provider_token);
-            }
-        }
-        
         // CHARGEMENT DES DONNÉES UTILISATEUR
+        // On le fait avant la sync Spotify pour avoir une base propre
         if (window.loadUserFavorites) {
             window.loadUserFavorites();
+        }
+
+        // TENTATIVE DE SYNC SPOTIFY
+        // On ne le fait qu'une seule fois par session de page
+        if (!hasSyncedSpotifySession && session.provider_token && session.user && session.user.app_metadata.provider === 'spotify') {
+            hasSyncedSpotifySession = true; // On marque comme fait
+            
+            syncSpotifyProfileData(session.user);
+            syncSpotifyFavorites(session.provider_token);
         }
         
         updateUserProfile(session.user);
@@ -92,6 +97,7 @@ function handleSession(session) {
         if (appLayout) {
             appLayout.classList.remove('layout-visible');
         }
+        hasSyncedSpotifySession = false; // Reset du flag
     }
 }
 
@@ -100,13 +106,10 @@ async function syncSpotifyProfileData(user) {
     try {
         const { avatar_url, full_name, name, picture } = user.user_metadata;
         const displayName = full_name || name;
-        // Spotify renvoie parfois 'picture' ou 'avatar_url' via Supabase
         const avatar = avatar_url || picture; 
 
         if (!displayName && !avatar) return;
 
-        // On vérifie d'abord si le profil est déjà rempli pour ne pas écraser inutilement
-        // Mais si c'est la première connexion ou si c'est "Anonyme", on met à jour.
         const { data: currentProfile } = await supabaseClient
             .from('profiles')
             .select('username, avatar_url')
@@ -119,25 +122,21 @@ async function syncSpotifyProfileData(user) {
         };
         let hasChanges = false;
 
-        // Mise à jour du pseudo si vide ou générique
         if (displayName && (!currentProfile || !currentProfile.username || currentProfile.username === 'Anonyme' || currentProfile.username === user.email)) {
             updates.username = displayName;
             hasChanges = true;
         }
         
-        // Mise à jour de l'avatar si vide
         if (avatar && (!currentProfile || !currentProfile.avatar_url)) {
             updates.avatar_url = avatar;
             hasChanges = true;
         }
 
-        // Si on a détecté des infos utiles à sauvegarder
         if (hasChanges) {
             console.log("🔄 Syncing Profile from Spotify metadata...");
             const { error } = await supabaseClient.from('profiles').upsert(updates);
             
             if (!error) {
-                // Rafraîchir l'interface immédiatement si possible
                 if (window.loadProfile) window.loadProfile();
                 showToast("Profil synchronisé avec Spotify ! 🎧");
             } else {
@@ -187,9 +186,16 @@ async function syncSpotifyFavorites(token) {
                      }
                 });
                 
+                // Mettre à jour l'UI si on est sur la page favoris
                 const viewTitle = document.getElementById('viewTitle');
                 if(viewTitle && viewTitle.innerText.includes('Favoris')) {
                     if(typeof showFavorites === 'function') showFavorites();
+                }
+                
+                // IMPORTANT: On force la mise à jour de l'état du bouton "Like" 
+                // au cas où le titre en cours faisait partie de l'import
+                if(typeof updateLikeButtonState === 'function') {
+                    updateLikeButtonState();
                 }
                 
                 if(newCount > 0) {
