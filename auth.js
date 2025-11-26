@@ -109,14 +109,20 @@ async function syncSpotifyFavorites(token) {
 
 async function loginWithSpotify() {
     showAuthLoading(true);
+    
+    // redirectTo doit pointer vers VOTRE site, pas vers Supabase.
+    // window.location.origin détecte automatiquement si vous êtes en localhost ou en prod.
+    const redirectUrl = window.location.origin; 
+    console.log("OAuth Redirect To:", redirectUrl);
+
     const { data, error } = await supabaseClient.auth.signInWithOAuth({
         provider: 'spotify',
         options: {
             scopes: 'user-library-read', // Permission pour lire les titres likés
-            redirectTo: 'https://mzxfcvzqxgslyopkkaej.supabase.co/auth/v1/callback'
+            redirectTo: redirectUrl
         }
     });
-    // Note: showAuthLoading(false) ne sera probablement jamais appelé car on redirige
+    
     if (error) {
         showAuthLoading(false);
         showAuthError(error.message);
