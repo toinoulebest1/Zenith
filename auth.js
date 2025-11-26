@@ -37,10 +37,14 @@ function checkUrlForErrors() {
         
         let userMessage = "Erreur de connexion.";
         
+        // GESTION DES ERREURS SPOTIFY COMMUNES
         if (errorCode === 'provider_email_needs_verification') {
-            userMessage = "⚠️ Votre email Spotify n'est pas vérifié. Veuillez le valider sur le site de Spotify.";
-        } else if (errorDesc) {
-            // Nettoyage simple du message (remplace les + par des espaces)
+            userMessage = "⚠️ Votre email Spotify n'est pas vérifié. Validez-le sur spotify.com.";
+        } 
+        else if (error === 'server_error' && errorDesc && errorDesc.includes('user profile')) {
+            userMessage = "⚠️ Erreur Spotify Dev : Avez-vous ajouté votre email dans 'User Management' sur le Dashboard Spotify ?";
+        }
+        else if (errorDesc) {
             userMessage = "⚠️ " + errorDesc.replace(/\+/g, ' ');
         }
 
