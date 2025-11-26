@@ -805,7 +805,6 @@ def get_lyrics():
 def get_artist_bio(): return jsonify({})
 
 if __name__ == '__main__':
-    init_client()
     port = int(os.environ.get("PORT", 5000))
     print(f"🚀 Serveur local lancé sur le port {port}")
     app.run(host='0.0.0.0', port=port)
