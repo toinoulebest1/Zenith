@@ -804,6 +804,16 @@ def get_lyrics():
 @app.route('/artist_bio')
 def get_artist_bio(): return jsonify({})
 
+@app.route('/')
+def serve_index():
+    # Sert le fichier index.html à la racine
+    return send_from_directory('.', 'index.html')
+
+@app.route('/<path:path>')
+def serve_static(path):
+    # Sert tous les autres fichiers (css, js, images)
+    return send_from_directory('.', path)
+
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     print(f"🚀 Serveur local lancé sur le port {port}")
