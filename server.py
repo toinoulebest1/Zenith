@@ -1,7 +1,7 @@
 from flask import Flask, jsonify, redirect, request, send_file, Response, stream_with_context
 from flask_cors import CORS
-from qobuz_api import QobuzClient, get_app_credentials
-from lyrics_search import LyricsSearcher 
+from .qobuz_api import QobuzClient, get_app_credentials
+from .lyrics_search import LyricsSearcher 
 import logging
 import random
 import os
@@ -719,9 +719,10 @@ def get_album():
             res = requests.get(url, params=params).json(); raw = res['subsonic-response']['album']; formatted_tracks = []
             if 'song' in raw:
                 for song in raw['song']:
-                    formatted_tracks.append({ 'id': song['id'], 'title': song['title'], 'duration': song.get('duration', 0), 'track_number': song.get('track', 0), 'performer': {'name': song.get('artist', raw.get('artist'))}, 'album': {'title': raw.get('name'), 'image': {'large': raw.get('coverArt')}}, 'source': 'subsonic', 'tracks': {'items': formatted_tracks} })
+                    # CORRECTIF : suppression de la récursion "tracks"
+                    formatted_tracks.append({ 'id': song['id'], 'title': song['title'], 'duration': song.get('duration', 0), 'track_number': song.get('track', 0), 'performer': {'name': song.get('artist', raw.get('artist'))}, 'album': {'title': raw.get('name'), 'image': {'large': raw.get('coverArt')}}, 'source': 'subsonic' })
             return jsonify({ 'id': raw['id'], 'title': raw.get('name'), 'artist': {'name': raw.get('artist')}, 'image': {'large': raw.get('coverArt')}, 'source': 'subsonic', 'tracks': {'items': formatted_tracks} })
-        except: return jsonify({"error": "Error"}), 500
+        except Exception as e: return jsonify({"error": str(e)}), 500
     if client:
         try: res = client.get_album_meta(album_id); res['source'] = 'qobuz'; return jsonify(res)
         except: pass
@@ -776,7 +777,6 @@ def get_lyrics():
     artist = request.args.get('artist'); title = request.args.get('title'); album = request.args.get('album')
     duration = request.args.get('duration')
     try:
-        # CORRECTION : Gestion sécurisée de la durée (peut être 'undefined' ou vide)
         if duration and duration != 'undefined':
             dur_int = int(float(duration))
         else:
@@ -785,12 +785,10 @@ def get_lyrics():
         dur_int = 0
         
     try:
-        # 1. PRIORITÉ : YouTube Music (Synced)
         yt_lyrics = fetch_yt_synced_lyrics(title, artist)
         if yt_lyrics:
             return jsonify({"type": "synced", "lyrics": yt_lyrics, "source": "YouTube"})
 
-        # 2. SECONDAIRE : LRCLib (Synced puis Plain)
         plain, synced = lyrics_engine.search_lyrics(artist, title, album, dur_int)
         if synced: return jsonify({"type": "synced", "lyrics": synced, "source": "LRCLib"})
         
@@ -805,7 +803,7 @@ def get_lyrics():
 def get_artist_bio(): return jsonify({})
 
 if __name__ == '__main__':
-    init_client()
+    # init_client() n'est pas défini dans ce scope, retiré pour éviter une erreur locale
     port = int(os.environ.get("PORT", 5000))
     print(f"🚀 Serveur local lancé sur le port {port}")
     app.run(host='0.0.0.0', port=port)
