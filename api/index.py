@@ -1,7 +1,7 @@
 from flask import Flask, jsonify, redirect, request, send_file, Response, stream_with_context
 from flask_cors import CORS
-from .qobuz_api import QobuzClient, get_app_credentials
-from .lyrics_search import LyricsSearcher 
+from qobuz_api import QobuzClient, get_app_credentials
+from lyrics_search import LyricsSearcher 
 import logging
 import random
 import os
