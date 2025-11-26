@@ -806,13 +806,13 @@ def get_artist_bio(): return jsonify({})
 
 @app.route('/')
 def serve_index():
-    # Sert le fichier index.html à la racine
-    return send_from_directory('.', 'index.html')
+    # On sert index.html depuis le dossier racine calculé
+    return send_from_directory(PROJECT_ROOT, 'index.html')
 
 @app.route('/<path:path>')
 def serve_static(path):
-    # Sert tous les autres fichiers (css, js, images)
-    return send_from_directory('.', path)
+    # On sert les autres fichiers (css, js) depuis la racine
+    return send_from_directory(PROJECT_ROOT, path)
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
