@@ -15,11 +15,9 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;500;700;800&display=swap" rel="stylesheet">
     
-    <!-- FEUILLES DE STYLE -->
     <link rel="stylesheet" href="magic.css">
     <link rel="stylesheet" href="style.css">
 
-    <!-- SUPABASE CDN -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
     <script src="cast.js"></script>
@@ -326,8 +324,9 @@
         let currentIndex = 0;
         let currentGridItems = [];
 
-        const playerA = new Audio(); playerA.id = "playerA";
-        const playerB = new Audio(); playerB.id = "playerB";
+        // IMPORTANT: On garde preload="auto" pour la mise en mémoire tampon rapide
+        const playerA = new Audio(); playerA.id = "playerA"; playerA.preload = "auto";
+        const playerB = new Audio(); playerB.id = "playerB"; playerB.preload = "auto";
         document.body.appendChild(playerA);
         document.body.appendChild(playerB);
 
@@ -339,9 +338,16 @@
         let lyricsData = []; let firstLineTime = null; let currentTrackId = null;
         let fadeInterval = null; let isFetchingRadio = false;
 
-        let audioCtx; let sourceA, sourceB; let eqFilters = [];
+        let audioCtx; 
+        let sourceA, sourceB; 
+        let gainNodeA, gainNodeB; // NOUVEAU : GainNodes dédiés pour le crossfade
+        let masterGain = null;    // NOUVEAU : Master Volume
+        let eqFilters = [];
         const eqFrequencies = [60, 230, 910, 4000, 14000]; 
-        let isOrbitOn = false; let orbitPanner = null; let orbitInterval = null; let orbitAngle = 0; let orbitTimeout = null; 
+        let isOrbitOn = false; 
+        let orbitPanner = null; 
+        let orbitOscillator = null; // NOUVEAU : Oscillateur pour Orbit 8D (plus de setInterval)
+        let orbitTimeout = null; 
         let isKaraokeOn = false; 
         let karaokeNodes = { dry: null, wet: null, lowLp: null, highHp: null, midHp: null, midLp: null, compressor: null, midGain: null };
         let isLimiterOn = true; let compressorNode = null; let makeupGainNode = null;
@@ -387,18 +393,220 @@
         function showProfileSettings() { document.getElementById('trackView').style.display = 'none'; document.getElementById('artistView').style.display = 'none'; document.getElementById('lyricsView').style.display = 'none'; document.getElementById('blindTestView').style.display = 'none'; document.getElementById('allPlaylistsView').style.display = 'none'; document.getElementById('playlistView').style.display = 'none'; document.getElementById('searchBarContainer').style.display = 'none'; document.getElementById('profileView').style.display = 'block'; window.loadProfile(); }
         window.loadUserFavorites = async function() { if(!supabaseClient) return; const { data: { user } } = await supabaseClient.auth.getUser(); if(!user) return; const { data, error } = await supabaseClient.from('favorites').select('*'); if(data) { favorites = data.map(f => f.track_data); updateLikeButtonState(); } window.loadProfile(); };
         function safePushState(data, title, url) { try { if (window.history && window.history.pushState) { window.history.pushState(data, title, url); } } catch (e) { console.warn("History pushState blocked", e); } }
-        function initAudioContext() { if (audioCtx) return; try { const AudioContext = window.AudioContext || window.webkitAudioContext; audioCtx = new AudioContext(); sourceA = audioCtx.createMediaElementSource(playerA); sourceB = audioCtx.createMediaElementSource(playerB); let preMix = audioCtx.createGain(); preMix.gain.value = 1.0; sourceA.connect(preMix); sourceB.connect(preMix); karaokeNodes.dry = audioCtx.createGain(); karaokeNodes.dry.gain.value = 1; karaokeNodes.wet = audioCtx.createGain(); karaokeNodes.wet.gain.value = 0; karaokeNodes.lowLp = audioCtx.createBiquadFilter(); karaokeNodes.lowLp.type = 'lowpass'; karaokeNodes.lowLp.frequency.value = 250; karaokeNodes.highHp = audioCtx.createBiquadFilter(); karaokeNodes.highHp.type = 'highpass'; karaokeNodes.highHp.frequency.value = 4000; karaokeNodes.midHp = audioCtx.createBiquadFilter(); karaokeNodes.midHp.type = 'highpass'; karaokeNodes.midHp.frequency.value = 250; karaokeNodes.midLp = audioCtx.createBiquadFilter(); karaokeNodes.midLp.type = 'lowpass'; karaokeNodes.midLp.frequency.value = 4000; karaokeNodes.compressor = audioCtx.createDynamicsCompressor(); karaokeNodes.compressor.threshold.value = -30; karaokeNodes.compressor.knee.value = 5; karaokeNodes.compressor.ratio.value = 3; karaokeNodes.compressor.attack.value = 0.005; karaokeNodes.compressor.release.value = 0.08; karaokeNodes.midGain = audioCtx.createGain(); karaokeNodes.midGain.value = 0.25; preMix.connect(karaokeNodes.dry); preMix.connect(karaokeNodes.lowLp); karaokeNodes.lowLp.connect(karaokeNodes.wet); preMix.connect(karaokeNodes.highHp); karaokeNodes.highHp.connect(karaokeNodes.wet); preMix.connect(karaokeNodes.midHp); karaokeNodes.midHp.connect(karaokeNodes.midLp); karaokeNodes.midLp.connect(karaokeNodes.compressor); karaokeNodes.compressor.connect(karaokeNodes.midGain); karaokeNodes.midGain.connect(karaokeNodes.wet); let postKaraoke = audioCtx.createGain(); karaokeNodes.dry.connect(postKaraoke); karaokeNodes.wet.connect(postKaraoke); compressorNode = audioCtx.createDynamicsCompressor(); compressorNode.threshold.setValueAtTime(0, audioCtx.currentTime); compressorNode.knee.setValueAtTime(40, audioCtx.currentTime); compressorNode.ratio.setValueAtTime(1, audioCtx.currentTime); compressorNode.attack.setValueAtTime(0, audioCtx.currentTime); compressorNode.release.setValueAtTime(0.25, audioCtx.currentTime); makeupGainNode = audioCtx.createGain(); makeupGainNode.gain.value = 1.0; postKaraoke.connect(compressorNode); compressorNode.connect(makeupGainNode); let previousNode = makeupGainNode; if(isLimiterOn) toggleLimiter(true, true); eqFilters = []; eqFrequencies.forEach((freq, index) => { const filter = audioCtx.createBiquadFilter(); if (index === 0) filter.type = 'lowshelf'; else if (index === eqFrequencies.length - 1) filter.type = 'highshelf'; else filter.type = 'peaking'; filter.frequency.value = freq; filter.Q.value = 1.0; filter.gain.value = 0; previousNode.connect(filter); previousNode = filter; eqFilters.push(filter); }); orbitPanner = audioCtx.createStereoPanner(); orbitPanner.pan.value = 0; previousNode.connect(orbitPanner); orbitPanner.connect(audioCtx.destination); } catch(e) { console.error("Audio Context Error", e); } }
-        function toggleLimiter(forceState = null, silent = false) { if (!audioCtx) initAudioContext(); if (forceState !== null) isLimiterOn = forceState; else isLimiterOn = !isLimiterOn; const btn = document.getElementById('limiterBtn'); if (isLimiterOn) { btn.classList.add('active'); if(compressorNode) { compressorNode.threshold.value = -24; compressorNode.knee.value = 0; compressorNode.ratio.value = 12; compressorNode.attack.value = 0.003; compressorNode.release.value = 0.25; makeupGainNode.gain.value = 1.5; } if(!silent) showToast("Normalisateur Activé 🔊"); } else { btn.classList.remove('active'); if(compressorNode) { compressorNode.threshold.value = 0; compressorNode.ratio.value = 1; makeupGainNode.gain.value = 1.0; } if(!silent) showToast("Normalisateur Désactivé"); } }
-        function toggleKaraoke() { if (!audioCtx) initAudioContext(); isKaraokeOn = !isKaraokeOn; const btn = document.getElementById('karaokeBtn'); if (isKaraokeOn) { btn.classList.add('active'); if(karaokeNodes.dry) { karaokeNodes.dry.gain.value = 0; karaokeNodes.wet.gain.value = 1; } showToast("Mode Sans Voix Activé 🎤🚫"); } else { btn.classList.remove('active'); if(karaokeNodes.dry) { karaokeNodes.dry.gain.value = 1; karaokeNodes.wet.gain.value = 0; } showToast("Mode Normal"); } }
-        function toggleOrbit() { if (!audioCtx) initAudioContext(); isOrbitOn = !isOrbitOn; const btn = document.getElementById('orbitBtn'); const orb = document.getElementById('orbitVisual'); if (isOrbitOn) { btn.classList.add('active'); orb.className = 'orbit-orb'; void orb.offsetWidth; orb.classList.add('center-stage'); orbitTimeout = setTimeout(() => { if(isOrbitOn) orb.classList.add('orbiting'); }, 3000); startOrbitAnimation(); } else { btn.classList.remove('active'); orb.className = 'orbit-orb'; clearTimeout(orbitTimeout); stopOrbitAnimation(); } }
-        function startOrbitAnimation() { if (orbitInterval) clearInterval(orbitInterval); const speed = 0.02; orbitInterval = setInterval(() => { if(orbitPanner) { orbitAngle += speed; orbitPanner.pan.value = Math.sin(orbitAngle); } }, 50); }
-        function stopOrbitAnimation() { if (orbitInterval) clearInterval(orbitInterval); if (orbitPanner) { orbitPanner.pan.setValueAtTime(orbitPanner.pan.value, audioCtx.currentTime); orbitPanner.pan.linearRampToValueAtTime(0, audioCtx.currentTime + 0.5); } orbitAngle = 0; }
-        function updateCrossfade(val) { crossfadeDuration = parseInt(val); document.getElementById('xfadeVal').innerText = crossfadeDuration + "s"; document.getElementById('settingCrossfade').value = val; document.getElementById('settingCrossfadeVal').innerText = val + "s"; document.querySelector('.xfade-range').value = val; }
-        function setGlobalVolume(val) { globalVolume = parseFloat(val); if (!isFading) activeAudio.volume = globalVolume; const inactive = activeAudio === playerA ? playerB : playerA; if(!isFading) inactive.volume = 0; }
+        
+        // --- REFONTE AUDIO CONTEXT (ANTI-GLITCH) ---
+        function initAudioContext() { 
+            if (audioCtx) return; 
+            try { 
+                const AudioContext = window.AudioContext || window.webkitAudioContext; 
+                // 1. PAS DE SAMPLE RATE FORCÉ = Pas de ré-échantillonnage CPU = Moins de coupures
+                audioCtx = new AudioContext({
+                    latencyHint: 'playback'
+                }); 
+                
+                // 2. CONFIGURATION DOUBLE SOURCE AVEC GAIN NODES
+                sourceA = audioCtx.createMediaElementSource(playerA); 
+                gainNodeA = audioCtx.createGain(); // Contrôle volume piste A
+                sourceA.connect(gainNodeA);
+
+                sourceB = audioCtx.createMediaElementSource(playerB); 
+                gainNodeB = audioCtx.createGain(); // Contrôle volume piste B
+                sourceB.connect(gainNodeB);
+
+                // Initialisation des gains (A actif, B muet)
+                gainNodeA.gain.value = 1;
+                gainNodeB.gain.value = 0;
+
+                // Mixage avant effets
+                let preMix = audioCtx.createGain(); 
+                gainNodeA.connect(preMix); 
+                gainNodeB.connect(preMix); 
+                
+                // --- CHAINE KARAOKE ---
+                karaokeNodes.dry = audioCtx.createGain(); karaokeNodes.dry.gain.value = 1; 
+                karaokeNodes.wet = audioCtx.createGain(); karaokeNodes.wet.gain.value = 0; 
+                karaokeNodes.lowLp = audioCtx.createBiquadFilter(); karaokeNodes.lowLp.type = 'lowpass'; karaokeNodes.lowLp.frequency.value = 250; 
+                karaokeNodes.highHp = audioCtx.createBiquadFilter(); karaokeNodes.highHp.type = 'highpass'; karaokeNodes.highHp.frequency.value = 4000; 
+                karaokeNodes.midHp = audioCtx.createBiquadFilter(); karaokeNodes.midHp.type = 'highpass'; karaokeNodes.midHp.frequency.value = 250; 
+                karaokeNodes.midLp = audioCtx.createBiquadFilter(); karaokeNodes.midLp.type = 'lowpass'; karaokeNodes.midLp.frequency.value = 4000; 
+                karaokeNodes.compressor = audioCtx.createDynamicsCompressor(); 
+                karaokeNodes.compressor.threshold.value = -30; 
+                karaokeNodes.compressor.knee.value = 5; 
+                karaokeNodes.compressor.ratio.value = 3; 
+                karaokeNodes.compressor.attack.value = 0.005; 
+                karaokeNodes.compressor.release.value = 0.08; 
+                karaokeNodes.midGain = audioCtx.createGain(); karaokeNodes.midGain.value = 0.25; 
+                
+                preMix.connect(karaokeNodes.dry); 
+                preMix.connect(karaokeNodes.lowLp); karaokeNodes.lowLp.connect(karaokeNodes.wet); 
+                preMix.connect(karaokeNodes.highHp); karaokeNodes.highHp.connect(karaokeNodes.wet); 
+                preMix.connect(karaokeNodes.midHp); karaokeNodes.midHp.connect(karaokeNodes.midLp); karaokeNodes.midLp.connect(karaokeNodes.compressor); karaokeNodes.compressor.connect(karaokeNodes.midGain); karaokeNodes.midGain.connect(karaokeNodes.wet); 
+                
+                let postKaraoke = audioCtx.createGain(); 
+                karaokeNodes.dry.connect(postKaraoke); 
+                karaokeNodes.wet.connect(postKaraoke); 
+                
+                // --- LIMITER / NORMALISATEUR ---
+                compressorNode = audioCtx.createDynamicsCompressor(); 
+                compressorNode.threshold.setValueAtTime(0, audioCtx.currentTime); 
+                compressorNode.knee.setValueAtTime(40, audioCtx.currentTime); 
+                compressorNode.ratio.setValueAtTime(1, audioCtx.currentTime); 
+                // 3. ATTAQUE RAPIDE (0.003s) = Pas de saturation sur les kicks
+                compressorNode.attack.setValueAtTime(0.003, audioCtx.currentTime); 
+                compressorNode.release.setValueAtTime(0.25, audioCtx.currentTime); 
+                
+                makeupGainNode = audioCtx.createGain(); 
+                makeupGainNode.gain.value = 1.0; 
+                
+                postKaraoke.connect(compressorNode); 
+                compressorNode.connect(makeupGainNode); 
+                
+                let previousNode = makeupGainNode; 
+                if(isLimiterOn) toggleLimiter(true, true); 
+                
+                // --- EQ ---
+                eqFilters = []; 
+                eqFrequencies.forEach((freq, index) => { 
+                    const filter = audioCtx.createBiquadFilter(); 
+                    if (index === 0) filter.type = 'lowshelf'; 
+                    else if (index === eqFrequencies.length - 1) filter.type = 'highshelf'; 
+                    else filter.type = 'peaking'; 
+                    filter.frequency.value = freq; filter.Q.value = 1.0; filter.gain.value = 0; 
+                    previousNode.connect(filter); previousNode = filter; eqFilters.push(filter); 
+                }); 
+                
+                // --- MASTER VOLUME (AVANT ORBIT) ---
+                masterGain = audioCtx.createGain();
+                masterGain.gain.value = globalVolume;
+                previousNode.connect(masterGain);
+
+                // --- ORBIT 8D PANNER ---
+                orbitPanner = audioCtx.createStereoPanner(); 
+                orbitPanner.pan.value = 0; 
+                
+                masterGain.connect(orbitPanner); 
+                orbitPanner.connect(audioCtx.destination); 
+                
+            } catch(e) { console.error("Audio Context Error", e); } 
+        }
+
+        function toggleLimiter(forceState = null, silent = false) { 
+            if (!audioCtx) initAudioContext(); 
+            if (forceState !== null) isLimiterOn = forceState; else isLimiterOn = !isLimiterOn; 
+            const btn = document.getElementById('limiterBtn'); 
+            const now = audioCtx.currentTime;
+            const ramp = 0.05; // Transition douce
+
+            if (isLimiterOn) { 
+                btn.classList.add('active'); 
+                if(compressorNode) { 
+                    compressorNode.threshold.setValueAtTime(-24, now); 
+                    compressorNode.knee.setValueAtTime(0, now); 
+                    compressorNode.ratio.setValueAtTime(12, now); 
+                    compressorNode.attack.setValueAtTime(0.003, now); 
+                    compressorNode.release.setValueAtTime(0.25, now); 
+                    // Transition douce anti-clic
+                    makeupGainNode.gain.setTargetAtTime(1.5, now, ramp);
+                } 
+                if(!silent) showToast("Normalisateur Activé 🔊"); 
+            } else { 
+                btn.classList.remove('active'); 
+                if(compressorNode) { 
+                    compressorNode.threshold.setValueAtTime(0, now); 
+                    compressorNode.ratio.setValueAtTime(1, now); 
+                    makeupGainNode.gain.setTargetAtTime(1.0, now, ramp);
+                } 
+                if(!silent) showToast("Normalisateur Désactivé"); 
+            } 
+        }
+
+        function toggleKaraoke() { 
+            if (!audioCtx) initAudioContext(); 
+            isKaraokeOn = !isKaraokeOn; 
+            const btn = document.getElementById('karaokeBtn'); 
+            const now = audioCtx.currentTime;
+            const ramp = 0.05; 
+
+            if (isKaraokeOn) { 
+                btn.classList.add('active'); 
+                if(karaokeNodes.dry) { 
+                    // Transitions douces anti-clic
+                    karaokeNodes.dry.gain.setTargetAtTime(0, now, ramp); 
+                    karaokeNodes.wet.gain.setTargetAtTime(1, now, ramp); 
+                } 
+                showToast("Mode Sans Voix Activé 🎤🚫"); 
+            } else { 
+                btn.classList.remove('active'); 
+                if(karaokeNodes.dry) { 
+                    karaokeNodes.dry.gain.setTargetAtTime(1, now, ramp); 
+                    karaokeNodes.wet.gain.setTargetAtTime(0, now, ramp); 
+                } 
+                showToast("Mode Normal"); 
+            } 
+        }
+
+        function toggleOrbit() { 
+            if (!audioCtx) initAudioContext(); 
+            isOrbitOn = !isOrbitOn; 
+            const btn = document.getElementById('orbitBtn'); 
+            const orb = document.getElementById('orbitVisual'); 
+            
+            if (isOrbitOn) { 
+                btn.classList.add('active'); 
+                orb.className = 'orbit-orb'; 
+                void orb.offsetWidth; 
+                orb.classList.add('center-stage'); 
+                orbitTimeout = setTimeout(() => { if(isOrbitOn) orb.classList.add('orbiting'); }, 3000); 
+                
+                // NOUVEAU : UTILISATION OSCILLATEUR (Fonctionne en arrière-plan)
+                if (!orbitOscillator) {
+                    orbitOscillator = audioCtx.createOscillator();
+                    orbitOscillator.type = 'sine';
+                    orbitOscillator.frequency.value = 0.1; // Vitesse rotation (0.1Hz = 10s)
+                    orbitOscillator.connect(orbitPanner.pan);
+                    orbitOscillator.start();
+                }
+                
+            } else { 
+                btn.classList.remove('active'); 
+                orb.className = 'orbit-orb'; 
+                clearTimeout(orbitTimeout); 
+                
+                if (orbitOscillator) {
+                    orbitOscillator.stop();
+                    orbitOscillator.disconnect();
+                    orbitOscillator = null;
+                    orbitPanner.pan.value = 0; // Reset centre
+                }
+            } 
+        }
+
+        // Cette fonction n'est plus utilisée (remplacée par Oscillateur) mais gardée pour compatibilité
+        function startOrbitAnimation() {} 
+        function stopOrbitAnimation() {}
+
+        function updateCrossfade(val) { 
+            crossfadeDuration = parseInt(val); 
+            document.getElementById('xfadeVal').innerText = crossfadeDuration + "s"; 
+            document.getElementById('settingCrossfade').value = val; 
+            document.getElementById('settingCrossfadeVal').innerText = val + "s"; 
+            document.querySelector('.xfade-range').value = val; 
+        }
+
+        function setGlobalVolume(val) { 
+            globalVolume = parseFloat(val); 
+            // Contrôle du volume via Web Audio Master Gain (Smooth)
+            if (masterGain && audioCtx) {
+                masterGain.gain.setTargetAtTime(globalVolume, audioCtx.currentTime, 0.1);
+            }
+        }
+
         function resetLyricsState() { lyricsData = []; firstLineTime = null; const view = document.getElementById('lyricsView'); view.innerHTML = '<div style="margin-top: 100px; color: #888; animation: pulseText 1.5s infinite;">Recherche des paroles...</div>'; document.getElementById('introContainer').style.display = 'none'; }
 
         async function loadTrack(index, autoPlay = true) {
             if(index < 0 || index >= tracks.length) return;
+            
+            // CASTING
             if (typeof ZenithCast !== 'undefined' && ZenithCast.isCasting) {
                 currentIndex = index; const t = tracks[index]; currentTrackId = t.id;
                 updateInterfaceInfo(t); updateActiveCard(); fetchLyrics(t, t.performer ? t.performer.name : 'Artiste');
@@ -428,6 +636,10 @@
             else url = `${API_BASE}/stream/${nextTrack.id}`;
 
             nextAudio.src = url;
+            // IMPORTANT : On reset le volume HTML5 à 1 car on gère le volume via GainNodes
+            nextAudio.volume = 1; 
+            prevAudio.volume = 1;
+
             currentIndex = index; currentTrackId = nextTrack.id;
             updateInterfaceInfo(nextTrack);
             
@@ -437,23 +649,62 @@
             if (autoPlay && isPlaying && crossfadeDuration > 0) {
                 performCrossfade(prevAudio, nextAudio);
             } else { 
+                // Hard Cut via GainNodes
+                if (audioCtx) {
+                    const activeGain = (nextAudio === playerA) ? gainNodeA : gainNodeB;
+                    const inactiveGain = (nextAudio === playerA) ? gainNodeB : gainNodeA;
+                    const now = audioCtx.currentTime;
+                    activeGain.gain.setValueAtTime(1, now);
+                    inactiveGain.gain.setValueAtTime(0, now);
+                }
+
                 prevAudio.pause(); prevAudio.currentTime = 0; 
-                activeAudio = nextAudio; activeAudio.volume = globalVolume; activeAudio.currentTime = 0; 
+                activeAudio = nextAudio; 
+                activeAudio.currentTime = 0; 
                 if(autoPlay) play(); 
             }
             setupMediaSession(nextTrack); fetchLyrics(nextTrack, nextTrack.performer ? nextTrack.performer.name : 'Artiste'); updateActiveCard();
             updateLikeButtonState();
             setTimeout(() => { if(isPlaying && currentTrackId === nextTrack.id) addToHistory(nextTrack); }, 10000);
             
-            // On ne déclenche plus la radio ici immédiatement, c'est géré par le pre-load ou le onended
-            // Mais on garde une sécurité si jamais
             if (index === tracks.length - 1 && !isFetchingRadio) { 
-                // Petite sécurité si le preload n'a pas marché
                 setTimeout(() => { if(currentIndex === tracks.length -1) triggerRadio(true); }, 5000);
             }
         }
 
-        function performCrossfade(fadeOutAudio, fadeInAudio) { isFading = true; activeAudio = fadeInAudio; fadeInAudio.volume = 0; fadeOutAudio.volume = globalVolume; fadeInAudio.play().catch(e => {}); isPlaying = true; document.getElementById('playIcon').className = 'fas fa-pause'; const steps = 40; const intervalTime = (crossfadeDuration * 1000) / steps; let step = 0; fadeInterval = setInterval(() => { step++; const ratio = step / steps; fadeInAudio.volume = ratio * globalVolume; fadeOutAudio.volume = (1 - ratio) * globalVolume; if (step >= steps) { clearInterval(fadeInterval); fadeOutAudio.pause(); fadeOutAudio.currentTime = 0; fadeOutAudio.volume = 0; fadeInAudio.volume = globalVolume; isFading = false; } }, intervalTime); }
+        // NOUVEAU CROSSFADE BASÉ SUR WEB AUDIO (Fonctionne écran éteint)
+        function performCrossfade(fadeOutAudio, fadeInAudio) { 
+            isFading = true; 
+            activeAudio = fadeInAudio; 
+            
+            const fadeOutGain = (fadeOutAudio === playerA) ? gainNodeA : gainNodeB;
+            const fadeInGain = (fadeInAudio === playerA) ? gainNodeA : gainNodeB;
+            const now = audioCtx.currentTime;
+
+            // Annulation événements précédents
+            fadeOutGain.gain.cancelScheduledValues(now);
+            fadeInGain.gain.cancelScheduledValues(now);
+
+            // Valeurs initiales
+            fadeOutGain.gain.setValueAtTime(1, now);
+            fadeInGain.gain.setValueAtTime(0, now);
+
+            // Rampes audio (Hardware timing)
+            fadeOutGain.gain.linearRampToValueAtTime(0, now + crossfadeDuration);
+            fadeInGain.gain.linearRampToValueAtTime(1, now + crossfadeDuration);
+
+            fadeInAudio.play().catch(e => {}); 
+            isPlaying = true; 
+            document.getElementById('playIcon').className = 'fas fa-pause'; 
+
+            // Nettoyage différé (pas critique pour le son)
+            setTimeout(() => { 
+                fadeOutAudio.pause(); 
+                fadeOutAudio.currentTime = 0; 
+                isFading = false; 
+            }, crossfadeDuration * 1000 + 100); 
+        }
+
         function attachListeners(audioObj) {
             audioObj.onloadedmetadata = () => { 
                 if(audioObj === activeAudio) { 
@@ -463,10 +714,9 @@
                 } 
             };
             audioObj.ontimeupdate = () => {
-                // GESTION DU PRELOAD RADIO
                 if (isRadioActive && currentIndex === tracks.length - 1 && !isFetchingRadio) {
                      const rem = audioObj.duration - audioObj.currentTime;
-                     if (rem < 20 && rem > 0) { // On charge 20s avant la fin
+                     if (rem < 20 && rem > 0) {
                          console.log("Preloading radio track...");
                          triggerRadio(true);
                      }
@@ -486,7 +736,6 @@
             audioObj.onerror = () => {
                 if(audioObj === activeAudio) {
                     console.error("Audio Error, trying to recover or skip...");
-                    // Tentative de récupération : on passe au suivant si erreur fatale
                     if(isPlaying) setTimeout(handleNext, 1000);
                 }
             };
@@ -502,10 +751,7 @@
             const cur = tracks[currentIndex]; 
             const artist = cur.performer ? cur.performer.name : cur.artist;
             
-            // --- ENVOI DE L'HISTORIQUE DE PLAYLIST (CORRECTION V2) ---
             let artistHistory = [];
-            
-            // On regarde les 5 dernières pistes de la playlist (y compris l'actuelle)
             const startIndex = Math.max(0, currentIndex - 4);
             const recentTracks = tracks.slice(startIndex, currentIndex + 1);
             
@@ -518,7 +764,6 @@
 
             try {
                 const historyStr = encodeURIComponent(artistHistory.join('|'));
-                
                 const res = await fetch(`${API_BASE}/recommend?artist=${encodeURIComponent(artist)}&title=${encodeURIComponent(cur.title)}&current_id=${cur.id}&recent_artists=${historyStr}`);
                 const raw = await res.json();
                 if(raw && raw.id) {
@@ -527,13 +772,9 @@
                     
                     tracks.push({ ...raw, img: hd, type: 'track', isRadio: true });
                     
-                    // CAPTURE DE L'INDEX FIXE AU MOMENT DE LA CRÉATION
                     const specificIndex = tracks.length - 1;
-                    
                     const div = document.createElement('div'); div.className = 'track-card'; div.dataset.id = raw.id;
                     div.innerHTML = `<div class="badges-container"><div class="type-badge" style="background:var(--primary)">RADIO</div></div><img src="${hd}"><h3>${raw.title}</h3><p style="color:var(--primary)">${raw.performer.name}</p>`;
-                    
-                    // UTILISATION DE L'INDEX CAPTURÉ (CORRECTIF CLIC)
                     div.onclick = () => loadTrack(specificIndex); 
                     
                     document.getElementById('trackGrid').appendChild(div);
