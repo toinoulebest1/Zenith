@@ -14,6 +14,7 @@
 
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;500;700;800&display=swap" rel="stylesheet">
+    
     <link rel="stylesheet" href="magic.css">
     <link rel="stylesheet" href="style.css">
 
@@ -23,6 +24,7 @@
 </head>
 <body>
     <div id="ambientBg"></div> <div id="ambientOverlay"></div> <div id="orbitVisual" class="orbit-orb"></div>
+
     <div id="toast" class="toast">Action effectuée</div>
 
     <div id="loginScreen" class="login-screen">
@@ -38,10 +40,80 @@
             <div id="btnToggleMode" class="login-toggle" onclick="toggleAuthMode()">Pas de compte ? <b>Créer un compte</b></div>
         </div>
     </div>
-    
-    <div id="createPlaylistModal" class="login-screen" style="display:none; z-index:2000; background:rgba(0,0,0,0.8);"><div class="login-card"><h2 style="margin-bottom: 20px;">Nouvelle Playlist</h2><input type="text" id="newPlaylistName" class="login-input" placeholder="Nom..."><div style="display:flex;align-items:center;justify-content:space-between;margin:20px 0;width:100%;"><span>Publique</span><label class="switch"><input type="checkbox" id="newPlaylistPublic"><span class="slider round"></span></label></div><div style="display:flex;gap:10px;"><button class="login-btn" style="background:#333;color:white;" onclick="document.getElementById('createPlaylistModal').style.display='none'">Annuler</button><button class="login-btn" onclick="createPlaylist()">Créer</button></div></div></div>
-    <div id="addToPlaylistModal" class="login-screen" style="display:none; z-index:2000; background:rgba(0,0,0,0.8);"><div class="login-card"><h2 style="margin-bottom: 20px;">Ajouter à...</h2><div id="addToPlaylistList" style="max-height:300px; overflow-y:auto; width:100%;"></div><button class="login-btn" style="background:#333; color:white; margin-top:20px;" onclick="document.getElementById('addToPlaylistModal').style.display='none'">Annuler</button></div></div>
-    <div id="introContainer" class="intro-container"><div id="introText" class="intro-text">Début</div><div class="intro-bar-bg"><div id="introBarFill" class="intro-bar-fill"></div></div></div>
+
+    <div id="createPlaylistModal" class="login-screen" style="display:none; z-index:2000; background:rgba(0,0,0,0.8);">
+        <div class="login-card">
+            <h2 style="margin-bottom: 20px;">Nouvelle Playlist</h2>
+            <input type="text" id="newPlaylistName" class="login-input" placeholder="Nom de la playlist...">
+            <div style="display:flex; align-items:center; justify-content:space-between; margin:20px 0; text-align:left; width:100%;">
+                <span>Publique (visible par tous)</span>
+                <label class="switch"><input type="checkbox" id="newPlaylistPublic"><span class="slider round"></span></label>
+            </div>
+            <div style="display:flex; gap:10px;">
+                <button class="login-btn" style="background:#333; color:white;" onclick="closeCreatePlaylistModal()">Annuler</button>
+                <button class="login-btn" onclick="createPlaylist()">Créer</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="editPlaylistModal" class="login-screen" style="display:none; z-index:2000; background:rgba(0,0,0,0.8);">
+        <div class="login-card">
+            <h2 style="margin-bottom: 20px;">Modifier Playlist</h2>
+            <input type="text" id="editPlaylistName" class="login-input" placeholder="Nom de la playlist...">
+            <div style="display:flex; align-items:center; justify-content:space-between; margin:20px 0; text-align:left; width:100%;">
+                <span>Publique</span>
+                <label class="switch"><input type="checkbox" id="editPlaylistPublic"><span class="slider round"></span></label>
+            </div>
+            <div style="display:flex; gap:10px;">
+                <button class="login-btn" style="background:#333; color:white;" onclick="closeEditPlaylistModal()">Annuler</button>
+                <button class="login-btn" onclick="savePlaylistEdits()">Sauvegarder</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="addToPlaylistModal" class="login-screen" style="display:none; z-index:2000; background:rgba(0,0,0,0.8);">
+        <div class="login-card">
+            <h2 style="margin-bottom: 20px;">Ajouter à...</h2>
+            <div id="addToPlaylistList" style="max-height:300px; overflow-y:auto; width:100%;"></div>
+            <button class="login-btn" style="background:#333; color:white; margin-top:20px;" onclick="closeAddToPlaylistModal()">Annuler</button>
+        </div>
+    </div>
+
+    <div id="partyModal" class="login-screen" style="display:none; z-index:2000; background:rgba(0,0,0,0.8);">
+        <div class="login-card" style="height: 80vh; justify-content: flex-start;">
+            <h2 style="margin-bottom: 10px;">Party Mode 🎉</h2>
+            <div id="partySetupContainer">
+                <p style="color:#ccc; margin-bottom:20px;">Écoutez de la musique en synchro avec vos amis.</p>
+                <button class="login-btn" onclick="Party.createRoom()">Créer une Room</button>
+                <div style="margin:15px 0; color:#555;">- OU -</div>
+                <input type="text" id="partyJoinCode" class="login-input" placeholder="Code de la room (ex: A4Z9)" style="text-transform:uppercase;">
+                <button class="login-btn" style="background:#333; color:white; margin-top:10px;" onclick="Party.joinRoom(document.getElementById('partyJoinCode').value)">Rejoindre</button>
+            </div>
+            <div id="partyActiveContainer" style="display:none;">
+                <div style="display:flex; justify-content:space-between; align-items:center; width:100%; margin-bottom:10px;">
+                    <div style="text-align:left;">
+                        <span style="font-size:10px; color:#888;">ROOM</span>
+                        <div id="partyCodeDisplay" style="font-size:20px; font-weight:800; color:var(--primary); letter-spacing:2px;">ABCD</div>
+                    </div>
+                    <div>
+                         <button class="action-btn-mini" onclick="Party.copyLink()" title="Copier lien"><i class="fas fa-link"></i></button>
+                         <button class="action-btn-mini" style="color:#ff0055;" onclick="Party.leaveRoom()" title="Quitter"><i class="fas fa-power-off"></i></button>
+                    </div>
+                </div>
+                <div class="chat-box-container" id="partyChatList"></div>
+                <div class="chat-input-area">
+                    <input type="text" id="partyChatInput" class="chat-input" placeholder="Votre message..." onkeypress="if(event.key==='Enter') Party.sendChat()">
+                    <button class="chat-send-btn" onclick="Party.sendChat()"><i class="fas fa-paper-plane"></i></button>
+                </div>
+            </div>
+            <button class="login-btn" style="background:transparent; color:#888; margin-top:10px; border:1px solid #444; width:auto; align-self:center; padding:10px 30px;" onclick="Party.closeModal()">Fermer</button>
+        </div>
+    </div>
+
+    <div id="introContainer" class="intro-container">
+        <div id="introText" class="intro-text">Début des paroles</div>
+        <div class="intro-bar-bg"><div id="introBarFill" class="intro-bar-fill"></div></div>
+    </div>
 
     <div class="app-layout">
         <nav class="sidebar">
@@ -50,79 +122,164 @@
             <div class="nav-item" onclick="showFavorites()" title="Favoris"><i class="fas fa-heart"></i></div>
             <div class="nav-item" onclick="showHistory()" title="Historique"><i class="fas fa-history"></i></div>
             <div class="nav-item" onclick="showPlaylists()" title="Mes Playlists"><i class="fas fa-list"></i></div>
-            <div class="nav-item" onclick="showWeeklyTop()" title="Top 10"><i class="fas fa-trophy"></i></div>
-            <div class="nav-item lyrics-btn" onclick="toggleLyrics()" title="Paroles"><i class="fas fa-microphone-alt"></i></div>
+            <div class="nav-item" onclick="showWeeklyTop()" title="Top 10 Semaine"><i class="fas fa-trophy"></i></div>
+            <div class="nav-item lyrics-btn" onclick="toggleLyrics()" title="Paroles (V)"><i class="fas fa-microphone-alt"></i></div>
             <div class="nav-item" onclick="startBlindTest()" title="Blind Test"><i class="fas fa-gamepad"></i></div>
-            <div class="nav-item" id="btnPartyMenu" onclick="Party.openModal()" title="Party Mode"><i class="fas fa-users"></i><div id="partyBadge" class="nav-badge">0</div></div>
+            <div class="nav-item" id="btnPartyMenu" onclick="Party.openModal()" title="Party Mode">
+                <i class="fas fa-users"></i>
+                <div id="partyBadge" class="nav-badge">0</div>
+            </div>
             <div class="nav-item" onclick="toggleEQ()" title="Audio FX"><i class="fas fa-sliders-h"></i></div>
-            <div class="nav-item" onclick="showProfileSettings()" title="Profil"><i class="fas fa-user"></i></div>
-            <div class="nav-item" onclick="ZenithCast.triggerMenu()" title="Cast"><i class="fab fa-chromecast" id="castBtnIcon"></i></div>
+            <div class="nav-item" onclick="showProfileSettings()" title="Mon Compte"><i class="fas fa-user"></i></div>
+            <div class="nav-item" onclick="ZenithCast.triggerMenu()" title="Caster sur TV"><i class="fab fa-chromecast" id="castBtnIcon"></i></div>
             <div class="nav-item" onclick="logout()" title="Déconnexion" style="margin-top: auto;"><i class="fas fa-sign-out-alt"></i></div>
         </nav>
 
         <main class="main-feed">
             <div class="search-container" id="searchBarContainer">
-                <select id="searchType" class="search-select"><option value="all">Tout</option><option value="track">Titres</option><option value="album">Albums</option><option value="playlist">Playlists</option></select>
+                <select id="searchType" class="search-select">
+                    <option value="all">Tout</option>
+                    <option value="track">Titres</option>
+                    <option value="album">Albums</option>
+                    <option value="playlist">Playlists</option> 
+                </select>
                 <input type="text" id="searchInput" class="search-input" placeholder="Rechercher...">
                 <button class="search-btn" id="btnSearch" onclick="performSearch()">GO</button>
             </div>
+
             <div class="track-view" id="trackView">
-                <div class="header-controls"><button class="back-btn-main" onclick="goBack()"><i class="fas fa-arrow-left"></i></button><h2 id="viewTitle" style="font-size:1.2rem;opacity:0.8;margin:0;">Accueil</h2></div>
+                <div class="header-controls">
+                    <button class="back-btn-main" onclick="goBack()" title="Retour"><i class="fas fa-arrow-left"></i></button>
+                    <h2 id="viewTitle" style="font-size: 1.2rem; opacity: 0.8; margin:0;">Accueil</h2>
+                </div>
                 <div class="bento-grid" id="trackGrid" style="margin-top: 20px;"></div>
             </div>
-            <div class="track-view" id="allPlaylistsView" style="display:none;"><div class="header-controls"><button class="back-btn-main" onclick="goHome()"><i class="fas fa-arrow-left"></i></button><h2>Mes Playlists</h2></div><div class="bento-grid" id="allPlaylistsGrid" style="margin-top:20px;"></div></div>
-            <div class="track-view" id="playlistView" style="display:none;"><div class="header-controls"><button class="back-btn-main" onclick="goBack()"><i class="fas fa-arrow-left"></i></button><h2 id="playlistTitle">Ma Playlist</h2></div><div class="bento-grid" id="playlistGrid" style="margin-top:20px;"></div></div>
-            <div class="artist-view" id="artistView"><div class="artist-header-content"><img id="artistHeaderBg" class="artist-header-bg"><img id="artistProfileImg" class="artist-profile-img" src="https://via.placeholder.com/200"><div class="artist-info"><h1 id="artistProfileName" class="artist-name-large">Artiste</h1><div id="artistFans" class="artist-fans-badge"><i class="fas fa-users"></i> 0</div><p id="artistProfileBio" class="artist-bio" onclick="this.classList.toggle('expanded')">...</p></div></div><div class="section-title">Top Titres</div><div class="bento-grid" id="artistTopTracks"></div></div>
-            <div class="lyrics-view" id="lyricsView" style="display:none;"></div>
-            <div class="lyrics-view" id="blindTestView" style="display:none;"></div>
-            <div class="profile-view" id="profileView" style="display:none;">
+
+            <div class="track-view" id="allPlaylistsView" style="display:none;">
+                <div class="header-controls">
+                    <button class="back-btn-main" onclick="goHome()" title="Retour"><i class="fas fa-arrow-left"></i></button>
+                    <h2 style="font-size: 1.2rem; margin:0;">Mes Playlists</h2>
+                </div>
+                <div class="bento-grid" id="allPlaylistsGrid" style="margin-top: 20px;"></div>
+            </div>
+
+            <div class="track-view" id="playlistView" style="display:none;">
+                <div class="header-controls">
+                    <button class="back-btn-main" onclick="goBack()" title="Retour"><i class="fas fa-arrow-left"></i></button>
+                    <h2 id="playlistTitle" style="font-size: 1.2rem; margin:0;">Ma Playlist</h2>
+                </div>
+                <div class="bento-grid" id="playlistGrid" style="margin-top: 20px;"></div>
+            </div>
+
+            <div class="artist-view" id="artistView">
+                <div class="artist-header-content">
+                    <img id="artistHeaderBg" class="artist-header-bg">
+                    <img id="artistProfileImg" class="artist-profile-img" src="https://via.placeholder.com/200">
+                    <div class="artist-info">
+                        <h1 id="artistProfileName" class="artist-name-large">Artiste</h1>
+                        <div id="artistFans" class="artist-fans-badge"><i class="fas fa-users"></i> 0 fans</div>
+                        <p id="artistProfileBio" class="artist-bio" onclick="this.classList.toggle('expanded')">Chargement...</p>
+                    </div>
+                </div>
+                <div class="section-title"><i class="fas fa-star"></i> Top Titres</div>
+                <div class="bento-grid" id="artistTopTracks"></div>
+            </div>
+
+            <div class="lyrics-view" id="lyricsView">
+                <div style="margin-top: 100px; color: #555;">Paroles.</div>
+            </div>
+
+            <div class="lyrics-view" id="blindTestView" style="display: none;"></div>
+
+            <div class="profile-view" id="profileView">
                 <div class="profile-container">
-                    <h2>Mon Profil</h2>
-                    <div class="profile-avatar-wrapper" onclick="triggerAvatarUpload()"><img src="https://via.placeholder.com/150" id="profileAvatarPreview" class="profile-avatar"><div class="profile-avatar-overlay"><i class="fas fa-camera"></i></div><input type="file" id="profileAvatarInput" accept="image/*" style="display:none;"></div>
-                    <div class="form-group"><label class="form-label">Pseudo</label><input type="text" id="profileUsername" class="form-input"></div>
-                    <button class="save-btn" id="btnSaveProfile" onclick="updateProfile()">Enregistrer</button>
-                    <hr style="border:0;border-top:1px solid rgba(255,255,255,0.1);margin:30px 0;">
-                    <h3>Audio</h3>
-                    <div class="form-group" style="display:flex;justify-content:space-between;"><label class="form-label">Normalisateur</label><label class="switch"><input type="checkbox" id="settingLimiter" onchange="changeSetting('limiter',this.checked)"><span class="slider round"></span></label></div>
-                    <div class="form-group"><label class="form-label">Crossfade (sec)</label><input type="range" class="settings-slider" id="settingCrossfade" min="0" max="12" step="1" oninput="changeSetting('crossfade',this.value)"><span id="settingCrossfadeVal" style="float:right;color:var(--primary)">0s</span></div>
-                    <h3>Apparence</h3>
-                    <div class="form-group" style="display:flex;justify-content:space-between;"><label class="form-label">Effets Magiques</label><label class="switch"><input type="checkbox" id="settingMagic" onchange="changeSetting('magic',this.checked)"><span class="slider round"></span></label></div>
+                    <h2 style="margin-bottom: 30px; font-size: 24px;">Mon Profil</h2>
+                    <div class="profile-avatar-wrapper" onclick="triggerAvatarUpload()">
+                        <img src="https://via.placeholder.com/150" id="profileAvatarPreview" class="profile-avatar">
+                        <div class="profile-avatar-overlay"><i class="fas fa-camera"></i></div>
+                        <input type="file" id="profileAvatarInput" accept="image/*" style="display: none;">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Nom d'utilisateur</label>
+                        <input type="text" id="profileUsername" class="form-input" placeholder="Votre pseudo">
+                    </div>
+                    <button class="save-btn" id="btnSaveProfile" onclick="updateProfile()">Enregistrer les modifications</button>
+                    <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 30px 0;">
+                    <h3 style="margin-bottom: 20px; text-align: left;">Audio</h3>
+                    <div class="form-group" style="display: flex; justify-content: space-between; align-items: center;">
+                        <label class="form-label" style="margin:0;">Normalisateur actif au démarrage</label>
+                        <label class="switch"><input type="checkbox" id="settingLimiter" onchange="changeSetting('limiter', this.checked)"><span class="slider round"></span></label>
+                    </div>
+                    <div class="form-group">
+                        <div style="display: flex; justify-content: space-between;">
+                            <label class="form-label">Durée Crossfade par défaut</label>
+                            <span id="settingCrossfadeVal" style="color:var(--primary)">0s</span>
+                        </div>
+                        <input type="range" class="settings-slider" id="settingCrossfade" min="0" max="12" step="1" oninput="changeSetting('crossfade', this.value)">
+                    </div>
+                    <h3 style="margin-bottom: 20px; text-align: left; margin-top: 30px;">Apparence</h3>
+                    <div class="form-group" style="display: flex; justify-content: space-between; align-items: center;">
+                        <label class="form-label" style="margin:0;">Effets Magiques (Thèmes)</label>
+                        <label class="switch"><input type="checkbox" id="settingMagic" onchange="changeSetting('magic', this.checked)"><span class="slider round"></span></label>
+                    </div>
+                    <div class="form-group" style="margin-top:30px; text-align:left;">
+                         <p style="color:#888; font-size:12px; margin-bottom:10px;">Raccourcis Clavier</p>
+                         <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; font-size:12px; color:#ccc;">
+                             <div>Espace : Lecture/Pause</div>
+                             <div>Flèches ⬅️ / ➡️ : -/+ 5 sec</div>
+                             <div>Flèches ⬆️ / ⬇️ : Volume</div>
+                             <div>F : Mode Zen</div>
+                         </div>
+                    </div>
                 </div>
             </div>
         </main>
 
         <aside class="right-panel">
-            <div class="xl-image-wrapper"><div id="xlBadge" class="xl-badge smooth-fade">HI-RES</div><img src="https://via.placeholder.com/600" id="xlArt" class="album-art-xl smooth-fade"></div>
-            <h2 id="xlTitle" class="smooth-fade" style="font-size:1.2rem;margin-bottom:5px;">Prêt</h2>
-            <p id="xlArtist" class="smooth-fade" style="color:var(--primary);">...</p>
-            <div class="wand-container" id="wandContainer"><div class="wand-light"></div><div class="magic-wand"></div></div>
+            <div class="xl-image-wrapper">
+                <div id="xlBadge" class="xl-badge smooth-fade">HI-RES</div>
+                <img src="https://via.placeholder.com/600/222/222" id="xlArt" class="album-art-xl smooth-fade">
+            </div>
+            <h2 id="xlTitle" class="smooth-fade" style="font-size: 1.2rem; margin-bottom: 5px;">Prêt</h2>
+            <p id="xlArtist" class="smooth-fade" style="color: var(--primary); font-size: 1rem;">...</p>
+            <div class="wand-container" id="wandContainer">
+                <div class="wand-light"></div>
+                <div class="magic-wand"></div>
+            </div>
         </aside>
 
         <div class="eq-overlay" id="eqView">
             <div class="eq-header"><h3>Audio FX</h3><button class="close-eq" onclick="toggleEQ()"><i class="fas fa-times"></i></button></div>
-            <div class="xfade-section"><div style="display:flex;justify-content:space-between;"><span style="font-size:12px;">CROSSFADE</span><span id="xfadeVal" style="color:var(--primary);">0s</span></div><input type="range" class="xfade-range" min="0" max="12" step="1" value="0" oninput="updateCrossfade(this.value)"></div>
+            <div class="xfade-section">
+                <div style="display:flex; justify-content:space-between; margin-bottom:5px;"><span style="font-size:12px; color:#888; font-weight:bold;">CROSSFADE</span><span id="xfadeVal" style="font-size:12px; color:var(--primary);">0s</span></div>
+                <input type="range" class="xfade-range" min="0" max="12" step="1" value="0" oninput="updateCrossfade(this.value)">
+            </div>
             <div class="eq-sliders">
-                <div class="eq-band"><input type="range" class="eq-range" min="-12" max="12" value="0" oninput="updateEQ(0,this.value)"><span>60Hz</span></div>
-                <div class="eq-band"><input type="range" class="eq-range" min="-12" max="12" value="0" oninput="updateEQ(1,this.value)"><span>230Hz</span></div>
-                <div class="eq-band"><input type="range" class="eq-range" min="-12" max="12" value="0" oninput="updateEQ(2,this.value)"><span>910Hz</span></div>
-                <div class="eq-band"><input type="range" class="eq-range" min="-12" max="12" value="0" oninput="updateEQ(3,this.value)"><span>4kHz</span></div>
-                <div class="eq-band"><input type="range" class="eq-range" min="-12" max="12" value="0" oninput="updateEQ(4,this.value)"><span>14kHz</span></div>
+                <div class="eq-band"><input type="range" class="eq-range" min="-12" max="12" value="0" data-freq="60" oninput="updateEQ(0, this.value)"><span>60Hz</span></div>
+                <div class="eq-band"><input type="range" class="eq-range" min="-12" max="12" value="0" data-freq="230" oninput="updateEQ(1, this.value)"><span>230Hz</span></div>
+                <div class="eq-band"><input type="range" class="eq-range" min="-12" max="12" value="0" data-freq="910" oninput="updateEQ(2, this.value)"><span>910Hz</span></div>
+                <div class="eq-band"><input type="range" class="eq-range" min="-12" max="12" value="0" data-freq="4000" oninput="updateEQ(3, this.value)"><span>4kHz</span></div>
+                <div class="eq-band"><input type="range" class="eq-range" min="-12" max="12" value="0" data-freq="14000" oninput="updateEQ(4, this.value)"><span>14kHz</span></div>
             </div>
             <button class="limiter-btn active" id="limiterBtn" onclick="toggleLimiter()"><i class="fas fa-compress-arrows-alt"></i> NORMALISATEUR</button>
             <button class="orbit-btn" id="orbitBtn" onclick="toggleOrbit()"><i class="fas fa-globe-americas"></i> 8D ORBIT (WORKLET)</button>
             <button class="karaoke-btn" id="karaokeBtn" onclick="toggleKaraoke()"><i class="fas fa-microphone-slash"></i> NO VOCAL (PHASE)</button>
-            <button class="eq-reset-btn" onclick="resetEQ()">Reset EQ</button>
+            <button class="eq-reset-btn" onclick="resetEQ()">Réinitialiser EQ</button>
         </div>
 
         <div class="player-capsule">
-            <div class="radio-badge" id="radioBadge">RADIO</div>
+            <div class="radio-badge" id="radioBadge">RADIO AUTO</div>
             <div class="cap-info">
                 <img src="https://via.placeholder.com/60" id="capArt" class="cap-img smooth-fade">
-                <div style="display:flex;flex-direction:column;margin-left:15px;overflow:hidden;">
-                    <div id="capTitle" class="cap-title smooth-fade">Titre</div>
-                    <div id="capArtist" class="cap-artist smooth-fade">Artiste</div>
+                <div style="display:flex; align-items:center; flex:1; overflow:hidden;">
+                    <div class="cap-text">
+                        <div id="capTitle" class="cap-title smooth-fade">Titre</div>
+                        <div id="capArtist" class="cap-artist smooth-fade" onclick="if(tracks[currentIndex]) openArtistProfile(tracks[currentIndex].performer.name)">Artiste</div>
+                    </div>
+                    <button id="btnLike" class="action-btn-mini" onclick="toggleLike()" title="Ajouter aux favoris"><i class="far fa-heart"></i></button>
+                    <button class="action-btn-mini" onclick="openAddToPlaylistModal()" title="Ajouter à une Playlist"><i class="fas fa-list-ul"></i></button>
+                    <button class="share-btn-mini" onclick="copyLink()" title="Partager"><i class="fas fa-link" style="color:var(--text-dim)"></i></button>
                 </div>
-                <button id="btnLike" class="action-btn-mini" onclick="toggleLike()"><i class="far fa-heart"></i></button>
             </div>
             <div class="cap-center">
                 <div class="controls">
@@ -132,9 +289,16 @@
                     <button class="ctrl-btn" id="btnNext"><i class="fas fa-step-forward"></i></button>
                     <button class="ctrl-btn lyrics-btn" onclick="toggleLyrics()"><i class="fas fa-microphone"></i></button>
                 </div>
-                <div class="timeline-box"><span id="currTime">0:00</span><div class="progress-bg" id="progressBar"><div class="progress-fill" id="progressFill"></div></div><span id="totTime">0:00</span></div>
+                <div class="timeline-box">
+                    <span id="currTime">0:00</span>
+                    <div class="progress-bg" id="progressBar"><div class="progress-fill" id="progressFill"></div><div class="seek-hitbox"></div></div>
+                    <span id="totTime">0:00</span>
+                </div>
             </div>
-            <div class="cap-right"><i class="fas fa-volume-up"></i><input type="range" class="vol-slider" min="0" max="1" step="0.01" value="1"></div>
+            <div class="cap-right">
+                <i class="fas fa-volume-up" style="color:#888; font-size:12px;"></i>
+                <input type="range" class="vol-slider" min="0" max="1" step="0.01" value="1">
+            </div>
         </div>
     </div>
 
@@ -144,75 +308,155 @@
     <script src="magic.js"></script>
     <script src="blindtest.js"></script>
     <script src="party.js"></script>
-    <script src="shortcuts.js"></script>
     
     <script>
-        const API_BASE = '';
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/sw.js').catch(err => console.log('SW Error:', err));
+            });
+        }
+    </script>
+    
+    <script>
+        const API_BASE = ''; 
+        
+        let tracks = [];
+        let currentIndex = 0;
+        let currentGridItems = [];
+
+        // LECTEURS AUDIO HTML5 (Source)
         const playerA = new Audio(); playerA.id = "playerA"; playerA.preload = "auto"; playerA.crossOrigin = "anonymous";
         const playerB = new Audio(); playerB.id = "playerB"; playerB.preload = "auto"; playerB.crossOrigin = "anonymous";
-        
-        let tracks = [], currentIndex = 0, activeAudio = playerA;
+        document.body.appendChild(playerA);
+        document.body.appendChild(playerB);
+
+        let activeAudio = playerA; 
+        let crossfadeDuration = 0; let globalVolume = 1; 
+        let isFading = false; let nextTrackTriggered = false; 
+        let isPlaying = false; let isRadioActive = false; let isLyricsMode = false;
+        let lyricsData = []; let firstLineTime = null; let currentTrackId = null;
+        let fadeInterval = null; let isFetchingRadio = false;
+
+        // --- VARIABLES AUDIO WORKLET ---
         let audioCtx, zenithNode, sourceA, sourceB;
-        let crossfadeDuration = 0, globalVolume = 1;
-        let isPlaying = false, isRadioActive = false;
-        let isLimiterOn = true, isOrbitOn = false, isKaraokeOn = false;
+        let isOrbitOn = false, isKaraokeOn = false, isLimiterOn = true;
+        let eqFilters = []; const eqFrequencies = [60, 230, 910, 4000, 14000];
+
+        let userSettings = { limiter: true, crossfade: 0, magic: true };
+        let magicEnabled = true; 
         
-        // Initialisation du moteur AudioWorklet
+        let favorites = [];
+        let history = JSON.parse(localStorage.getItem('zenith_history_local') || '[]');
+        setInterval(() => { localStorage.setItem('zenith_history_local', JSON.stringify(history)); }, 10000);
+
+        let navStack = [];
+
+        function resetNavStack() { navStack = []; }
+        function pushNavState() {
+            navStack.push({
+                gridItems: [...currentGridItems],
+                title: document.getElementById('viewTitle').innerText,
+                scroll: window.scrollY
+            });
+        }
+
+        function goBack() {
+            const artistV = document.getElementById('artistView');
+            if (artistV.style.display === 'block') { artistV.style.display = 'none'; showTracks(); return; }
+            const playlistV = document.getElementById('playlistView');
+            if (playlistV.style.display === 'block') { playlistV.style.display = 'none'; if(document.getElementById('allPlaylistsView').style.display === 'none') { showTracks(); } else { document.getElementById('allPlaylistsView').style.display = 'block'; } return; }
+            const allPlView = document.getElementById('allPlaylistsView');
+            if (allPlView.style.display === 'block') { allPlView.style.display = 'none'; goHome(); return; }
+            if (document.getElementById('trackView').style.display === 'block' && navStack.length === 0) { const searchVal = document.getElementById('searchInput').value; const isResultTitle = document.getElementById('viewTitle').innerText === "Résultats"; if (searchVal || isResultTitle) { document.getElementById('searchInput').value = ""; goHome(); return; } }
+            if (navStack.length > 0) { const state = navStack.pop(); showTracks(); renderGrid(state.gridItems, false); document.getElementById('viewTitle').innerText = state.title; setTimeout(() => window.scrollTo(0, state.scroll), 0); safePushState({}, "", window.location.pathname); return; }
+            if (window.history.length > 1) { window.history.back(); } else { goHome(); }
+        }
+
+        function applySettings(settings) {
+            const isLimiter = (settings.limiter === true || settings.limiter === 'true'); isLimiterOn = isLimiter; document.getElementById('settingLimiter').checked = isLimiter; if (audioCtx) toggleLimiter(isLimiter, true);
+            const xfade = parseInt(settings.crossfade || 0); crossfadeDuration = xfade; document.getElementById('settingCrossfade').value = xfade; document.getElementById('settingCrossfadeVal').innerText = xfade + "s"; document.getElementById('xfadeVal').innerText = xfade + "s"; document.querySelector('.xfade-range').value = xfade;
+            const isMagic = (settings.magic === true || settings.magic === 'true'); magicEnabled = isMagic; document.getElementById('settingMagic').checked = isMagic; if(!magicEnabled) { document.body.className = ''; document.getElementById('wandContainer').classList.remove('active'); if(typeof stopEffects === 'function') stopEffects(); }
+        }
+        async function changeSetting(key, value) { userSettings[key] = value; applySettings(userSettings); localStorage.setItem('zenith_pref_' + key, value); if(!supabaseClient) return; const { data: { user } } = await supabaseClient.auth.getUser(); if(user) { try { await supabaseClient.from('profiles').update({ settings: userSettings }).eq('id', user.id); } catch(e) { console.error("Sync settings error", e); } } }
+        function loadLocalSettings() { const sLimiter = localStorage.getItem('zenith_pref_limiter'); if(sLimiter !== null) userSettings.limiter = (sLimiter === 'true'); const sXfade = localStorage.getItem('zenith_pref_crossfade'); if(sXfade !== null) userSettings.crossfade = parseInt(sXfade); const sMagic = localStorage.getItem('zenith_pref_magic'); if(sMagic !== null) userSettings.magic = (sMagic === 'true'); applySettings(userSettings); }
+        const originalLoadProfile = window.loadProfile; window.loadProfile = async function() { if(originalLoadProfile) await originalLoadProfile(); const { data: { user } } = await supabaseClient.auth.getUser(); if(!user) return; if (window.loadUserPlaylists) window.loadUserPlaylists(); const { data, error } = await supabaseClient.from('profiles').select('settings').eq('id', user.id).single(); if (data && data.settings) { userSettings = { ...userSettings, ...data.settings }; applySettings(userSettings); localStorage.setItem('zenith_pref_limiter', userSettings.limiter); localStorage.setItem('zenith_pref_crossfade', userSettings.crossfade); localStorage.setItem('zenith_pref_magic', userSettings.magic); } };
+        function showProfileSettings() { document.getElementById('trackView').style.display = 'none'; document.getElementById('artistView').style.display = 'none'; document.getElementById('lyricsView').style.display = 'none'; document.getElementById('blindTestView').style.display = 'none'; document.getElementById('allPlaylistsView').style.display = 'none'; document.getElementById('playlistView').style.display = 'none'; document.getElementById('searchBarContainer').style.display = 'none'; document.getElementById('profileView').style.display = 'block'; window.loadProfile(); }
+        window.loadUserFavorites = async function() { if(!supabaseClient) return; const { data: { user } } = await supabaseClient.auth.getUser(); if(!user) return; const { data, error } = await supabaseClient.from('favorites').select('*'); if(data) { favorites = data.map(f => f.track_data); updateLikeButtonState(); } window.loadProfile(); };
+        function safePushState(data, title, url) { try { if (window.history && window.history.pushState) { window.history.pushState(data, title, url); } } catch (e) { console.warn("History pushState blocked", e); } }
+        
+        // --- MOTEUR AUDIO WORKLET (ANTI-COUPURE) ---
         async function initAudioContext() {
             if (audioCtx) return;
             try {
-                audioCtx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'playback' });
+                const AudioContext = window.AudioContext || window.webkitAudioContext;
+                // 1. Suppression sampleRate forcé
+                audioCtx = new AudioContext({ latencyHint: 'playback' });
                 
-                // Chargement du module Worklet
+                // 2. Chargement Module
                 await audioCtx.audioWorklet.addModule('zenith-processor.js');
                 
-                // Création du Nœud Zenith (Cerveau)
+                // 3. Création Nœud Zenith
                 zenithNode = new AudioWorkletNode(audioCtx, 'zenith-processor', {
-                    numberOfInputs: 2, // Entrée A et Entrée B
-                    numberOfOutputs: 1, // Sortie Stéréo
+                    numberOfInputs: 2,
+                    numberOfOutputs: 1,
                     parameterData: { volume: globalVolume }
                 });
 
-                // Sources HTML5 -> Worklet
+                // 4. Connexions Sources
                 sourceA = audioCtx.createMediaElementSource(playerA);
                 sourceB = audioCtx.createMediaElementSource(playerB);
-                sourceA.connect(zenithNode, 0, 0); // Connecte A à l'input 0 du Worklet
-                sourceB.connect(zenithNode, 0, 1); // Connecte B à l'input 1 du Worklet
+                sourceA.connect(zenithNode, 0, 0);
+                sourceB.connect(zenithNode, 0, 1);
 
-                // Chaîne d'effets natifs (Compresseur/Limiter + EQ)
-                const compressor = audioCtx.createDynamicsCompressor();
-                compressor.threshold.value = -12;
-                compressor.knee.value = 30;
-                compressor.ratio.value = 12;
-                compressor.attack.value = 0.003;
-                
-                // EQ Graph
-                const frequencies = [60, 230, 910, 4000, 14000];
+                // 5. Chaîne d'effets (EQ + Compresseur)
                 let prevNode = zenithNode;
-                window.eqFilters = frequencies.map((f, i) => {
+                eqFilters = eqFrequencies.map((freq, i) => {
                     const filter = audioCtx.createBiquadFilter();
-                    filter.type = i===0 ? 'lowshelf' : (i===4 ? 'highshelf' : 'peaking');
-                    filter.frequency.value = f;
+                    filter.type = i===0?'lowshelf':(i===4?'highshelf':'peaking');
+                    filter.frequency.value = freq;
                     prevNode.connect(filter);
                     prevNode = filter;
                     return filter;
                 });
 
-                // Connexion finale
+                const compressor = audioCtx.createDynamicsCompressor();
+                // Paramètres rapides pour éviter le clipping
+                compressor.threshold.value = -12;
+                compressor.knee.value = 30;
+                compressor.ratio.value = 12;
+                compressor.attack.value = 0.003; 
+                compressor.release.value = 0.25;
+
                 prevNode.connect(compressor);
                 compressor.connect(audioCtx.destination);
+                
+                console.log("🚀 Moteur Zenith AudioWorklet activé");
 
-                console.log("🚀 Moteur Zenith AudioWorklet démarré");
-
-            } catch (e) { console.error("Echec AudioWorklet:", e); }
+            } catch (e) { console.error("Erreur AudioWorklet:", e); }
         }
 
-        // Contrôle des paramètres du Worklet
-        function setWorkletParam(paramName, value, rampTime = 0.1) {
-            if (zenithNode) {
-                const param = zenithNode.parameters.get(paramName);
-                param.linearRampToValueAtTime(value, audioCtx.currentTime + rampTime);
+        // Helpers Audio
+        function setWorkletParam(name, val, ramp=0.1) {
+            if(zenithNode) {
+                const p = zenithNode.parameters.get(name);
+                p.cancelScheduledValues(audioCtx.currentTime);
+                p.linearRampToValueAtTime(val, audioCtx.currentTime + ramp);
             }
+        }
+
+        function toggleLimiter(forceState = null, silent = false) {
+            // Le limiter est natif dans la chaîne, ici on ne fait qu'afficher l'état
+            if(forceState!==null) isLimiterOn = forceState; else isLimiterOn = !isLimiterOn;
+            document.getElementById('limiterBtn').classList.toggle('active', isLimiterOn);
+            if(!silent) showToast(isLimiterOn ? "Normalisateur Activé" : "Désactivé");
+        }
+
+        function toggleKaraoke() {
+            if (!audioCtx) initAudioContext();
+            isKaraokeOn = !isKaraokeOn;
+            document.getElementById('karaokeBtn').classList.toggle('active', isKaraokeOn);
+            setWorkletParam('karaokeEnabled', isKaraokeOn ? 1 : 0);
+            showToast(isKaraokeOn ? "No Vocal Activé" : "Normal");
         }
 
         function toggleOrbit() {
@@ -221,61 +465,77 @@
             document.getElementById('orbitBtn').classList.toggle('active', isOrbitOn);
             setWorkletParam('orbitEnabled', isOrbitOn ? 1 : 0);
             
-            // Visuel
             const orb = document.getElementById('orbitVisual');
-            if (isOrbitOn) {
-                orb.className = 'orbit-orb'; void orb.offsetWidth; orb.classList.add('center-stage', 'orbiting');
-            } else {
-                orb.classList.remove('orbiting', 'center-stage');
-            }
-            showToast(isOrbitOn ? "8D Orbit Activé 🪐" : "8D Désactivé");
+            if (isOrbitOn) { orb.className = 'orbit-orb'; void orb.offsetWidth; orb.classList.add('center-stage', 'orbiting'); }
+            else { orb.classList.remove('orbiting', 'center-stage'); }
+            showToast(isOrbitOn ? "8D Orbit Activé" : "Désactivé");
         }
 
-        function toggleKaraoke() {
-            if (!audioCtx) initAudioContext();
-            isKaraokeOn = !isKaraokeOn;
-            document.getElementById('karaokeBtn').classList.toggle('active', isKaraokeOn);
-            setWorkletParam('karaokeEnabled', isKaraokeOn ? 1 : 0);
-            showToast(isKaraokeOn ? "No Vocal (Phase) Activé 🎤🚫" : "Mode Normal");
+        function updateCrossfade(val) {
+            crossfadeDuration = parseInt(val);
+            document.getElementById('xfadeVal').innerText = val + "s";
+            document.getElementById('settingCrossfadeVal').innerText = val + "s";
         }
 
         function setGlobalVolume(val) {
             globalVolume = parseFloat(val);
             if (zenithNode) setWorkletParam('volume', globalVolume, 0.05);
         }
+        
+        function updateEQ(i,v) { if(audioCtx && eqFilters[i]) eqFilters[i].gain.value = parseFloat(v); }
+        function resetEQ() { document.querySelectorAll('.eq-range').forEach((s, i) => { s.value=0; updateEQ(i, 0); }); }
 
-        function updateCrossfade(val) {
-            crossfadeDuration = parseInt(val);
-            document.getElementById('xfadeVal').innerText = val + "s";
-            // Note: Le crossfade réel se fait dans loadTrack via l'automatisation du paramètre 'crossfade' du worklet
-        }
+        function resetLyricsState() { lyricsData = []; firstLineTime = null; const view = document.getElementById('lyricsView'); view.innerHTML = '<div style="margin-top: 100px; color: #888; animation: pulseText 1.5s infinite;">Recherche des paroles...</div>'; document.getElementById('introContainer').style.display = 'none'; }
 
-        // Chargement et Lecture (Crossfade via Worklet)
+        // CHARGEMENT PISTE
         async function loadTrack(index, autoPlay = true) {
-            if (index < 0 || index >= tracks.length) return;
+            if(index < 0 || index >= tracks.length) return;
             
-            // Initialisation audio impérative au premier clic
+            if (typeof ZenithCast !== 'undefined' && ZenithCast.isCasting) {
+                // Mode Cast (inchangé)
+                currentIndex = index; const t = tracks[index]; currentTrackId = t.id;
+                updateInterfaceInfo(t); updateActiveCard(); fetchLyrics(t, t.performer ? t.performer.name : 'Artiste');
+                ZenithCast.loadMedia(t); pause(); isPlaying = true; document.getElementById('playIcon').className = 'fas fa-pause';
+                updateLikeButtonState();
+                if (index === tracks.length - 1) triggerRadio(true);
+                return; 
+            }
+
+            // Initialisation Audio
             if (!audioCtx) await initAudioContext();
             if (audioCtx.state === 'suspended') await audioCtx.resume();
 
+            nextTrackTriggered = false; 
             const nextTrack = tracks[index];
-            // Logique pour alterner les lecteurs (A/B)
-            const nextAudio = activeAudio === playerA ? playerB : playerA;
-            const prevAudio = activeAudio;
             
-            // URL resolution
-            let url = nextTrack.source === 'subsonic' ? `${API_BASE}/stream_subsonic/${nextTrack.id}` : `${API_BASE}/stream/${nextTrack.id}`;
-            if (nextTrack.source === 'yt_lazy') url = `${API_BASE}/resolve_stream?title=${encodeURIComponent(nextTrack.title)}&artist=${encodeURIComponent(nextTrack.performer.name)}`;
+            // Logique A/B
+            const nextAudio = (activeAudio === playerA) ? playerB : playerA; 
+            const prevAudio = activeAudio;
+            const targetCrossfade = (nextAudio === playerB) ? 1 : 0;
+
+            if (nextTrack.isRadio) { document.getElementById('radioBadge').style.display = 'block'; isRadioActive = true; } else { document.getElementById('radioBadge').style.display = 'none'; isRadioActive = false; }
+            if (typeof broadcastTrackChange === 'function') broadcastTrackChange(nextTrack);
+            resetLyricsState();
+
+            let url = '';
+            if(nextTrack.source === 'subsonic') url = `${API_BASE}/stream_subsonic/${nextTrack.id}`;
+            else if(nextTrack.source === 'yt_lazy') {
+                const artist = nextTrack.performer ? nextTrack.performer.name : 'Inconnu';
+                url = `${API_BASE}/resolve_stream?title=${encodeURIComponent(nextTrack.title)}&artist=${encodeURIComponent(artist)}`;
+            }
+            else url = `${API_BASE}/stream/${nextTrack.id}`;
 
             nextAudio.src = url;
-            nextAudio.volume = 1; // On laisse le Worklet gérer le volume réel
+            nextAudio.volume = 1; // Worklet gère le volume réel
+
+            currentIndex = index; currentTrackId = nextTrack.id;
+            updateInterfaceInfo(nextTrack);
             
-            // Crossfade Logic via Worklet Params
-            const targetCrossfade = nextAudio === playerB ? 1 : 0; // 0 = A, 1 = B
+            if(nextTrack.source !== 'yt_lazy') safePushState({}, "", `/?track=${nextTrack.id}&source=${nextTrack.source}`);
             
-            if (crossfadeDuration > 0 && isPlaying) {
-                // Transition douce
-                nextAudio.play().catch(e=>console.error(e));
+            // CROSSFADE VIA WORKLET
+            if (autoPlay && isPlaying && crossfadeDuration > 0) {
+                nextAudio.play().catch(e=>{});
                 if (zenithNode) {
                     const param = zenithNode.parameters.get('crossfade');
                     param.cancelScheduledValues(audioCtx.currentTime);
@@ -283,83 +543,284 @@
                     param.linearRampToValueAtTime(targetCrossfade, audioCtx.currentTime + crossfadeDuration);
                 }
                 setTimeout(() => { prevAudio.pause(); prevAudio.currentTime = 0; }, crossfadeDuration * 1000);
-            } else {
-                // Cut immédiat
-                if (zenithNode) {
-                    zenithNode.parameters.get('crossfade').setValueAtTime(targetCrossfade, audioCtx.currentTime);
-                }
-                prevAudio.pause();
-                if (autoPlay) nextAudio.play().catch(e=>console.error(e));
+            } else { 
+                if (zenithNode) zenithNode.parameters.get('crossfade').setValueAtTime(targetCrossfade, audioCtx.currentTime);
+                prevAudio.pause(); prevAudio.currentTime = 0; 
+                if(autoPlay) nextAudio.play().catch(e=>{});
             }
-
-            activeAudio = nextAudio;
-            currentIndex = index;
-            isPlaying = true;
+            
+            activeAudio = nextAudio; 
+            isPlaying = true; 
             document.getElementById('playIcon').className = 'fas fa-pause';
-            updateInterface(nextTrack);
             
-            // Gestion file d'attente / Radio
-            if (index === tracks.length - 1) setTimeout(() => triggerRadio(true), 5000);
+            setupMediaSession(nextTrack); fetchLyrics(nextTrack, nextTrack.performer ? nextTrack.performer.name : 'Artiste'); updateActiveCard();
+            updateLikeButtonState();
+            setTimeout(() => { if(isPlaying && currentTrackId === nextTrack.id) addToHistory(nextTrack); }, 10000);
+            
+            if (index === tracks.length - 1 && !isFetchingRadio) { 
+                setTimeout(() => { if(currentIndex === tracks.length -1) triggerRadio(true); }, 5000);
+            }
         }
 
-        function updateInterface(t) {
-            // Mise à jour UI (Titre, Cover, etc.) - Simplifié pour l'exemple
-            document.getElementById('capTitle').innerText = t.title;
-            document.getElementById('capArtist').innerText = t.performer ? t.performer.name : 'Artiste';
-            let img = t.album && t.album.image ? t.album.image.large : 'https://via.placeholder.com/300';
-            if (t.source === 'subsonic') img = `${API_BASE}/get_subsonic_cover/${t.album.image.large}`;
-            document.getElementById('capArt').src = img;
-            document.getElementById('xlArt').src = img;
-            document.getElementById('ambientBg').style.backgroundImage = `url('${img}')`;
+        function attachListeners(audioObj) {
+            audioObj.onloadedmetadata = () => { 
+                if(audioObj === activeAudio) { 
+                    let d = audioObj.duration; const t = tracks[currentIndex];
+                    if((!d || !isFinite(d)) && t && t.duration) d = t.duration;
+                    document.getElementById('totTime').innerText = fmtTime(d); updateMediaSessionState(); 
+                } 
+            };
+            audioObj.ontimeupdate = () => {
+                if (isRadioActive && currentIndex === tracks.length - 1 && !isFetchingRadio) {
+                     const rem = audioObj.duration - audioObj.currentTime;
+                     if (rem < 20 && rem > 0) { triggerRadio(true); }
+                }
+                // Auto Next (Crossfade trigger)
+                if (audioObj === activeAudio && isPlaying && crossfadeDuration > 0 && !nextTrackTriggered) {
+                    let remaining = audioObj.duration - audioObj.currentTime;
+                    if (remaining <= crossfadeDuration && remaining > 0.5) { nextTrackTriggered = true; handleNext(); return; }
+                }
+                if(audioObj === activeAudio && !document.hidden) {
+                    let d = audioObj.duration; if((!d || !isFinite(d)) && tracks[currentIndex].duration) d = tracks[currentIndex].duration;
+                    if(d && isFinite(d)) { document.getElementById('progressFill').style.width = (audioObj.currentTime/d)*100 + '%'; }
+                    document.getElementById('currTime').innerText = fmtTime(audioObj.currentTime); syncLyricsUI(); updateMediaSessionState();
+                }
+            };
+            audioObj.onended = () => { if(audioObj === activeAudio && !nextTrackTriggered) handleNext(); };
+        }
+        attachListeners(playerA); attachListeners(playerB);
+
+        async function handleNext() { if (currentIndex < tracks.length - 1) { loadTrack(currentIndex + 1); } else { triggerRadio(); } }
+        
+        async function triggerRadio(isBackground = false) {
+            if(isFetchingRadio) return; isFetchingRadio = true;
+            if(!isBackground) { showToast("Recherche radio... 📻"); document.getElementById('radioBadge').style.display = 'block'; isRadioActive = true; }
             
-            // Mise à jour des effets visuels si visible
-            if (!document.hidden && typeof checkMagic === 'function') checkMagic(t.title, t.performer.name);
+            const cur = tracks[currentIndex]; 
+            const artist = cur.performer ? cur.performer.name : cur.artist;
+            let artistHistory = [];
+            const startIndex = Math.max(0, currentIndex - 4);
+            const recentTracks = tracks.slice(startIndex, currentIndex + 1);
+            recentTracks.forEach(t => {
+                 let a = 'Inconnu';
+                 if(t.performer && t.performer.name) a = t.performer.name;
+                 else if(t.artist && t.artist.name) a = t.artist.name;
+                 artistHistory.push(a);
+            });
+
+            try {
+                const historyStr = encodeURIComponent(artistHistory.join('|'));
+                const res = await fetch(`${API_BASE}/recommend?artist=${encodeURIComponent(artist)}&title=${encodeURIComponent(cur.title)}&current_id=${cur.id}&recent_artists=${historyStr}`);
+                const raw = await res.json();
+                if(raw && raw.id) {
+                    let hd = ''; if(raw.source === 'subsonic') hd = `${API_BASE}/get_subsonic_cover/${raw.album.image.large}`; else hd = (raw.album.image.large||'').replace('_300','_600');
+                    if(!raw.performer) raw.performer = { name: raw.artist ? raw.artist.name : 'Artiste' };
+                    
+                    tracks.push({ ...raw, img: hd, type: 'track', isRadio: true });
+                    const specificIndex = tracks.length - 1;
+                    
+                    const div = document.createElement('div'); div.className = 'track-card'; div.dataset.id = raw.id;
+                    div.innerHTML = `<div class="badges-container"><div class="type-badge" style="background:var(--primary)">RADIO</div></div><img src="${hd}"><h3>${raw.title}</h3><p style="color:var(--primary)">${raw.performer.name}</p>`;
+                    div.onclick = () => loadTrack(specificIndex); 
+                    
+                    document.getElementById('trackGrid').appendChild(div);
+                    if (!isBackground) { 
+                        loadTrack(tracks.length - 1); 
+                        setTimeout(() => div.scrollIntoView({behavior: "smooth", block: "center"}), 100); 
+                    }
+                }
+            } catch(e) { 
+                console.error(e);
+                if(!isBackground && currentIndex < tracks.length-1) loadTrack(currentIndex+1); 
+            } finally { isFetchingRadio = false; }
         }
 
-        // Boutons et Contrôles
-        function play() { activeAudio.play(); isPlaying=true; document.getElementById('playIcon').className='fas fa-pause'; }
-        function pause() { activeAudio.pause(); isPlaying=false; document.getElementById('playIcon').className='fas fa-play'; }
-        function handleNext() { if(currentIndex < tracks.length-1) loadTrack(currentIndex+1); else triggerRadio(); }
+        function updateInterfaceInfo(t) {
+            let img = ''; if(t.source === 'subsonic') img = `${API_BASE}/get_subsonic_cover/${t.album.image.large}`; else img = (t.album.image.large||'').replace('_300','_600');
+            let artistName = t.performer ? t.performer.name : 'Artiste';
+            const xlArt = document.getElementById('xlArt'); const capArt = document.getElementById('capArt'); const amb = document.getElementById('ambientBg');
+            const textEls = [ 'xlTitle', 'xlArtist', 'xlBadge', 'capTitle', 'capArtist' ].map(id=>document.getElementById(id));
+            textEls.forEach(el => el.classList.add('fade-out-active'));
+            setTimeout(() => {
+                document.getElementById('xlTitle').innerText = t.title; document.getElementById('xlArtist').innerText = artistName; document.getElementById('capTitle').innerText = t.title; document.getElementById('capArtist').innerText = artistName;
+                const badge = document.getElementById('xlBadge'); badge.style.display = (t.source !== 'subsonic' && t.maximum_bit_depth > 16) ? 'block' : 'none';
+                if(magicEnabled) checkMagic(t.title, artistName);
+                textEls.forEach(el => el.classList.remove('fade-out-active'));
+            }, 300);
+            const currentSrc = xlArt.getAttribute('src') || ''; 
+            if (currentSrc !== img) {
+                xlArt.classList.add('fade-out-active'); capArt.classList.add('fade-out-active');
+                const tempImg = new Image(); tempImg.onload = () => { xlArt.src = img; capArt.src = img; amb.style.backgroundImage = `url('${img}')`; amb.style.opacity = '1'; xlArt.classList.remove('fade-out-active'); capArt.classList.remove('fade-out-active'); }; tempImg.src = img;
+                setTimeout(() => { xlArt.classList.remove('fade-out-active'); capArt.classList.remove('fade-out-active'); if(amb.style.opacity != '1') amb.style.opacity = '1'; }, 1000);
+            } else { if(amb.style.opacity != '1') { amb.style.backgroundImage = `url('${img}')`; amb.style.opacity = '1'; } }
+        }
+
+        async function openArtistProfile(name) { safePushState({}, "", `/?artist_profile=${encodeURIComponent(name)}`); document.getElementById('trackView').style.display='none'; document.getElementById('lyricsView').style.display='none'; const view = document.getElementById('artistView'); view.style.display='block'; document.getElementById('artistProfileName').innerText = name; document.getElementById('artistProfileBio').innerText = "Chargement..."; document.getElementById('artistTopTracks').innerHTML = '<p style="text-align:center;">Chargement...</p>'; document.getElementById('artistProfileImg').src = 'https://via.placeholder.com/200'; document.getElementById('artistHeaderBg').src = ''; document.getElementById('artistFans').style.display = 'none'; try { const res = await fetch(`${API_BASE}/artist_bio?name=${encodeURIComponent(name)}`); const data = await res.json(); if(data.bio) document.getElementById('artistProfileBio').innerText = data.bio; if(data.image) { document.getElementById('artistProfileImg').src = data.image; document.getElementById('artistHeaderBg').src = data.image; } if(data.nb_fans) { let formatted = data.nb_fans.toLocaleString('fr-FR'); document.getElementById('artistFans').innerHTML = `<i class="fas fa-users"></i> ${formatted} Fans`; document.getElementById('artistFans').style.display = 'inline-flex'; } else { document.getElementById('artistFans').style.display = 'none'; } const grid = document.getElementById('artistTopTracks'); grid.innerHTML = ''; if(data.top_tracks) { data.top_tracks.forEach(t => { const div = document.createElement('div'); div.className = 'track-card'; div.dataset.id = t.id; let b = ''; if(t.source !== 'subsonic' && t.maximum_bit_depth > 16) { b = '<div class="type-badge badge-hires">HI-RES</div>'; } div.innerHTML = `<div class="badges-container">${b}</div><img src="${t.image || 'https://via.placeholder.com/300'}"><h3>${t.title}</h3><p>${t.artist}</p>`; div.onclick = () => { tracks = data.top_tracks.map(x => ({ id: x.id, title: x.title, performer: { name: x.artist }, album: { title: 'Top Tracks', image: { large: x.image } }, source: x.source, maximum_bit_depth: x.maximum_bit_depth, duration: x.duration })); const idx = tracks.findIndex(tr => tr.id === t.id); loadTrack(idx !== -1 ? idx : 0); }; grid.appendChild(div); }); updateActiveCard(); } } catch(e) { console.log(e); } }
+        function toggleEQ() { const v=document.getElementById('eqView'); if(!audioCtx)initAudioContext(); if(v.style.display==='flex'){v.classList.remove('active');setTimeout(()=>v.style.display='none',300);}else{v.style.display='flex';setTimeout(()=>v.classList.add('active'),10);} }
+        function play() { if(audioCtx && audioCtx.state === 'suspended') audioCtx.resume(); activeAudio.play().then(() => { isPlaying = true; document.getElementById('playIcon').className = 'fas fa-pause'; updateMediaSessionState(); if('mediaSession' in navigator) navigator.mediaSession.playbackState = "playing"; if (typeof broadcastPlay === 'function') broadcastPlay(); }).catch(e => {}); }
+        function pause() { playerA.pause(); playerB.pause(); isPlaying = false; document.getElementById('playIcon').className = 'fas fa-play'; if('mediaSession' in navigator) navigator.mediaSession.playbackState = "paused"; if (typeof broadcastPause === 'function') broadcastPause(); }
+        function fmtTime(s) { if(!s || isNaN(s)) return "0:00"; let m=Math.floor(s/60), sec=Math.floor(s%60); return m+":"+(sec<10?"0":"")+sec; }
+        function showToast(msg) { const t=document.getElementById('toast'); t.innerText=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),2000); }
+        function copyLink() { if(!currentTrackId) return; const t=tracks[currentIndex]; navigator.clipboard.writeText(`${window.location.origin}/?track=${t.id}&source=${t.source}`).then(()=>showToast('Lien copié !')); }
+        async function toggleLike() { const btn = document.getElementById('btnLike'); if(btn.disabled) return; btn.disabled = true; try { const t = tracks[currentIndex]; if(!t) return; const { data: { user } } = await supabaseClient.auth.getUser(); if(!user) { showToast("Connectez-vous pour liker !"); return; } const idx = favorites.findIndex(f => String(f.id) === String(t.id)); if (idx === -1) { favorites.push(t); btn.innerHTML = '<i class="fas fa-heart"></i>'; btn.style.color = 'var(--secondary)'; showToast('Liké ❤️'); try { await supabaseClient.from('favorites').insert({ user_id: user.id, track_id: String(t.id), track_data: t }); } catch(e) { console.error(e); } } else { favorites.splice(idx, 1); btn.innerHTML = '<i class="far fa-heart"></i>'; btn.style.color = 'var(--text-dim)'; showToast('Disliké 💔'); try { await supabaseClient.from('favorites').delete().match({ user_id: user.id, track_id: String(t.id) }); } catch(e) { console.error(e); } } } finally { btn.disabled = false; } }
+        function updateLikeButtonState() { const t = tracks[currentIndex]; if(!t) return; const idx = favorites.findIndex(f => String(f.id) === String(t.id)); const btn = document.getElementById('btnLike'); if(idx !== -1) { btn.innerHTML = '<i class="fas fa-heart"></i>'; btn.style.color = 'var(--secondary)'; } else { btn.innerHTML = '<i class="far fa-heart"></i>'; btn.style.color = 'var(--text-dim)'; } }
+        function addToHistory(t) { if(history.length>0 && history[0].id===t.id) return; history.unshift(t); if(history.length>50) history.pop(); }
+        function cleanString(s) { return s ? s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/gi,'').trim() : ""; }
+        function updateActiveCard() { document.querySelectorAll('.track-card').forEach(el => { el.classList.remove('active-track'); if(el.querySelector('.playing-indicator')) el.querySelector('.playing-indicator').remove(); }); if(!currentTrackId) return; const activeCards = document.querySelectorAll(`.track-card[data-id="${currentTrackId}"]`); activeCards.forEach(active => { active.classList.add('active-track'); const ind = document.createElement('div'); ind.className = 'playing-indicator'; ind.innerHTML = '<i class="fas fa-volume-up"></i>'; active.appendChild(ind); }); }
+        function goHome(p=true){ if(p) safePushState({},"","/"); resetNavStack(); showTracks(); document.getElementById('trackGrid').innerHTML=`<div style="grid-column: 1/-1; text-align: center; padding: 60px 20px; color: #ccc;"><h2 style="font-size: 2rem; color: var(--primary); margin-bottom: 20px; text-shadow: 0 0 30px rgba(0, 210, 255, 0.3);">Bienvenue sur Zenith Ultimate</h2><p style="font-size: 1.1rem; line-height: 1.6; max-width: 600px; margin: 0 auto; color: #aaa;">L'expérience audio haute résolution ultime. Profitez d'une qualité sonore cristalline, d'effets spatiaux immersifs et d'une bibliothèque musicale infinie.</p><div style="margin-top: 40px; display: flex; flex-wrap: wrap; justify-content: center; gap: 30px; font-size: 0.9rem;"><div style="display:flex; flex-direction:column; align-items:center; gap:10px;"><div style="width:50px; height:50px; background:rgba(255,255,255,0.05); border-radius:50%; display:flex; align-items:center; justify-content:center;"><i class="fas fa-wave-square" style="color:var(--primary); font-size:20px;"></i></div><span>Audio Hi-Res</span></div><div style="display:flex; flex-direction:column; align-items:center; gap:10px;"><div style="width:50px; height:50px; background:rgba(255,255,255,0.05); border-radius:50%; display:flex; align-items:center; justify-content:center;"><i class="fas fa-globe-americas" style="color:var(--primary); font-size:20px;"></i></div><span>Audio Spatial 8D</span></div><div style="display:flex; flex-direction:column; align-items:center; gap:10px;"><div style="width:50px; height:50px; background:rgba(255,255,255,0.05); border-radius:50%; display:flex; align-items:center; justify-content:center;"><i class="fas fa-microphone-alt" style="color:var(--primary); font-size:20px;"></i></div><span>Paroles Synchro</span></div><div style="display:flex; flex-direction:column; align-items:center; gap:10px;"><div style="width:50px; height:50px; background:rgba(255,255,255,0.05); border-radius:50%; display:flex; align-items:center; justify-content:center;"><i class="fas fa-magic" style="color:var(--primary); font-size:20px;"></i></div><span>Thèmes Magiques</span></div></div><div style="margin-top: 50px;"><p style="font-size: 14px; opacity: 0.6;">Utilisez la barre de recherche pour commencer votre voyage sonore.</p></div></div>`; }
+        async function showWeeklyTop() { resetNavStack(); showTracks(); document.getElementById('searchBarContainer').style.display='none'; document.getElementById('viewTitle').innerText="Top 10 Semaine 🏆"; document.getElementById('trackGrid').innerHTML='<p style="text-align:center;margin-top:50px;">Calcul du classement...</p>'; try { const { data, error } = await supabaseClient.rpc('get_weekly_top_tracks'); if(error) throw error; if (data && data.length > 0) { const topTracks = data.map((item, index) => { return { ...item.track_data, rank: index + 1 }; }); renderGrid(topTracks, true); } else { document.getElementById('trackGrid').innerHTML=`<div style="grid-column:1/-1;text-align:center;padding:50px;color:#555;"><i class="fas fa-trophy" style="font-size:30px;margin-bottom:10px;"></i><p>Aucun like cette semaine.<br>Soyez le premier à lancer la tendance !</p></div>`; } } catch(e) { console.error("Top 10 Error", e); showToast("Erreur récupération Top 10"); } }
+        window.onpopstate = async (e) => { const p=new URLSearchParams(window.location.search); if(p.get('artist_profile')) await openArtistProfile(p.get('artist_profile')); else if(p.get('artist')) await openArtist(p.get('artist')); else if(p.get('album')) await openAlbum(p.get('album'),p.get('source')); else if(p.get('q')) {document.getElementById('searchInput').value=p.get('q'); await performSearch();} else goHome(false); };
+        window.onload = async () => { loadLocalSettings(); const p=new URLSearchParams(window.location.search); if(p.get('track')) await openTrackDirect(p.get('track'),p.get('source')); else if(p.get('artist')) openArtist(p.get('artist')); else if(p.get('album')) openAlbum(p.get('album'),p.get('source')); else goHome(); };
+        async function openTrackDirect(id,s){ try{const r=await fetch(`${API_BASE}/track?id=${id}&source=${s||''}`); const d=await r.json(); if(d.id){ let i=d.source==='subsonic'?`${API_BASE}/get_subsonic_cover/${d.album.image.large}`:(d.album.image.large||'').replace('_300','_600'); tracks=[{...d,img:i,performer:d.performer||{name:d.artist?d.artist.name:"Artiste"},type:'track'}]; renderGrid(tracks,false); loadTrack(0, false); }}catch(e){}}
+        function showTracks(){ document.getElementById('trackView').style.display='block'; document.getElementById('artistView').style.display='none'; document.getElementById('lyricsView').style.display='none'; document.getElementById('blindTestView').style.display='none'; document.getElementById('profileView').style.display='none'; document.getElementById('playlistView').style.display='none'; document.getElementById('allPlaylistsView').style.display='none'; document.getElementById('searchBarContainer').style.display='flex'; isLyricsMode=false; document.getElementById('introContainer').style.display='none'; document.getElementById('viewTitle').innerText="Résultats"; }
+        function showFavorites(){ resetNavStack(); showTracks(); document.getElementById('searchBarContainer').style.display='none'; renderGrid([...favorites], true, "Vous n'avez pas encore de favoris.<br>Likez des titres pour les retrouver ici !"); document.getElementById('viewTitle').innerText="Mes Favoris ❤️"; }
+        function showHistory(){ resetNavStack(); showTracks(); document.getElementById('searchBarContainer').style.display='none'; renderGrid([...history], true, "Aucun historique disponible."); document.getElementById('viewTitle').innerText="Historique 🕒"; }
+        function showPlaylists(){ resetNavStack(); showTracks(); document.getElementById('trackView').style.display='none'; document.getElementById('allPlaylistsView').style.display='block'; document.getElementById('searchBarContainer').style.display='none'; renderAllPlaylists(); }
+        function toggleLyrics(){ isLyricsMode=!isLyricsMode; if(isLyricsMode){ document.getElementById('trackView').style.display='none'; document.getElementById('artistView').style.display='none'; document.getElementById('blindTestView').style.display='none'; document.getElementById('profileView').style.display='none'; document.getElementById('lyricsView').style.display='block'; renderSyncedLyrics(); }else showTracks(); }
         
-        // Fonctions UI standards (Favorites, Search, etc.) restent identiques à votre code précédent...
-        // (Je ne les répète pas pour alléger, elles ne changent pas)
+        async function performSearch(){ 
+            resetNavStack(); 
+            const q=document.getElementById('searchInput').value; 
+            const t=document.getElementById('searchType').value; 
+            if(!q)return; 
+            safePushState({},"",`/?q=${encodeURIComponent(q)}`); 
+            showTracks(); 
+            document.getElementById('trackGrid').innerHTML='<p style="text-align:center;margin-top:50px;">Chargement...</p>'; 
+            
+            let results = [];
+            if (t === 'all' || t === 'playlist') {
+                const playlists = await searchPublicPlaylists(q);
+                results = results.concat(playlists);
+            }
+            try {
+                const r=await fetch(`${API_BASE}/search?q=${encodeURIComponent(q)}&type=${t}`); 
+                const d=await r.json(); 
+                if(d.albums) d.albums.forEach(a=>results.push({...a,type:'album'})); 
+                if(d.tracks) d.tracks.forEach(x=>results.push({...x,type:'track'})); 
+                if(d.external_playlists) d.external_playlists.forEach(p=>results.push(p));
+            } catch(e) { console.error(e); }
+            renderGrid(results, false);
+        }
+
+        function openExternalPlaylist(playlist) {
+            pushNavState();
+            document.getElementById('trackView').style.display = 'none';
+            document.getElementById('artistView').style.display = 'none';
+            document.getElementById('lyricsView').style.display = 'none';
+            document.getElementById('blindTestView').style.display = 'none';
+            document.getElementById('profileView').style.display = 'none';
+            document.getElementById('allPlaylistsView').style.display = 'none';
+            document.getElementById('searchBarContainer').style.display = 'none';
+            
+            const view = document.getElementById('playlistView');
+            view.style.display = 'block';
+            
+            document.getElementById('playlistTitle').innerHTML = `
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <span>${playlist.name}</span>
+                    <span style="font-size:10px; background:rgba(255,255,255,0.1); padding:2px 6px; border-radius:4px;">PLAYLIST</span>
+                </div>`;
+            const g = document.getElementById('playlistGrid');
+            g.innerHTML = `
+                <div style="grid-column:1/-1; text-align:center; padding:50px;">
+                    <i class="fas fa-sync fa-spin" style="font-size:30px; color:var(--primary); margin-bottom:20px;"></i>
+                    <p>Chargement de la playlist...</p>
+                </div>`;
+            
+            fetch(`${API_BASE}/yt_playlist?id=${playlist.id}`)
+                .then(r => r.json())
+                .then(details => {
+                    if(!details.tracks || details.tracks.length === 0) { g.innerHTML = '<p style="padding:20px;">Vide.</p>'; return; }
+                    g.innerHTML = ''; 
+                    details.tracks.forEach((it) => {
+                        const displayImg = it.img || it.album.image.large || 'https://via.placeholder.com/300'; 
+                        const div = document.createElement('div'); div.className = 'track-card'; div.dataset.id = it.id;
+                        div.innerHTML = `<div class="badges-container"></div><img src="${displayImg}"><h3>${it.title}</h3><p>${it.performer.name}</p>`;
+                        div.onclick = () => { tracks = details.tracks.map(t => ({ ...t, img: t.img || t.album.image.large, type: 'track' })); const idx = tracks.findIndex(x => x.id === it.id); loadTrack(idx !== -1 ? idx : 0); };
+                        g.appendChild(div);
+                    });
+                    updateActiveCard();
+                })
+                .catch(err => { console.error(err); g.innerHTML = '<p style="text-align:center; padding:20px; color:red;">Erreur de chargement.</p>'; });
+        }
+
+        function renderGrid(items, q=false, emptyMsg="Aucun résultat.") {
+            currentGridItems = items || [];
+            const g=document.getElementById('trackGrid'); g.innerHTML=''; 
+            if(!items||items.length===0){ g.innerHTML=`<div style="grid-column:1/-1;text-align:center;padding:50px;color:#555;"><i class="far fa-folder-open" style="font-size:30px;margin-bottom:10px;"></i><p>${emptyMsg}</p></div>`; return; } 
+            items.forEach(it=>{ 
+                const isAlb=it.type==='album'; const isPl=it.type==='playlist'; const src=it.source; 
+                let mediaElement = '';
+                if (isPl) { if (typeof getPlaylistCoverHTML === 'function' && src !== 'ytmusic') { mediaElement = getPlaylistCoverHTML(it); } else { let imgUrl = it.image || 'https://via.placeholder.com/300'; mediaElement = `<img src="${imgUrl}">`; } } else { let u = ''; if(src==='subsonic'){ u=`${API_BASE}/get_subsonic_cover/${isAlb?it.image.large:it.album.image.large}`; } else { u=(isAlb?it.image.large:it.album.image.large)||''; u=u.replace('_300','_600'); } if(!u)u='https://via.placeholder.com/300'; mediaElement = `<img src="${u}">`; } 
+                const d=document.createElement('div'); d.className='track-card'; if(it.type==='artist') d.classList.add('artist-card'); d.dataset.id=it.id; 
+                let b = ''; let rankBadgeHTML = ''; 
+                if(isAlb) b='<div class="type-badge badge-album">ALBUM</div>'; else if(isPl) b='<div class="type-badge badge-hires" style="background:#ff0055">PLAYLIST</div>'; 
+                if(src!=='subsonic' && src!=='ytmusic' && it.maximum_bit_depth>16 && !isPl) b+='<div class="type-badge badge-hires">HI-RES</div>'; 
+                if(it.rank) { let rankClass = 'rank-other'; if(it.rank === 1) rankClass = 'rank-1'; else if(it.rank === 2) rankClass = 'rank-2'; else if(it.rank === 3) rankClass = 'rank-3'; rankBadgeHTML = `<div class="rank-badge ${rankClass}">#${it.rank}</div>`; }
+                let subtitle = ''; if (isPl) { subtitle = it.performer ? it.performer.name : 'Playlist'; } else { subtitle = isAlb ? it.artist.name : it.performer.name; }
+                let votesHTML = ''; if (it.like_count) { votesHTML = `<div class="vote-count"><i class="fas fa-heart"></i> ${it.like_count}</div>`; }
+                d.innerHTML=`${rankBadgeHTML}<div class="badges-container">${b}</div>${mediaElement}<h3>${it.name||it.title}</h3><p>${subtitle}</p>${votesHTML}`; 
+                d.onclick=()=>{ if(isAlb) openAlbum(it.id,src); else if(isPl) { if(src === 'ytmusic') openExternalPlaylist(it); else openPlaylist(it.id); } else { if(q){tracks=items; const idx=tracks.findIndex(x=>x.id===it.id); isRadioActive=false; document.getElementById('radioBadge').style.display='none'; loadTrack(idx!==-1?idx:0);} else{tracks=[it]; isRadioActive=false; document.getElementById('radioBadge').style.display='none'; loadTrack(0);} } }; 
+                g.appendChild(d); 
+            }); 
+            updateActiveCard(); 
+        }
+        async function openArtist(id){ safePushState({},"",`/?artist=${id}`); document.getElementById('trackGrid').innerHTML='<p style="text-align:center;margin-top:50px;">Chargement...</p>'; try{const r=await fetch(`${API_BASE}/artist?id=${id}`); const d=await r.json(); if(d.albums&&d.albums.items) renderGrid(d.albums.items.map(a=>({...a,type:'album',artist:{name:d.name}})),false); }catch(e){console.error(e);} }
+        async function openAlbum(id,s){ pushNavState(); safePushState({},"",`/?album=${id}&source=${s||''}`); document.getElementById('trackGrid').innerHTML='<p style="text-align:center;margin-top:50px;">Chargement...</p>'; try{const r=await fetch(`${API_BASE}/album?id=${id}&source=${s||''}`); const d=await r.json(); if(d.tracks&&d.tracks.items) renderGrid(d.tracks.items.map(t=>({...t,type:'track',performer:t.performer||{name:d.artist.name},album:{image:{large:d.image.large},title:d.title},source:d.source||t.source||'qobuz'})),true); }catch(e){console.error(e);} }
         
-        // Optimisation Arrière-plan
+        function setupMediaSession(t) {
+            if ('mediaSession' in navigator) {
+                let img = 'https://via.placeholder.com/300';
+                if(t.source === 'subsonic') img = `${API_BASE}/get_subsonic_cover/${t.album.image.large}`;
+                else if(t.album && t.album.image) img = t.album.image.large.replace('_300','_600');
+                navigator.mediaSession.metadata = new MediaMetadata({ title: t.title, artist: t.performer ? t.performer.name : 'Artiste', album: t.album ? t.album.title : '', artwork: [{ src: img, sizes: '512x512', type: 'image/jpeg' }] });
+                navigator.mediaSession.setActionHandler('play', play); navigator.mediaSession.setActionHandler('pause', pause); navigator.mediaSession.setActionHandler('previoustrack', () => { if(currentIndex > 0) loadTrack(currentIndex - 1); else activeAudio.currentTime = 0; }); navigator.mediaSession.setActionHandler('nexttrack', handleNext); navigator.mediaSession.setActionHandler('seekto', (d) => { if(d.seekTime) { activeAudio.currentTime = d.seekTime; updateMediaSessionState(); if(typeof broadcastSeek === 'function') broadcastSeek(); } });
+            }
+        }
+        function updateMediaSessionState() { if (!('mediaSession' in navigator)) return; let d = activeAudio.duration; const t = tracks[currentIndex]; if ((!d || !isFinite(d)) && t && t.duration) { d = t.duration; } if (d && isFinite(d) && activeAudio.currentTime <= d) { try { navigator.mediaSession.setPositionState({ duration: d, playbackRate: activeAudio.playbackRate, position: activeAudio.currentTime }); } catch(e) { console.warn("MediaSession Error:", e); } } }
+        async function fetchLyrics(t,a,l){ try{const r=await fetch(`${API_BASE}/lyrics?artist=${encodeURIComponent(a)}&title=${encodeURIComponent(t.title)}&album=${encodeURIComponent(l||'')}&duration=${t.duration}`); const d=await r.json(); if(d.type==='synced'){parseLRC(d.lyrics);renderSyncedLyrics();}else if(d.type==='plain')document.getElementById('lyricsView').innerHTML=`<div style="white-space:pre-line;font-size:18px;line-height:1.6;">${d.lyrics}</div>`; else document.getElementById('lyricsView').innerHTML='<p style="margin-top:50px;">Non trouvé.</p>';}catch(e){document.getElementById('lyricsView').innerHTML='<p style="margin-top:50px;">Indisponible.</p>';}}
+        function parseLRC(l){if(!l)return;try{const ls=l.split('\n'),rx=/^\[(\d{2}):(\d{2})[.:](\d{2,3})\](.*)/; lyricsData=[]; ls.forEach(x=>{const m=x.match(rx);if(m){const s=parseInt(m[1])*60+parseInt(m[2])+(m[3].length===2?parseInt(m[3])/100:parseInt(m[3])/1000); lyricsData.push({time:s,text:m[4].trim()});}}); if(lyricsData.length>0)firstLineTime=lyricsData[0].time;}catch(e){}}
+        function renderSyncedLyrics(){if(!isLyricsMode||!lyricsData.length)return;const c=document.getElementById('lyricsView');c.innerHTML='';const s=document.createElement('div');s.style.height="40vh";c.appendChild(s);lyricsData.forEach((l,i)=>{const d=document.createElement('div');d.className='lyric-line';d.id=`line-${i}`;d.innerText=l.text;d.onclick=()=>{activeAudio.currentTime=l.time;play();};c.appendChild(d);});const b=document.createElement('div');b.style.height="40vh";c.appendChild(b);}
+        function syncLyricsUI(){ 
+            // OPTIMISATION ARRIERE PLAN
+            if (document.hidden) return;
+
+            const ic=document.getElementById('introContainer'); if(isLyricsMode&&firstLineTime!==null&&firstLineTime>0){const lf=firstLineTime-activeAudio.currentTime; if(lf>0.5){ic.style.display='block';document.getElementById('introBarFill').style.width=(activeAudio.currentTime/firstLineTime)*100+'%';document.getElementById('introText').innerText=`Début dans ${lf.toFixed(1)}s`;}else ic.style.display='none';}else ic.style.display='none'; if(!isLyricsMode||!lyricsData.length)return; const cu=activeAudio.currentTime; let idx=-1; for(let i=0;i<lyricsData.length;i++){if(cu>=lyricsData[i].time)idx=i;else break;} document.querySelectorAll('.lyric-line').forEach((d,i)=>{if(i===idx){if(!d.classList.contains('active')){d.classList.add('active');d.scrollIntoView({behavior:"smooth",block:"center"});}}else d.classList.remove('active');}); 
+        }
+
+        document.addEventListener('DOMContentLoaded',()=>{
+            document.getElementById('btnSearch').addEventListener('click',performSearch);
+            document.getElementById('searchInput').addEventListener('keypress',(e)=>{if(e.key==='Enter')performSearch();});
+            document.getElementById('btnPlay').addEventListener('click',()=>isPlaying?pause():play());
+            document.getElementById('btnNext').addEventListener('click',handleNext);
+            document.getElementById('btnPrev').addEventListener('click',()=>{ if(currentIndex > 0) loadTrack(currentIndex - 1); else activeAudio.currentTime = 0; });
+            document.getElementById('progressBar').addEventListener('click',(e)=>{if(!activeAudio.duration)return;activeAudio.currentTime=(e.offsetX/document.getElementById('progressBar').clientWidth)*activeAudio.duration;updateMediaSessionState(); if(typeof broadcastSeek === 'function') broadcastSeek();});
+            document.querySelector('.vol-slider').oninput=function(){setGlobalVolume(this.value)};
+        });
+
+        // GESTION INTELLIGENTE ARRIÈRE-PLAN
         document.addEventListener('visibilitychange', () => {
             if (document.hidden) {
-                if(typeof stopEffects === 'function') stopEffects();
+                console.log("Background mode: UI paused");
+                if (typeof stopEffects === 'function') stopEffects();
                 const orb = document.getElementById('orbitVisual');
                 if(orb) orb.style.animation = 'none';
             } else {
-                if(isOrbitOn) document.getElementById('orbitVisual').classList.add('orbiting');
+                console.log("Foreground mode");
+                const t = tracks[currentIndex];
+                if (t && magicEnabled && typeof checkMagic === 'function') checkMagic(t.title, t.performer ? t.performer.name : t.artist);
+                if (isOrbitOn) {
+                     const orb = document.getElementById('orbitVisual');
+                     if(orb) { 
+                         orb.className = 'orbit-orb'; 
+                         void orb.offsetWidth; 
+                         orb.classList.add('center-stage', 'orbiting');
+                     }
+                }
+                syncLyricsUI();
             }
         });
-
-        // Listeners Audio (Timeupdate, Ended)
-        [playerA, playerB].forEach(p => {
-            p.addEventListener('timeupdate', () => {
-                if(p !== activeAudio || document.hidden) return;
-                const pct = (p.currentTime / p.duration) * 100;
-                document.getElementById('progressFill').style.width = pct + '%';
-                document.getElementById('currTime').innerText = fmtTime(p.currentTime);
-                document.getElementById('totTime').innerText = fmtTime(p.duration);
-            });
-            p.addEventListener('ended', () => handleNext());
-        });
-
-        function fmtTime(s) { return (s-(s%=60))/60+(9<s?':':':0')+~~s; }
-        
-        // Initialisation
-        window.onload = () => {
-            // Charger les favoris ou la page d'accueil...
-            goHome();
-            document.querySelector('.vol-slider').oninput = (e) => setGlobalVolume(e.target.value);
-        };
-        
-        // Placeholder pour les fonctions externes (triggerRadio, etc.)
-        // Copiez-collez vos fonctions existantes ici (triggerRadio, performSearch, etc.)
-        // Elles fonctionnent sans modification avec ce nouveau moteur.
-        
     </script>
+    <script src="shortcuts.js"></script>
 </body>
 </html>
