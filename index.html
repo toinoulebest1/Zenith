@@ -32,6 +32,17 @@
         <div class="login-card">
             <h1 style="margin-bottom: 20px; font-size: 2rem; color: var(--primary);">ZENITH</h1>
             <h2 id="authTitle" style="margin-bottom: 30px; font-weight: 300;">Connexion</h2>
+            
+            <button id="btnSpotifyAction" class="btn-spotify" onclick="loginWithSpotify()">
+                <i class="fab fa-spotify"></i> Se connecter avec Spotify
+            </button>
+            
+            <div style="display:flex; align-items:center; width:100%; margin: 20px 0;">
+                <hr style="flex:1; border:0; border-top:1px solid rgba(255,255,255,0.1);">
+                <span style="padding:0 10px; color:#666; font-size:12px;">OU CLASSIQUE</span>
+                <hr style="flex:1; border:0; border-top:1px solid rgba(255,255,255,0.1);">
+            </div>
+
             <input type="text" id="username" class="login-input" placeholder="Nom d'utilisateur" style="display:none;" onkeypress="if(event.key==='Enter') document.getElementById('email').focus()">
             <input type="email" id="email" class="login-input" placeholder="Email" onkeypress="if(event.key==='Enter') document.getElementById('password').focus()">
             <input type="password" id="password" class="login-input" placeholder="Mot de passe" onkeypress="if(event.key==='Enter') isLoginMode ? login(document.getElementById('email').value, this.value) : signup(document.getElementById('email').value, this.value)">
@@ -541,7 +552,7 @@
 
             let url = '';
             if(nextTrack.source === 'subsonic') url = `${API_BASE}/stream_subsonic/${nextTrack.id}`;
-            else if(nextTrack.source === 'yt_lazy') {
+            else if(nextTrack.source === 'yt_lazy' || nextTrack.source === 'spotify_lazy') {
                 const artist = nextTrack.performer ? nextTrack.performer.name : 'Inconnu';
                 url = `${API_BASE}/resolve_stream?title=${encodeURIComponent(nextTrack.title)}&artist=${encodeURIComponent(artist)}`;
             }
@@ -553,7 +564,7 @@
             currentIndex = index; currentTrackId = nextTrack.id;
             updateInterfaceInfo(nextTrack);
             
-            if(nextTrack.source !== 'yt_lazy') safePushState({}, "", `/?track=${nextTrack.id}&source=${nextTrack.source}`);
+            if(nextTrack.source !== 'yt_lazy' && nextTrack.source !== 'spotify_lazy') safePushState({}, "", `/?track=${nextTrack.id}&source=${nextTrack.source}`);
             
             // CROSSFADE VIA WORKLET
             if (autoPlay && isPlaying && crossfadeDuration > 0) {

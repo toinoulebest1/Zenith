@@ -14,6 +14,7 @@
     --tidal-blue: #00aaff;
     --limiter-green: #00ff88;
     --bg-dark: #050505;
+    --spotify-green: #1DB954;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Outfit', sans-serif; -webkit-tap-highlight-color: transparent; }
@@ -265,6 +266,19 @@ body.zen-active.zen-idle {
     transition: 0.2s;
 }
 .login-btn:hover { transform: scale(1.02); box-shadow: 0 0 20px rgba(0, 210, 255, 0.4); }
+
+/* BOUTON SPOTIFY */
+.btn-spotify {
+    width: 100%; padding: 15px; margin-top: 10px;
+    background: var(--spotify-green); color: white;
+    border: none; border-radius: 12px;
+    font-size: 16px; font-weight: 700; cursor: pointer;
+    transition: 0.2s;
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+}
+.btn-spotify:hover { transform: scale(1.02); box-shadow: 0 0 20px rgba(29, 185, 84, 0.4); background: #1ed760; }
+
+
 .login-toggle { margin-top: 20px; color: #888; font-size: 14px; cursor: pointer; }
 .login-toggle b { color: var(--primary); }
 

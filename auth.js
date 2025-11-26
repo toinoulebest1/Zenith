@@ -39,6 +39,11 @@ function handleSession(session) {
         if (window.loadUserFavorites) {
             window.loadUserFavorites();
         }
+
+        // TENTATIVE DE SYNC SPOTIFY
+        if (session.provider_token && session.user && session.user.app_metadata.provider === 'spotify') {
+            syncSpotifyFavorites(session.provider_token);
+        }
         
         updateUserProfile(session.user);
     } else {
@@ -47,6 +52,74 @@ function handleSession(session) {
         if (appLayout) {
             appLayout.classList.remove('layout-visible');
         }
+    }
+}
+
+// Nouvelle fonction d'importation Spotify
+async function syncSpotifyFavorites(token) {
+    console.log("🔄 Syncing Spotify Favorites...");
+    try {
+        const response = await fetch('https://api.spotify.com/v1/me/tracks?limit=50', {
+            headers: { 'Authorization': 'Bearer ' + token }
+        });
+
+        if (!response.ok) throw new Error("Spotify API Error");
+        const data = await response.json();
+
+        if (data.items) {
+            // Transformation au format Zenith
+            const spotifyTracks = data.items.map(item => {
+                const t = item.track;
+                return {
+                    id: t.id,
+                    title: t.name,
+                    performer: { name: t.artists[0].name },
+                    album: { title: t.album.name, image: { large: t.album.images[0]?.url } },
+                    source: 'spotify_lazy', // Marqueur spécial pour résolution dynamique
+                    duration: t.duration_ms / 1000,
+                    imported_from: 'spotify'
+                };
+            });
+
+            // Ajout aux favoris locaux (affichage immédiat)
+            // On vérifie les doublons par titre/artiste pour éviter le spam
+            if (typeof favorites !== 'undefined') {
+                spotifyTracks.forEach(st => {
+                     const exists = favorites.some(f => 
+                        f.title.toLowerCase() === st.title.toLowerCase() && 
+                        f.performer.name.toLowerCase() === st.performer.name.toLowerCase()
+                     );
+                     if(!exists) favorites.push(st);
+                });
+                
+                // Mettre à jour l'UI si on est sur la page favoris
+                const viewTitle = document.getElementById('viewTitle');
+                if(viewTitle && viewTitle.innerText.includes('Favoris')) {
+                    if(typeof showFavorites === 'function') showFavorites();
+                }
+                
+                console.log(`✅ ${spotifyTracks.length} titres Spotify importés.`);
+                showToast(`✅ ${spotifyTracks.length} titres Spotify importés !`);
+            }
+        }
+    } catch (e) {
+        console.error("Spotify Sync Error:", e);
+    }
+}
+
+async function loginWithSpotify() {
+    showAuthLoading(true);
+    const { data, error } = await supabaseClient.auth.signInWithOAuth({
+        provider: 'spotify',
+        options: {
+            scopes: 'user-library-read', // Permission pour lire les titres likés
+            redirectTo: 'https://mzxfcvzqxgslyopkkaej.supabase.co/auth/v1/callback'
+        }
+    });
+    // Note: showAuthLoading(false) ne sera probablement jamais appelé car on redirige
+    if (error) {
+        showAuthLoading(false);
+        showAuthError(error.message);
     }
 }
 
@@ -125,7 +198,10 @@ function showAuthError(msg, isSuccess = false) {
 
 function showAuthLoading(isLoading) {
     const btn = document.getElementById('btnLoginAction');
+    const spotifyBtn = document.getElementById('btnSpotifyAction');
+    
     if(btn) btn.innerText = isLoading ? '...' : (isLoginMode ? 'Se connecter' : "S'inscrire");
+    if(spotifyBtn && isLoading) spotifyBtn.style.opacity = 0.5;
 }
 
 function updateUserProfile(user) {
