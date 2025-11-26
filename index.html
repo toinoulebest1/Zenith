@@ -351,10 +351,11 @@
         // --- VARIABLES AUDIO WORKLET ---
         let audioCtx, zenithNode, sourceA, sourceB;
         let masterGain; // Pour le mode fallback
-        let isOrbitOn = false, isKaraokeOn = false, isLimiterOn = true;
+        let isOrbitOn = false, isKaraokeOn = false, isLimiterOn = false; // LIMITER OFF PAR DÉFAUT
         let eqFilters = []; const eqFrequencies = [60, 230, 910, 4000, 14000];
+        let compressor; // Variable globale pour le compresseur
 
-        let userSettings = { limiter: true, crossfade: 0, magic: true };
+        let userSettings = { limiter: false, crossfade: 0, magic: true }; // LIMITER FALSE PAR DÉFAUT
         let magicEnabled = true; 
         
         let favorites = [];
@@ -390,7 +391,15 @@
             const isMagic = (settings.magic === true || settings.magic === 'true'); magicEnabled = isMagic; document.getElementById('settingMagic').checked = isMagic; if(!magicEnabled) { document.body.className = ''; document.getElementById('wandContainer').classList.remove('active'); if(typeof stopEffects === 'function') stopEffects(); }
         }
         async function changeSetting(key, value) { userSettings[key] = value; applySettings(userSettings); localStorage.setItem('zenith_pref_' + key, value); if(!supabaseClient) return; const { data: { user } } = await supabaseClient.auth.getUser(); if(user) { try { await supabaseClient.from('profiles').update({ settings: userSettings }).eq('id', user.id); } catch(e) { console.error("Sync settings error", e); } } }
-        function loadLocalSettings() { const sLimiter = localStorage.getItem('zenith_pref_limiter'); if(sLimiter !== null) userSettings.limiter = (sLimiter === 'true'); const sXfade = localStorage.getItem('zenith_pref_crossfade'); if(sXfade !== null) userSettings.crossfade = parseInt(sXfade); const sMagic = localStorage.getItem('zenith_pref_magic'); if(sMagic !== null) userSettings.magic = (sMagic === 'true'); applySettings(userSettings); }
+        function loadLocalSettings() { 
+            const sLimiter = localStorage.getItem('zenith_pref_limiter'); 
+            if(sLimiter !== null) userSettings.limiter = (sLimiter === 'true'); 
+            else userSettings.limiter = false; // Valeur par défaut explicite
+
+            const sXfade = localStorage.getItem('zenith_pref_crossfade'); if(sXfade !== null) userSettings.crossfade = parseInt(sXfade); 
+            const sMagic = localStorage.getItem('zenith_pref_magic'); if(sMagic !== null) userSettings.magic = (sMagic === 'true'); 
+            applySettings(userSettings); 
+        }
         const originalLoadProfile = window.loadProfile; window.loadProfile = async function() { if(originalLoadProfile) await originalLoadProfile(); const { data: { user } } = await supabaseClient.auth.getUser(); if(!user) return; if (window.loadUserPlaylists) window.loadUserPlaylists(); const { data, error } = await supabaseClient.from('profiles').select('settings').eq('id', user.id).single(); if (data && data.settings) { userSettings = { ...userSettings, ...data.settings }; applySettings(userSettings); localStorage.setItem('zenith_pref_limiter', userSettings.limiter); localStorage.setItem('zenith_pref_crossfade', userSettings.crossfade); localStorage.setItem('zenith_pref_magic', userSettings.magic); } };
         function showProfileSettings() { document.getElementById('trackView').style.display = 'none'; document.getElementById('artistView').style.display = 'none'; document.getElementById('lyricsView').style.display = 'none'; document.getElementById('blindTestView').style.display = 'none'; document.getElementById('allPlaylistsView').style.display = 'none'; document.getElementById('playlistView').style.display = 'none'; document.getElementById('searchBarContainer').style.display = 'none'; document.getElementById('profileView').style.display = 'block'; window.loadProfile(); }
         window.loadUserFavorites = async function() { if(!supabaseClient) return; const { data: { user } } = await supabaseClient.auth.getUser(); if(!user) return; const { data, error } = await supabaseClient.from('favorites').select('*'); if(data) { favorites = data.map(f => f.track_data); updateLikeButtonState(); } window.loadProfile(); };
@@ -449,13 +458,20 @@
                     return filter;
                 });
 
-                const compressor = audioCtx.createDynamicsCompressor();
-                // Paramètres rapides pour éviter le clipping
-                compressor.threshold.value = -12;
-                compressor.knee.value = 30;
-                compressor.ratio.value = 12;
-                compressor.attack.value = 0.003; 
-                compressor.release.value = 0.25;
+                compressor = audioCtx.createDynamicsCompressor();
+                
+                // INITIALISATION CORRECTE DU COMPRESSEUR EN FONCTION DES RÉGLAGES
+                if (isLimiterOn) {
+                    compressor.threshold.value = -12;
+                    compressor.knee.value = 30;
+                    compressor.ratio.value = 12;
+                    compressor.attack.value = 0.003; 
+                    compressor.release.value = 0.25;
+                } else {
+                    // Transparent par défaut
+                    compressor.threshold.value = 0;
+                    compressor.ratio.value = 1; 
+                }
 
                 prevNode.connect(compressor);
                 compressor.connect(audioCtx.destination);
@@ -475,10 +491,25 @@
         }
 
         function toggleLimiter(forceState = null, silent = false) {
-            // Le limiter est natif dans la chaîne, ici on ne fait qu'afficher l'état
             if(forceState!==null) isLimiterOn = forceState; else isLimiterOn = !isLimiterOn;
+            
+            // Mise à jour visuelle
             document.getElementById('limiterBtn').classList.toggle('active', isLimiterOn);
-            if(!silent) showToast(isLimiterOn ? "Normalisateur Activé" : "Désactivé");
+            
+            // Application Audio Réelle
+            if (compressor && audioCtx) {
+                const t = audioCtx.currentTime;
+                if (isLimiterOn) {
+                    compressor.threshold.setValueAtTime(-12, t);
+                    compressor.ratio.setValueAtTime(12, t);
+                } else {
+                    // Retour à la transparence (Bypass virtuel)
+                    compressor.threshold.setValueAtTime(0, t);
+                    compressor.ratio.setValueAtTime(1, t);
+                }
+            }
+
+            if(!silent) showToast(isLimiterOn ? "Normalisateur Activé" : "Désactivé (Hi-Fi)");
         }
 
         function toggleKaraoke() {
@@ -654,7 +685,7 @@
                     
                     const div = document.createElement('div'); div.className = 'track-card'; div.dataset.id = raw.id;
                     div.innerHTML = `<div class="badges-container"><div class="type-badge" style="background:var(--primary)">RADIO</div></div><img src="${hd}"><h3>${raw.title}</h3><p style="color:var(--primary)">${raw.performer.name}</p>`;
-                    div.onclick = () => loadTrack(specificIndex); 
+                    div.onclick = () => { loadTrack(specificIndex); }; 
                     
                     document.getElementById('trackGrid').appendChild(div);
                     if (!isBackground) { 

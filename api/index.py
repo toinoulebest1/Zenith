@@ -688,9 +688,11 @@ def stream_subsonic(track_id):
 @app.route('/stream/<track_id>')
 def stream_track(track_id):
     if not client: return jsonify({"error": "Init error"}), 500
+    # CORRECTIF : On utilise 'fmt' dans l'appel pour tester les formats (27, 7, 6, 5)
+    # Au lieu de forcer '5' (MP3) à chaque fois
     for fmt in [27, 7, 6, 5]:
         try:
-            url_data = client.get_track_url(track_id, 5)
+            url_data = client.get_track_url(track_id, fmt)
             if 'url' in url_data: return redirect(f"{SUPABASE_PROXY_URL}?url={urllib.parse.quote(url_data['url'])}")
         except: continue
     return jsonify({"error": "No URL found"}), 404
