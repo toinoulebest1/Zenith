@@ -1,10 +1,23 @@
+import sys
+import os
+
+# 1. Configuration des chemins pour Docker/Coolify
+# On ajoute le dossier courant au path pour que les imports (qobuz_api, etc.) fonctionnent
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(current_dir)
+
+# On définit la racine du projet (un niveau au-dessus de api/) pour trouver index.html
+PROJECT_ROOT = os.path.abspath(os.path.join(current_dir, '..'))
+
 from flask import Flask, jsonify, redirect, request, send_file, Response, stream_with_context, send_from_directory
 from flask_cors import CORS
+
+# Imports locaux (maintenant que le sys.path est configuré)
 from qobuz_api import QobuzClient, get_app_credentials
 from lyrics_search import LyricsSearcher 
+
 import logging
 import random
-import os
 import requests
 import json 
 from pathlib import Path 
@@ -38,7 +51,7 @@ SUBSONIC_VERSION = "1.13.0"
 # --- CONFIGURATION SUPABASE PROXY ---
 SUPABASE_PROXY_URL = "https://mzxfcvzqxgslyopkkaej.supabase.co/functions/v1/stream-proxy"
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder=PROJECT_ROOT, static_url_path='')
 CORS(app)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ZenithServer")
@@ -239,7 +252,7 @@ def get_subsonic_track_details(track_id):
         logger.error(f"Subsonic Details Error: {e}")
         return None
 
-# --- RECHERCHE RECOMMENDATIONS INTELLIGENTE (YT -> CHECK QOBUZ/SUBSONIC) ---
+# --- RECHERCHE RECOMMENDATIONS INTELLIGENTE ---
 def get_yt_recommendations(title, artist, banned_artists=set()):
     """
     Algorithme Radio Amélioré avec filtre "Album" (Audio Only)
@@ -272,13 +285,10 @@ def get_yt_recommendations(title, artist, banned_artists=set()):
             logger.error(f"❌ YT Radio: Erreur playlist: {e}")
             return None
 
-        # 3. Filtrage et Vérification Qobuz/Subsonic
+        # 3. Filtrage
         seen_ids = set()
         candidates = []
         
-        logger.info(f"📥 [RADIO FETCH] {len(raw_candidates)} candidats bruts trouvés.")
-
-        # Pré-filtrage rapide pour avoir une liste propre
         for item in raw_candidates:
             if 'videoId' in item and 'playlistId' not in item:
                 r_id = item.get('videoId')
@@ -289,50 +299,25 @@ def get_yt_recommendations(title, artist, banned_artists=set()):
                 artists = item.get('artists', [])
                 r_artist_name = artists[0]['name'] if artists else "Artiste inconnu"
                 
-                # --- FILTRE 1 : LE CLÉ "ALBUM" ---
-                # C'est la méthode fiable pour virer les clips vidéos
-                if 'album' not in item or not item.get('album'):
-                    logger.info(f"🚫 [REJET] Pas d'album (Probablement un Clip): {r_title}")
-                    continue
-
-                # --- AUTRES FILTRES ---
-                if clean_string(r_artist_name) in banned_artists: 
-                    logger.info(f"🚫 [REJET] Artiste banni: {r_artist_name}")
-                    continue
-                if clean_string(r_title) == clean_string(title): 
-                    logger.info(f"🚫 [REJET] Doublon titre: {r_title}")
-                    continue
+                if 'album' not in item or not item.get('album'): continue
+                if clean_string(r_artist_name) in banned_artists: continue
+                if clean_string(r_title) == clean_string(title): continue
                 
-                # On a retiré le filtre is_garbage_content agressif (remix, edit, etc.)
-                # On garde juste un check minimal pour les interviews
                 is_bad, reason = is_garbage_content(r_title, r_artist_name)
-                if is_bad:
-                    logger.info(f"🚫 [REJET] Contenu indésirable ({reason}): {r_title}")
-                    continue
+                if is_bad: continue
                 
-                logger.info(f"✨ [CANDIDAT] Retenu: {r_title} - {r_artist_name}")
                 candidates.append({'title': r_title, 'artist': r_artist_name})
 
-        # Mélange pour la variété
         random.shuffle(candidates)
         
-        # 4. BOUCLE DE VÉRIFICATION
+        # 4. RESOLUTION QOBUZ/SUBSONIC
         max_tries = 10
         checked_count = 0
         
-        logger.info(f"🔍 [RADIO CHECK] Vérification existence Qobuz/Subsonic...")
-
         for cand in candidates:
-            if checked_count >= max_tries:
-                break
+            if checked_count >= max_tries: break
             
-            c_title = cand['title']
-            c_artist = cand['artist']
-            
-            logger.info(f"🕵️ [RESOLVING] #{checked_count+1}: {c_title} - {c_artist}")
-            
-            # Appel à la fonction qui cherche sur Qobuz/Subsonic
-            match = try_resolve_track(c_title, c_artist)
+            match = try_resolve_track(cand['title'], cand['artist'])
             
             if match:
                 source = match['source']
@@ -345,26 +330,17 @@ def get_yt_recommendations(title, artist, banned_artists=set()):
                         fix_qobuz_title(meta)
                         if meta.get('album', {}).get('image', {}).get('large'):
                             meta['img'] = meta['album']['image']['large'].replace('_300', '_600')
-                        
-                        logger.info(f"✅ [SUCCESS] TROUVÉ SUR QOBUZ: {meta['title']}")
                         return meta
-                    except Exception as e:
-                        logger.error(f"Erreur fetch Qobuz meta: {e}")
+                    except Exception as e: logger.error(f"Erreur fetch Qobuz meta: {e}")
                 
                 elif source == 'subsonic':
                     try:
                         song = get_subsonic_track_details(real_id)
-                        if song:
-                            logger.info(f"✅ [SUCCESS] TROUVÉ SUR SUBSONIC: {song['title']}")
-                            return song
-                    except Exception as e:
-                        logger.error(f"Erreur fetch Subsonic meta: {e}")
-            else:
-                logger.info("❌ [FAIL] Non trouvé sur les plateformes Hi-Res.")
+                        if song: return song
+                    except Exception as e: logger.error(f"Erreur fetch Subsonic meta: {e}")
 
             checked_count += 1
             
-        logger.warning("❌ [RADIO FAIL] Aucun candidat YouTube n'existe sur Qobuz/Subsonic.")
         return None 
 
     except Exception as e:
@@ -448,8 +424,6 @@ def try_resolve_track(title, artist):
             items = q_resp.get('tracks', {}).get('items', [])
             if items:
                 rec = items[0]
-                
-                # Logique de matching Robuste (Fonctionne SANS RapidFuzz)
                 t1 = clean_string(rec['title'])
                 t2 = clean_string(title)
                 
@@ -457,7 +431,6 @@ def try_resolve_track(title, artist):
                 if FUZZ_AVAILABLE:
                     if fuzz.ratio(t1, t2) > 50: is_match = True
                 else:
-                    # Fallback si rapidfuzz manque : vérification d'inclusion simple
                     if t2 in t1 or t1 in t2: is_match = True
                     
                 if is_match:
@@ -480,7 +453,6 @@ def recommend_tracks():
     original_title = request.args.get('title', '')
     
     recent_artists_str = request.args.get('recent_artists', '')
-    # SPLIT PAR PIPE (Robustesse) ou VIRGULE (Fallback)
     if '|' in recent_artists_str:
         recent_artists_raw = recent_artists_str.split('|')
     else:
@@ -488,7 +460,6 @@ def recommend_tracks():
         
     recent_artists = [clean_string(a) for a in recent_artists_raw if a]
     
-    # QUOTA 2 SUR 5 POUR BAN
     banned_artists = set()
     artist_counts = {}
     for artist in recent_artists:
@@ -499,13 +470,11 @@ def recommend_tracks():
             banned_artists.add(artist)
 
     # 1. TENTATIVE YOUTUBE AVEC VÉRIFICATION QOBUZ/SUBSONIC
-    # Si get_yt_recommendations renvoie quelque chose, c'est désormais garanti d'être du Qobuz/Subsonic
-    # (Ou None si rien n'a été trouvé)
     resolved_rec = get_yt_recommendations(original_title, original_artist, banned_artists)
     if resolved_rec:
         return jsonify(resolved_rec)
         
-    # 2. FALLBACK QOBUZ (Si la vérification a échoué partout)
+    # 2. FALLBACK QOBUZ
     if client:
         try:
             track_id = request.args.get('current_id')
@@ -524,17 +493,13 @@ def recommend_tracks():
             
             for item in items:
                 if str(item['id']) == str(track_id): continue
-                
                 candidate_artist = item.get('performer', {}).get('name', 'Inconnu')
                 candidate_clean = clean_string(candidate_artist)
-                
                 if candidate_clean in banned_artists: continue
                 if candidate_clean == clean_string(original_artist) and clean_string(item['title']) == clean_string(original_title): continue
-
                 item['source'] = 'qobuz'
                 fix_qobuz_title(item)
                 return jsonify(item)
-                
         except Exception as e:
             logger.error(f"Qobuz Fallback Error: {e}")
 
@@ -553,21 +518,17 @@ def search_tracks():
 
     with ThreadPoolExecutor(max_workers=10) as executor:
         futures = {}
-        
         if search_type in ['track', 'all']:
             futures['q_tracks'] = executor.submit(threaded_qobuz_search, query, 25, 'track')
             futures['s_tracks'] = executor.submit(fetch_subsonic_tracks, query, 25)
-            
         if search_type in ['album', 'all']:
             futures['q_albums'] = executor.submit(threaded_qobuz_search, query, 15, 'album')
             futures['s_albums'] = executor.submit(fetch_subsonic_albums, query, 15)
-            
         if search_type in ['playlist', 'all']:
             try:
                 yt_raw = yt.search(query, filter='playlists', limit=15)
                 yt_albums = yt.search(query, filter='albums', limit=10)
                 all_yt = yt_raw + yt_albums
-                
                 for item in all_yt:
                     try:
                         thumbnails = item.get('thumbnails', [])
@@ -577,13 +538,11 @@ def search_tracks():
                         if w > 0 and h > 0:
                             ratio = w / h
                             if ratio < 0.9 or ratio > 1.1: continue
-                        
                         img_url = get_hq_yt_image(best_thumb['url'])
                         subtitle = "YouTube"
                         if 'author' in item: subtitle = item['author']
                         elif 'artists' in item: subtitle = ", ".join([a.get('name', '') for a in item['artists']])
                         elif 'year' in item: subtitle = str(item['year'])
-
                         playlists_results.append({
                             "id": item.get('browseId'),
                             "name": item.get('title'),
@@ -605,17 +564,11 @@ def search_tracks():
     if search_type in ['track', 'all']:
         sigs = set()
         for t in qobuz_tracks:
-            # SECURISATION DU PERFORER (CORRECTIF CRASH)
             artist_dict = t.get('performer') or t.get('artist') or {}
             artist_name = artist_dict.get('name', 'Inconnu')
-            
-            # Normalisation pour le frontend
-            if 'performer' not in t or not t['performer']:
-                t['performer'] = {'name': artist_name}
-                
+            if 'performer' not in t or not t['performer']: t['performer'] = {'name': artist_name}
             sig = f"{clean_string(t.get('title', ''))}_{clean_string(artist_name)}"
             sigs.add(sig); combined_tracks.append(t)
-            
         for t in subsonic_tracks:
             artist_name = t.get('performer', {}).get('name', 'Inconnu')
             sig = f"{clean_string(t.get('title', ''))}_{clean_string(artist_name)}"
@@ -656,7 +609,6 @@ def get_yt_playlist_details():
                     if w > 0 and h > 0:
                         ratio = w / h
                         if ratio < 0.9 or ratio > 1.1: continue
-                
                 t_title = track.get('title'); t_id = track.get('videoId')
                 artists_list = track.get('artists', []); t_artist = artists_list[0]['name'] if artists_list else (details.get('artists', [{'name':'Inconnu'}])[0]['name'])
                 t_img = album_art
@@ -719,9 +671,9 @@ def get_album():
             res = requests.get(url, params=params).json(); raw = res['subsonic-response']['album']; formatted_tracks = []
             if 'song' in raw:
                 for song in raw['song']:
-                    formatted_tracks.append({ 'id': song['id'], 'title': song['title'], 'duration': song.get('duration', 0), 'track_number': song.get('track', 0), 'performer': {'name': song.get('artist', raw.get('artist'))}, 'album': {'title': raw.get('name'), 'image': {'large': raw.get('coverArt')}}, 'source': 'subsonic', 'tracks': {'items': formatted_tracks} })
+                    formatted_tracks.append({ 'id': song['id'], 'title': song['title'], 'duration': song.get('duration', 0), 'track_number': song.get('track', 0), 'performer': {'name': song.get('artist', raw.get('artist'))}, 'album': {'title': raw.get('name'), 'image': {'large': raw.get('coverArt')}}, 'source': 'subsonic' })
             return jsonify({ 'id': raw['id'], 'title': raw.get('name'), 'artist': {'name': raw.get('artist')}, 'image': {'large': raw.get('coverArt')}, 'source': 'subsonic', 'tracks': {'items': formatted_tracks} })
-        except: return jsonify({"error": "Error"}), 500
+        except Exception as e: return jsonify({"error": str(e)}), 500
     if client:
         try: res = client.get_album_meta(album_id); res['source'] = 'qobuz'; return jsonify(res)
         except: pass
@@ -748,7 +700,6 @@ def get_subsonic_cover(cover_id):
     url = SUBSONIC_BASE + "getCoverArt.view"; params = get_subsonic_query_params(); params['id'] = cover_id; params['size'] = 600 
     req = requests.Request('GET', url, params=params); prepared = req.prepare(); return redirect(prepared.url)
 
-# --- ROUTE BLIND TEST ---
 @app.route('/blind_test_tracks')
 def get_blind_test_tracks():
     if not client: return jsonify({"error": "Client not initialized"}), 500
@@ -776,7 +727,6 @@ def get_lyrics():
     artist = request.args.get('artist'); title = request.args.get('title'); album = request.args.get('album')
     duration = request.args.get('duration')
     try:
-        # CORRECTION : Gestion sécurisée de la durée (peut être 'undefined' ou vide)
         if duration and duration != 'undefined':
             dur_int = int(float(duration))
         else:
@@ -785,15 +735,12 @@ def get_lyrics():
         dur_int = 0
         
     try:
-        # 1. PRIORITÉ : YouTube Music (Synced)
         yt_lyrics = fetch_yt_synced_lyrics(title, artist)
         if yt_lyrics:
             return jsonify({"type": "synced", "lyrics": yt_lyrics, "source": "YouTube"})
 
-        # 2. SECONDAIRE : LRCLib (Synced puis Plain)
         plain, synced = lyrics_engine.search_lyrics(artist, title, album, dur_int)
         if synced: return jsonify({"type": "synced", "lyrics": synced, "source": "LRCLib"})
-        
         if plain: return jsonify({"type": "plain", "lyrics": plain, "source": "LRCLib"})
         
     except Exception as e:
@@ -804,17 +751,16 @@ def get_lyrics():
 @app.route('/artist_bio')
 def get_artist_bio(): return jsonify({})
 
+# ROUTE PAR DEFAUT : SERVIR LE FRONTEND (index.html, css, js)
 @app.route('/')
 def serve_index():
-    # On sert index.html depuis le dossier racine calculé
     return send_from_directory(PROJECT_ROOT, 'index.html')
 
 @app.route('/<path:path>')
 def serve_static(path):
-    # On sert les autres fichiers (css, js) depuis la racine
     return send_from_directory(PROJECT_ROOT, path)
 
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))
-    print(f"🚀 Serveur local lancé sur le port {port}")
+    port = int(os.environ.get("PORT", 8000))
+    print(f"🚀 Serveur Docker lancé sur le port {port}")
     app.run(host='0.0.0.0', port=port)

@@ -1,17 +1,27 @@
-# On utilise une version légère de Python
-FROM python:3.9-slim
+# Utiliser une image Python légère
+FROM python:3.10-slim
 
-# On se place dans le dossier de l'application
+# Définir le dossier de travail
 WORKDIR /app
 
-# On copie tous vos fichiers dans l'image
-COPY . .
+# Installation des dépendances système nécessaires (gcc pour la compilation de certaines libs)
+RUN apt-get update && apt-get install -y gcc && rm -rf /var/lib/apt/lists/*
 
-# On installe les librairies nécessaires (Flask, etc.)
+# Copie des dépendances Python
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# On ouvre le port 5000 (celui de votre serveur)
-EXPOSE 5000
+# Copie du code source
+COPY . .
 
-# La commande de démarrage (celle qui lançait votre site)
-CMD ["python3", "api/index.py"]
+# Variables d'environnement
+ENV PORT=8000
+ENV FLASK_APP=api/index.py
+ENV PYTHONPATH=/app/api
+
+# Exposition du port
+EXPOSE 8000
+
+# Commande de démarrage avec Gunicorn (Serveur de production WSGI)
+# On pointe vers l'objet 'app' dans le fichier api/index.py
+CMD ["gunicorn", "-w", "4", "-b", "0.0.0.0:8000", "api.index:app"]
