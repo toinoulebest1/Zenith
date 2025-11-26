@@ -339,6 +339,7 @@
 
         // --- VARIABLES AUDIO WORKLET ---
         let audioCtx, zenithNode, sourceA, sourceB;
+        let masterGain; // Pour le mode fallback
         let isOrbitOn = false, isKaraokeOn = false, isLimiterOn = true;
         let eqFilters = []; const eqFrequencies = [60, 230, 910, 4000, 14000];
 
@@ -391,6 +392,24 @@
                 const AudioContext = window.AudioContext || window.webkitAudioContext;
                 // 1. Suppression sampleRate forcé
                 audioCtx = new AudioContext({ latencyHint: 'playback' });
+
+                // --- FALLBACK HTTP (Si AudioWorklet non dispo) ---
+                if (!audioCtx.audioWorklet) {
+                    console.warn("⚠️ AudioWorklet non disponible (HTTP). Mode Fallback activé.");
+                    showToast("AudioFX désactivés (HTTP)");
+
+                    // Création Master Gain
+                    masterGain = audioCtx.createGain();
+                    masterGain.gain.value = globalVolume;
+
+                    // Connexion directe
+                    sourceA = audioCtx.createMediaElementSource(playerA);
+                    sourceB = audioCtx.createMediaElementSource(playerB);
+                    sourceA.connect(masterGain);
+                    sourceB.connect(masterGain);
+                    masterGain.connect(audioCtx.destination);
+                    return;
+                }
                 
                 // 2. Chargement Module
                 await audioCtx.audioWorklet.addModule('zenith-processor.js');
@@ -453,6 +472,7 @@
 
         function toggleKaraoke() {
             if (!audioCtx) initAudioContext();
+            if (!zenithNode) { showToast("Non disponible en HTTP"); return; }
             isKaraokeOn = !isKaraokeOn;
             document.getElementById('karaokeBtn').classList.toggle('active', isKaraokeOn);
             setWorkletParam('karaokeEnabled', isKaraokeOn ? 1 : 0);
@@ -461,6 +481,7 @@
 
         function toggleOrbit() {
             if (!audioCtx) initAudioContext();
+            if (!zenithNode) { showToast("Non disponible en HTTP"); return; }
             isOrbitOn = !isOrbitOn;
             document.getElementById('orbitBtn').classList.toggle('active', isOrbitOn);
             setWorkletParam('orbitEnabled', isOrbitOn ? 1 : 0);
@@ -480,6 +501,7 @@
         function setGlobalVolume(val) {
             globalVolume = parseFloat(val);
             if (zenithNode) setWorkletParam('volume', globalVolume, 0.05);
+            else if (masterGain) masterGain.gain.setTargetAtTime(globalVolume, audioCtx.currentTime, 0.05);
         }
         
         function updateEQ(i,v) { if(audioCtx && eqFilters[i]) eqFilters[i].gain.value = parseFloat(v); }
@@ -526,7 +548,7 @@
             else url = `${API_BASE}/stream/${nextTrack.id}`;
 
             nextAudio.src = url;
-            nextAudio.volume = 1; // Worklet gère le volume réel
+            nextAudio.volume = 1; // Worklet ou Gain gère le volume réel
 
             currentIndex = index; currentTrackId = nextTrack.id;
             updateInterfaceInfo(nextTrack);
