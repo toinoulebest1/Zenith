@@ -38,8 +38,8 @@ function checkUrlForErrors() {
         let userMessage = "Erreur de connexion.";
         
         // GESTION DES ERREURS SPOTIFY COMMUNES
-        if (errorCode === 'provider_email_needs_verification') {
-            userMessage = "⚠️ Votre email Spotify n'est pas vérifié. Validez-le sur spotify.com.";
+        if (errorCode === 'provider_email_needs_verification' || (errorDesc && errorDesc.includes('Unverified email'))) {
+            userMessage = "⚠️ Email non vérifié chez Spotify. Consultez votre boîte mail (et les spams) pour valider votre compte Spotify.";
         } 
         else if (error === 'server_error' && errorDesc && errorDesc.includes('user profile')) {
             userMessage = "⚠️ Erreur Spotify Dev : Avez-vous ajouté votre email dans 'User Management' sur le Dashboard Spotify ?";
@@ -67,20 +67,22 @@ function handleSession(session) {
         // Utilisateur connecté
         if (loginScreen) loginScreen.style.display = 'none';
         if (appLayout) {
-            // FIX MOBILE : On n'utilise pas style.display = 'grid' ici car ça casse le CSS mobile
-            // On utilise une classe pour laisser le CSS décider (Grid sur PC, Flex sur Mobile)
             appLayout.style.display = ''; 
             appLayout.classList.add('layout-visible');
+        }
+        
+        // TENTATIVE DE SYNC SPOTIFY (Favoris + Profil)
+        if (session.user && session.user.app_metadata.provider === 'spotify') {
+            syncSpotifyProfileData(session.user);
+            
+            if (session.provider_token) {
+                syncSpotifyFavorites(session.provider_token);
+            }
         }
         
         // CHARGEMENT DES DONNÉES UTILISATEUR
         if (window.loadUserFavorites) {
             window.loadUserFavorites();
-        }
-
-        // TENTATIVE DE SYNC SPOTIFY
-        if (session.provider_token && session.user && session.user.app_metadata.provider === 'spotify') {
-            syncSpotifyFavorites(session.provider_token);
         }
         
         updateUserProfile(session.user);
@@ -93,7 +95,61 @@ function handleSession(session) {
     }
 }
 
-// Nouvelle fonction d'importation Spotify
+// Nouvelle fonction : Sync Avatar et Pseudo depuis Spotify
+async function syncSpotifyProfileData(user) {
+    try {
+        const { avatar_url, full_name, name, picture } = user.user_metadata;
+        const displayName = full_name || name;
+        // Spotify renvoie parfois 'picture' ou 'avatar_url' via Supabase
+        const avatar = avatar_url || picture; 
+
+        if (!displayName && !avatar) return;
+
+        // On vérifie d'abord si le profil est déjà rempli pour ne pas écraser inutilement
+        // Mais si c'est la première connexion ou si c'est "Anonyme", on met à jour.
+        const { data: currentProfile } = await supabaseClient
+            .from('profiles')
+            .select('username, avatar_url')
+            .eq('id', user.id)
+            .single();
+            
+        const updates = {
+            id: user.id,
+            updated_at: new Date()
+        };
+        let hasChanges = false;
+
+        // Mise à jour du pseudo si vide ou générique
+        if (displayName && (!currentProfile || !currentProfile.username || currentProfile.username === 'Anonyme' || currentProfile.username === user.email)) {
+            updates.username = displayName;
+            hasChanges = true;
+        }
+        
+        // Mise à jour de l'avatar si vide
+        if (avatar && (!currentProfile || !currentProfile.avatar_url)) {
+            updates.avatar_url = avatar;
+            hasChanges = true;
+        }
+
+        // Si on a détecté des infos utiles à sauvegarder
+        if (hasChanges) {
+            console.log("🔄 Syncing Profile from Spotify metadata...");
+            const { error } = await supabaseClient.from('profiles').upsert(updates);
+            
+            if (!error) {
+                // Rafraîchir l'interface immédiatement si possible
+                if (window.loadProfile) window.loadProfile();
+                showToast("Profil synchronisé avec Spotify ! 🎧");
+            } else {
+                console.error("Profile update error:", error);
+            }
+        }
+    } catch (e) {
+        console.error("Spotify Profile Sync Error:", e);
+    }
+}
+
+// Fonction d'importation Favoris Spotify
 async function syncSpotifyFavorites(token) {
     console.log("🔄 Syncing Spotify Favorites...");
     try {
@@ -105,7 +161,6 @@ async function syncSpotifyFavorites(token) {
         const data = await response.json();
 
         if (data.items) {
-            // Transformation au format Zenith
             const spotifyTracks = data.items.map(item => {
                 const t = item.track;
                 return {
@@ -113,31 +168,34 @@ async function syncSpotifyFavorites(token) {
                     title: t.name,
                     performer: { name: t.artists[0].name },
                     album: { title: t.album.name, image: { large: t.album.images[0]?.url } },
-                    source: 'spotify_lazy', // Marqueur spécial pour résolution dynamique
+                    source: 'spotify_lazy',
                     duration: t.duration_ms / 1000,
                     imported_from: 'spotify'
                 };
             });
 
-            // Ajout aux favoris locaux (affichage immédiat)
-            // On vérifie les doublons par titre/artiste pour éviter le spam
             if (typeof favorites !== 'undefined') {
+                let newCount = 0;
                 spotifyTracks.forEach(st => {
                      const exists = favorites.some(f => 
                         f.title.toLowerCase() === st.title.toLowerCase() && 
                         f.performer.name.toLowerCase() === st.performer.name.toLowerCase()
                      );
-                     if(!exists) favorites.push(st);
+                     if(!exists) {
+                         favorites.push(st);
+                         newCount++;
+                     }
                 });
                 
-                // Mettre à jour l'UI si on est sur la page favoris
                 const viewTitle = document.getElementById('viewTitle');
                 if(viewTitle && viewTitle.innerText.includes('Favoris')) {
                     if(typeof showFavorites === 'function') showFavorites();
                 }
                 
-                console.log(`✅ ${spotifyTracks.length} titres Spotify importés.`);
-                showToast(`✅ ${spotifyTracks.length} titres Spotify importés !`);
+                if(newCount > 0) {
+                    console.log(`✅ ${newCount} nouveaux titres Spotify importés.`);
+                    showToast(`✅ ${newCount} titres Spotify importés !`);
+                }
             }
         }
     } catch (e) {
@@ -147,16 +205,13 @@ async function syncSpotifyFavorites(token) {
 
 async function loginWithSpotify() {
     showAuthLoading(true);
-    
-    // redirectTo doit pointer vers VOTRE site, pas vers Supabase.
-    // window.location.origin détecte automatiquement si vous êtes en localhost ou en prod.
     const redirectUrl = window.location.origin; 
     console.log("OAuth Redirect To:", redirectUrl);
 
     const { data, error } = await supabaseClient.auth.signInWithOAuth({
         provider: 'spotify',
         options: {
-            scopes: 'user-library-read', // Permission pour lire les titres likés
+            scopes: 'user-library-read',
             redirectTo: redirectUrl
         }
     });
@@ -181,7 +236,6 @@ async function login(email, password) {
 }
 
 async function signup(email, password) {
-    // Récupération du pseudo depuis le nouveau champ
     const usernameInput = document.getElementById('username');
     const username = usernameInput ? usernameInput.value.trim() : "";
 
@@ -192,7 +246,6 @@ async function signup(email, password) {
 
     showAuthLoading(true);
     
-    // On passe le username dans les métadonnées
     const { data, error } = await supabaseClient.auth.signUp({
         email: email,
         password: password,
@@ -208,9 +261,7 @@ async function signup(email, password) {
     if (error) {
         showAuthError(error.message);
     } else {
-        // Si l'inscription est réussie et qu'on a un utilisateur
         if (data && data.user) {
-            // On force la mise à jour du profil pour être sûr que le pseudo est bien enregistré
             try {
                 await supabaseClient.from('profiles').upsert({
                     id: data.user.id,
@@ -249,27 +300,21 @@ function showAuthLoading(isLoading) {
 }
 
 function updateUserProfile(user) {
-    // Petit helper pour afficher l'email dans la sidebar par exemple
     console.log("Logged in as:", user.email);
 }
 
-// État local du formulaire
 let isLoginMode = true;
 function toggleAuthMode() {
     isLoginMode = !isLoginMode;
-    
-    // Affichage conditionnel du champ pseudo
     const userField = document.getElementById('username');
     if (userField) {
         userField.style.display = isLoginMode ? 'none' : 'block';
         if (!isLoginMode) userField.focus();
     }
-
     document.getElementById('authTitle').innerText = isLoginMode ? 'Connexion' : 'Inscription';
     document.getElementById('btnLoginAction').innerText = isLoginMode ? 'Se connecter' : "S'inscrire";
     document.getElementById('btnToggleMode').innerHTML = isLoginMode ? 'Pas de compte ? <b>Créer un compte</b>' : 'Déjà un compte ? <b>Se connecter</b>';
     document.getElementById('authMessage').innerText = '';
 }
 
-// Initialisation au chargement
 document.addEventListener('DOMContentLoaded', initAuth);
