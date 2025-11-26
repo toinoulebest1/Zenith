@@ -14,11 +14,45 @@ function initAuth() {
     
     supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     
+    // Vérification des erreurs dans l'URL au retour d'OAuth
+    checkUrlForErrors();
+
     // Écouter les changements d'état (Connexion, Déconnexion)
     supabaseClient.auth.onAuthStateChange((event, session) => {
         console.log("Auth Event:", event);
         handleSession(session);
     });
+}
+
+function checkUrlForErrors() {
+    const params = new URLSearchParams(window.location.search);
+    const hashParams = new URLSearchParams(window.location.hash.substring(1)); // Supprime le #
+    
+    const error = params.get('error') || hashParams.get('error');
+    const errorDesc = params.get('error_description') || hashParams.get('error_description');
+    const errorCode = params.get('error_code') || hashParams.get('error_code');
+
+    if (error) {
+        console.error("Auth Error Detected:", error, errorDesc);
+        
+        let userMessage = "Erreur de connexion.";
+        
+        if (errorCode === 'provider_email_needs_verification') {
+            userMessage = "⚠️ Votre email Spotify n'est pas vérifié. Veuillez le valider sur le site de Spotify.";
+        } else if (errorDesc) {
+            // Nettoyage simple du message (remplace les + par des espaces)
+            userMessage = "⚠️ " + errorDesc.replace(/\+/g, ' ');
+        }
+
+        // On attend un peu que l'UI soit chargée pour afficher le toast
+        setTimeout(() => {
+            if (typeof showToast === 'function') showToast(userMessage);
+            else alert(userMessage);
+            
+            // Nettoyage de l'URL pour ne pas réafficher l'erreur au refresh
+            window.history.replaceState({}, document.title, window.location.pathname);
+        }, 1000);
+    }
 }
 
 function handleSession(session) {
