@@ -708,7 +708,7 @@ audio.addEventListener('ended', player.next);
             showTracks();
             document.getElementById('searchBarContainer').style.display='none';
             renderGrid([...history], true, "Votre historique est vide.<br>Écoutez des titres pour les retrouver ici !<br>Nous gardons vos 50 dernières écoutes.");
-            document.getElementById('viewTitle').innerText="Historique 🕒";
+            document.getElementById('viewTitle').innerText="Historique des 50 dernières chansons 🕒";
         }
         function showPlaylists(){ resetNavStack(); showTracks(); document.getElementById('trackView').style.display='none'; document.getElementById('allPlaylistsView').style.display='block'; document.getElementById('searchBarContainer').style.display='none'; renderAllPlaylists(); }
         function toggleLyrics(){ isLyricsMode=!isLyricsMode; if(isLyricsMode){ document.getElementById('trackView').style.display='none'; document.getElementById('artistView').style.display='none'; document.getElementById('blindTestView').style.display='none'; document.getElementById('profileView').style.display='none'; document.getElementById('lyricsView').style.display='block'; renderSyncedLyrics(); }else showTracks(); }
