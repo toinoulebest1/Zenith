@@ -272,7 +272,7 @@
                 <div class="eq-band"><input type="range" class="eq-range" min="-12" max="12" value="0" data-freq="4000" oninput="updateEQ(3, this.value)"><span>4kHz</span></div>
                 <div class="eq-band"><input type="range" class="eq-range" min="-12" max="12" value="0" data-freq="14000" oninput="updateEQ(4, this.value)"><span>14kHz</span></div>
             </div>
-            <button class="limiter-btn active" id="limiterBtn" onclick="toggleLimiter()"><i class="fas fa-compress-arrows-alt"></i> NORMALISATEUR</button>
+            <button class="limiter-btn" id="limiterBtn" onclick="toggleLimiter()"><i class="fas fa-compress-arrows-alt"></i> NORMALISATEUR</button>
             <button class="orbit-btn" id="orbitBtn" onclick="toggleOrbit()"><i class="fas fa-globe-americas"></i> 8D ORBIT (WORKLET)</button>
             <button class="karaoke-btn" id="karaokeBtn" onclick="toggleKaraoke()"><i class="fas fa-microphone-slash"></i> NO VOCAL (PHASE)</button>
             <button class="eq-reset-btn" onclick="resetEQ()">Réinitialiser EQ</button>
@@ -494,6 +494,7 @@
             
             // Mise à jour visuelle
             document.getElementById('limiterBtn').classList.toggle('active', isLimiterOn);
+            console.log("Limiter state:", isLimiterOn ? "ON" : "OFF"); // Ajout d'un log
             
             // Application Audio Réelle
             if (compressor && audioCtx) {
