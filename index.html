@@ -664,7 +664,8 @@
             setTimeout(() => { if(isPlaying && currentTrackId === nextTrack.id) saveTrackToHistory(nextTrack); }, 10000);
             
             if (isRadioActive && index === tracks.length - 1 && !isFetchingRadio) { 
-                setTimeout(() => { if(currentIndex === tracks.length -1) triggerRadio(true); }, 5000);
+                // Lancement immédiat de la recherche pour la suite
+                setTimeout(() => { if(currentIndex === tracks.length -1) triggerRadio(true); }, 100);
             }
 
             // Déclenche la lecture après le setup du crossfade
@@ -1067,7 +1068,10 @@
                 if(d.tracks) d.tracks.forEach(x=>results.push({...x,type:'track'})); 
                 if(d.external_playlists) d.external_playlists.forEach(p=>results.push(p));
             } catch(e) { console.error(e); }
-            renderGrid(results, true); // Enable radio after search results
+            
+            // On marque les résultats comme venant d'une recherche
+            const finalResults = results.map(r => ({...r, fromSearch: true}));
+            renderGrid(finalResults, true); // Enable radio after search results
         }
 
         function openExternalPlaylist(playlist) {
