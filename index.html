@@ -359,8 +359,7 @@
         let magicEnabled = true; 
         
         let favorites = [];
-        let history = JSON.parse(localStorage.getItem('zenith_history_local') || '[]');
-        setInterval(() => { localStorage.setItem('zenith_history_local', JSON.stringify(history)); }, 10000);
+        let history = []; // L'historique sera maintenant géré par Supabase
 
         let navStack = [];
 
@@ -400,7 +399,7 @@
             const sMagic = localStorage.getItem('zenith_pref_magic'); if(sMagic !== null) userSettings.magic = (sMagic === 'true'); 
             applySettings(userSettings); 
         }
-        const originalLoadProfile = window.loadProfile; window.loadProfile = async function() { if(originalLoadProfile) await originalLoadProfile(); const { data: { user } } = await supabaseClient.auth.getUser(); if(!user) return; if (window.loadUserPlaylists) window.loadUserPlaylists(); const { data, error } = await supabaseClient.from('profiles').select('settings').eq('id', user.id).single(); if (data && data.settings) { userSettings = { ...userSettings, ...data.settings }; applySettings(userSettings); localStorage.setItem('zenith_pref_limiter', userSettings.limiter); localStorage.setItem('zenith_pref_crossfade', userSettings.crossfade); localStorage.setItem('zenith_pref_magic', userSettings.magic); } };
+        const originalLoadProfile = window.loadProfile; window.loadProfile = async function() { if(originalLoadProfile) await originalLoadProfile(); const { data: { user } } = await supabaseClient.auth.getUser(); if(!user) return; if (window.loadUserPlaylists) window.loadUserPlaylists(); if (window.loadUserHistory) await window.loadUserHistory(); const { data, error } = await supabaseClient.from('profiles').select('settings').eq('id', user.id).single(); if (data && data.settings) { userSettings = { ...userSettings, ...data.settings }; applySettings(userSettings); localStorage.setItem('zenith_pref_limiter', userSettings.limiter); localStorage.setItem('zenith_pref_crossfade', userSettings.crossfade); localStorage.setItem('zenith_pref_magic', userSettings.magic); } };
         function showProfileSettings() { document.getElementById('trackView').style.display = 'none'; document.getElementById('artistView').style.display = 'none'; document.getElementById('lyricsView').style.display = 'none'; document.getElementById('blindTestView').style.display = 'none'; document.getElementById('allPlaylistsView').style.display = 'none'; document.getElementById('playlistView').style.display = 'none'; document.getElementById('searchBarContainer').style.display = 'none'; document.getElementById('profileView').style.display = 'block'; window.loadProfile(); }
         window.loadUserFavorites = async function() { if(!supabaseClient) return; const { data: { user } } = await supabaseClient.auth.getUser(); if(!user) return; const { data, error } = await supabaseClient.from('favorites').select('*'); if(data) { favorites = data.map(f => f.track_data); updateLikeButtonState(); } window.loadProfile(); };
         function safePushState(data, title, url) { try { if (window.history && window.history.pushState) { window.history.pushState(data, title, url); } } catch (e) { console.warn("History pushState blocked", e); } }
@@ -619,7 +618,8 @@
             
             setupMediaSession(nextTrack); fetchLyrics(nextTrack, nextTrack.performer ? nextTrack.performer.name : 'Artiste'); updateActiveCard();
             updateLikeButtonState();
-            setTimeout(() => { if(isPlaying && currentTrackId === nextTrack.id) addToHistory(nextTrack); }, 10000);
+            // Appel à la nouvelle fonction d'ajout à l'historique Supabase
+            setTimeout(() => { if(isPlaying && currentTrackId === nextTrack.id) saveTrackToHistory(nextTrack); }, 10000);
             
             if (index === tracks.length - 1 && !isFetchingRadio) { 
                 setTimeout(() => { if(currentIndex === tracks.length -1) triggerRadio(true); }, 5000);
@@ -727,8 +727,145 @@
         function showToast(msg) { const t=document.getElementById('toast'); t.innerText=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),2000); }
         function copyLink() { if(!currentTrackId) return; const t=tracks[currentIndex]; navigator.clipboard.writeText(`${window.location.origin}/?track=${t.id}&source=${t.source}`).then(()=>showToast('Lien copié !')); }
         async function toggleLike() { const btn = document.getElementById('btnLike'); if(btn.disabled) return; btn.disabled = true; try { const t = tracks[currentIndex]; if(!t) return; const { data: { user } } = await supabaseClient.auth.getUser(); if(!user) { showToast("Connectez-vous pour liker !"); return; } const idx = favorites.findIndex(f => String(f.id) === String(t.id)); if (idx === -1) { favorites.push(t); btn.innerHTML = '<i class="fas fa-heart"></i>'; btn.style.color = 'var(--secondary)'; showToast('Liké ❤️'); try { await supabaseClient.from('favorites').insert({ user_id: user.id, track_id: String(t.id), track_data: t }); } catch(e) { console.error(e); } } else { favorites.splice(idx, 1); btn.innerHTML = '<i class="far fa-heart"></i>'; btn.style.color = 'var(--text-dim)'; showToast('Disliké 💔'); try { await supabaseClient.from('favorites').delete().match({ user_id: user.id, track_id: String(t.id) }); } catch(e) { console.error(e); } } } finally { btn.disabled = false; } }
-        function updateLikeButtonState() { const t = tracks[currentIndex]; if(!t) return; const idx = favorites.findIndex(f => String(f.id) === String(t.id)); const btn = document.getElementById('btnLike'); if(idx !== -1) { btn.innerHTML = '<i class="fas fa-heart"></i>'; btn.style.color = 'var(--secondary)'; } else { btn.innerHTML = '<i class="far fa-heart"></i>'; btn.style.color = 'var(--text-dim)'; } }
-        function addToHistory(t) { if(history.length>0 && history[0].id===t.id) return; history.unshift(t); if(history.length>50) history.pop(); }
+        function updateLikeButtonState() { const t = tracks[currentIndex]; if(!t) return; const idx = favorites.findIndex(f => String(f.id) === String(t.id)); const btn = document.getElementById('btnLike'); if(idx !== -1) { btn.innerHTML = '<i class="fas fa-heart></i>'; btn.style.color = 'var(--secondary)'; } else { btn.innerHTML = '<i class="far fa-heart"></i>'; btn.style.color = 'var(--text-dim)'; } }
+        
+        // Nouvelle fonction pour ajouter un titre à l'historique Supabase
+        async function saveTrackToHistory(track) {
+            if (!supabaseClient) {
+                console.error("saveTrackToHistory: Supabase client non initialisé.");
+                return;
+            }
+            const { data: { user } } = await supabaseClient.auth.getUser();
+            if (!user) {
+                console.warn("saveTrackToHistory: Utilisateur non connecté, historique non sauvegardé.");
+                return;
+            }
+
+            console.log(`saveTrackToHistory: Tentative de sauvegarde pour l'utilisateur ${user.id}, titre ${track.id}`);
+
+            try {
+                // 1. Vérifier si le titre existe déjà dans l'historique de l'utilisateur
+                const { data: existingHistory, error: fetchError } = await supabaseClient
+                    .from('history')
+                    .select('id')
+                    .eq('user_id', user.id)
+                    .eq('track_id', String(track.id));
+
+                if (fetchError) {
+                    console.error("saveTrackToHistory: Erreur lors de la vérification de l'historique existant:", fetchError);
+                    throw fetchError;
+                }
+
+                if (existingHistory && existingHistory.length > 0) {
+                    console.log(`saveTrackToHistory: Titre ${track.id} déjà dans l'historique, mise à jour du timestamp.`);
+                    // Si le titre existe, le supprimer pour le réinsérer avec un nouveau timestamp
+                    const { error: deleteError } = await supabaseClient
+                        .from('history')
+                        .delete()
+                        .eq('id', existingHistory[0].id);
+
+                    if (deleteError) {
+                        console.error("saveTrackToHistory: Erreur lors de la suppression de l'ancien historique:", deleteError);
+                        throw deleteError;
+                    }
+                    console.log(`saveTrackToHistory: Ancien historique pour ${track.id} supprimé.`);
+                }
+
+                // 2. Insérer le nouveau titre (ou le titre mis à jour)
+                const { error: insertError } = await supabaseClient
+                    .from('history')
+                    .insert({
+                        user_id: user.id,
+                        track_id: String(track.id),
+                        track_data: track,
+                        played_at: new Date().toISOString()
+                    });
+
+                if (insertError) {
+                    console.error("saveTrackToHistory: Erreur lors de l'insertion du nouveau titre dans l'historique:", insertError);
+                    throw insertError;
+                }
+                console.log(`saveTrackToHistory: Titre ${track.id} inséré/mis à jour dans l'historique.`);
+
+                // 3. Maintenir l'historique à 50 titres maximum
+                const { data: currentHistory, error: historyError } = await supabaseClient
+                    .from('history')
+                    .select('id')
+                    .eq('user_id', user.id)
+                    .order('played_at', { ascending: false });
+
+                if (historyError) {
+                    console.error("saveTrackToHistory: Erreur lors de la récupération de l'historique pour la purge:", historyError);
+                    throw historyError;
+                }
+
+                if (currentHistory && currentHistory.length > 50) {
+                    const idsToDelete = currentHistory.slice(50).map(item => item.id);
+                    console.log(`saveTrackToHistory: Purge de ${idsToDelete.length} anciens titres de l'historique.`);
+                    const { error: purgeError } = await supabaseClient
+                        .from('history')
+                        .delete()
+                        .in('id', idsToDelete);
+                    
+                    if (purgeError) {
+                        console.error("saveTrackToHistory: Erreur lors de la purge de l'historique:", purgeError);
+                        throw purgeError;
+                    }
+                    console.log("saveTrackToHistory: Purge de l'historique terminée.");
+                }
+                
+                // Recharger l'historique local après modification
+                await loadUserHistory();
+                console.log("saveTrackToHistory: Historique rechargé localement.");
+
+            } catch (e) {
+                console.error("Erreur globale lors de la sauvegarde de l'historique:", e);
+                showToast("Erreur sauvegarde historique."); // Inform user
+            }
+        }
+
+        // Nouvelle fonction pour charger l'historique depuis Supabase
+        window.loadUserHistory = async function() {
+            if (!supabaseClient) {
+                console.error("loadUserHistory: Supabase client non initialisé.");
+                history = []; // Clear local history if not logged in
+                return;
+            }
+            const { data: { user } } = await supabaseClient.auth.getUser();
+            if (!user) {
+                console.warn("loadUserHistory: Utilisateur non connecté, historique non chargé.");
+                history = []; // Clear local history if not logged in
+                return;
+            }
+
+            console.log(`loadUserHistory: Chargement de l'historique pour l'utilisateur ${user.id}.`);
+
+            try {
+                const { data, error } = await supabaseClient
+                    .from('history')
+                    .select('track_data')
+                    .eq('user_id', user.id)
+                    .order('played_at', { ascending: false })
+                    .limit(50);
+
+                if (error) {
+                    console.error("loadUserHistory: Erreur lors du chargement de l'historique:", error);
+                    throw error;
+                }
+
+                if (data) {
+                    history = data.map(item => item.track_data);
+                    console.log(`loadUserHistory: ${history.length} titres chargés.`);
+                } else {
+                    history = [];
+                    console.log("loadUserHistory: Aucun historique trouvé.");
+                }
+            } catch (e) {
+                console.error("Erreur globale lors du chargement de l'historique:", e);
+                history = [];
+            }
+        };
+
         function cleanString(s) { return s ? s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/gi,'').trim() : ""; }
         function updateActiveCard() { document.querySelectorAll('.track-card').forEach(el => { el.classList.remove('active-track'); if(el.querySelector('.playing-indicator')) el.querySelector('.playing-indicator').remove(); }); if(!currentTrackId) return; const activeCards = document.querySelectorAll(`.track-card[data-id="${currentTrackId}"]`); activeCards.forEach(active => { active.classList.add('active-track'); const ind = document.createElement('div'); ind.className = 'playing-indicator'; ind.innerHTML = '<i class="fas fa-volume-up"></i>'; active.appendChild(ind); }); }
         function goHome(p=true){ if(p) safePushState({},"","/"); resetNavStack(); showTracks(); document.getElementById('trackGrid').innerHTML=`<div style="grid-column: 1/-1; text-align: center; padding: 60px 20px; color: #ccc;"><h2 style="font-size: 2rem; color: var(--primary); margin-bottom: 20px; text-shadow: 0 0 30px rgba(0, 210, 255, 0.3);">Bienvenue sur Zenith Ultimate</h2><p style="font-size: 1.1rem; line-height: 1.6; max-width: 600px; margin: 0 auto; color: #aaa;">L'expérience audio haute résolution ultime. Profitez d'une qualité sonore cristalline, d'effets spatiaux immersifs et d'une bibliothèque musicale infinie.</p><div style="margin-top: 40px; display: flex; flex-wrap: wrap; justify-content: center; gap: 30px; font-size: 0.9rem;"><div style="display:flex; flex-direction:column; align-items:center; gap:10px;"><div style="width:50px; height:50px; background:rgba(255,255,255,0.05); border-radius:50%; display:flex; align-items:center; justify-content:center;"><i class="fas fa-wave-square" style="color:var(--primary); font-size:20px;"></i></div><span>Audio Hi-Res</span></div><div style="display:flex; flex-direction:column; align-items:center; gap:10px;"><div style="width:50px; height:50px; background:rgba(255,255,255,0.05); border-radius:50%; display:flex; align-items:center; justify-content:center;"><i class="fas fa-globe-americas" style="color:var(--primary); font-size:20px;"></i></div><span>Audio Spatial 8D</span></div><div style="display:flex; flex-direction:column; align-items:center; gap:10px;"><div style="width:50px; height:50px; background:rgba(255,255,255,0.05); border-radius:50%; display:flex; align-items:center; justify-content:center;"><i class="fas fa-microphone-alt" style="color:var(--primary); font-size:20px;"></i></div><span>Paroles Synchro</span></div><div style="display:flex; flex-direction:column; align-items:center; gap:10px;"><div style="width:50px; height:50px; background:rgba(255,255,255,0.05); border-radius:50%; display:flex; align-items:center; justify-content:center;"><i class="fas fa-magic" style="color:var(--primary); font-size:20px;"></i></div><span>Thèmes Magiques</span></div></div><div style="margin-top: 50px;"><p style="font-size: 14px; opacity: 0.6;">Utilisez la barre de recherche pour commencer votre voyage sonore.</p></div></div>`; }
@@ -748,7 +885,14 @@
         async function openTrackDirect(id,s){ try{const r=await fetch(`${API_BASE}/track?id=${id}&source=${s||''}`); const d=await r.json(); if(d.id){ let i=d.source==='subsonic'?`${API_BASE}/get_subsonic_cover/${d.album.image.large}`:(d.album.image.large||'').replace('_300','_600'); tracks=[{...d,img:i,performer:d.performer||{name:d.artist?d.artist.name:"Artiste"},type:'track'}]; renderGrid(tracks,false); loadTrack(0, false); }}catch(e){}}
         function showTracks(){ document.getElementById('trackView').style.display='block'; document.getElementById('artistView').style.display='none'; document.getElementById('lyricsView').style.display='none'; document.getElementById('blindTestView').style.display='none'; document.getElementById('profileView').style.display='none'; document.getElementById('playlistView').style.display='none'; document.getElementById('allPlaylistsView').style.display='none'; document.getElementById('searchBarContainer').style.display='flex'; isLyricsMode=false; document.getElementById('introContainer').style.display='none'; document.getElementById('viewTitle').innerText="Résultats"; }
         function showFavorites(){ resetNavStack(); showTracks(); document.getElementById('searchBarContainer').style.display='none'; renderGrid([...favorites], true, "Vous n'avez pas encore de favoris.<br>Likez des titres pour les retrouver ici !"); document.getElementById('viewTitle').innerText="Mes Favoris ❤️"; }
-        function showHistory(){ resetNavStack(); showTracks(); document.getElementById('searchBarContainer').style.display='none'; renderGrid([...history], true, "Aucun historique disponible."); document.getElementById('viewTitle').innerText="Historique 🕒"; }
+        // Mise à jour de showHistory pour utiliser l'historique Supabase
+        function showHistory(){
+            resetNavStack();
+            showTracks();
+            document.getElementById('searchBarContainer').style.display='none';
+            renderGrid([...history], true, "Votre historique est vide.<br>Écoutez des titres pour les retrouver ici !<br>Nous gardons vos 50 dernières écoutes.");
+            document.getElementById('viewTitle').innerText="Historique 🕒";
+        }
         function showPlaylists(){ resetNavStack(); showTracks(); document.getElementById('trackView').style.display='none'; document.getElementById('allPlaylistsView').style.display='block'; document.getElementById('searchBarContainer').style.display='none'; renderAllPlaylists(); }
         function toggleLyrics(){ isLyricsMode=!isLyricsMode; if(isLyricsMode){ document.getElementById('trackView').style.display='none'; document.getElementById('artistView').style.display='none'; document.getElementById('blindTestView').style.display='none'; document.getElementById('profileView').style.display='none'; document.getElementById('lyricsView').style.display='block'; renderSyncedLyrics(); }else showTracks(); }
         
