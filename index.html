@@ -646,19 +646,18 @@
             else url = `${API_BASE}/stream/${nextTrack.id}`;
 
             nextAudio.src = url;
-            // nextAudio.volume = globalVolume; // Volume now controlled by zenithNode's 'volume' parameter
+            // nextAudio.volume est maintenant géré par le paramètre 'volume' du zenithNode
 
             currentIndex = index; currentTrackId = nextTrack.id;
             updateInterfaceInfo(nextTrack);
             
             if(nextTrack.source !== 'yt_lazy' && nextTrack.source !== 'spotify_lazy') safePushState({}, "", `/?track=${nextTrack.id}&source=${nextTrack.source}`);
             
-            // Use crossfade logic
-            startCrossfade(prevAudio, nextAudio, autoPlay);
+            // Utilise la logique de crossfade
+            startCrossfade(prevAudio, nextAudio); // autoPlay n'est plus passé ici
             
             activeAudio = nextAudio; 
-            isPlaying = true; 
-            document.getElementById('playIcon').className = 'fas fa-pause';
+            // isPlaying et l'icône de lecture sont maintenant gérés par la fonction play()
             
             setupMediaSession(nextTrack); fetchLyrics(nextTrack, nextTrack.performer ? nextTrack.performer.name : 'Artiste'); updateActiveCard();
             updateLikeButtonState();
@@ -667,14 +666,19 @@
             if (index === tracks.length - 1 && !isFetchingRadio) { 
                 setTimeout(() => { if(currentIndex === tracks.length -1) triggerRadio(true); }, 5000);
             }
+
+            // Déclenche la lecture après le setup du crossfade
+            if (autoPlay) {
+                play(); 
+            }
         }
 
-        function startCrossfade(prevAudio, nextAudio, autoPlay) {
+        function startCrossfade(prevAudio, nextAudio) { // autoPlay n'est plus un paramètre
             if (!audioCtx || !zenithNode) {
-                // Fallback if AudioWorklet is not active
+                // Fallback si AudioWorklet n'est pas actif
                 prevAudio.pause();
                 prevAudio.currentTime = 0;
-                if (autoPlay) nextAudio.play().catch(e => {});
+                // nextAudio.play().catch(e => {}); // Supprimé, play() le gérera
                 return;
             }
 
@@ -684,36 +688,36 @@
             if (duration === 0) {
                 prevAudio.pause();
                 prevAudio.currentTime = 0;
-                if (autoPlay) nextAudio.play().catch(e => {});
-                // Reset crossfade parameter to ensure correct state for next track
+                // nextAudio.play().catch(e => {}); // Supprimé, play() le gérera
+                // Réinitialise le paramètre de crossfade pour assurer un état correct pour la piste suivante
                 zenithNode.parameters.get('crossfade').setValueAtTime(activeAudio === playerA ? 0 : 1, currentTime);
                 return;
             }
 
             isFading = true;
             
-            // Determine which player is active and which is next
+            // Détermine quel lecteur est actif et lequel est le suivant
             const currentIsPlayerA = (prevAudio === playerA);
-            const startCrossfadeValue = currentIsPlayerA ? 0 : 1; // 0 for A, 1 for B
-            const endCrossfadeValue = currentIsPlayerA ? 1 : 0; // 1 for B, 0 for A
+            const startCrossfadeValue = currentIsPlayerA ? 0 : 1; // 0 pour A, 1 pour B
+            const endCrossfadeValue = currentIsPlayerA ? 1 : 0; // 1 pour B, 0 pour A
 
-            // Set initial crossfade state
-            zenithNode.parameters.get('crossfade').cancelAndHoldAtTime(currentTime); // Stop any previous automation
+            // Définit l'état initial du crossfade
+            zenithNode.parameters.get('crossfade').cancelAndHoldAtTime(currentTime); // Arrête toute automatisation précédente
             zenithNode.parameters.get('crossfade').setValueAtTime(startCrossfadeValue, currentTime);
 
-            // Start next audio (volume controlled by worklet)
-            // The HTML5 audio element itself should play, the worklet handles its gain
-            if (autoPlay) nextAudio.play().catch(e => {});
+            // Démarre la lecture de la piste suivante (le volume est contrôlé par le worklet)
+            // L'élément audio HTML5 lui-même doit jouer, le worklet gère son gain
+            // nextAudio.play().catch(e => {}); // Supprimé, play() le gérera
 
-            // Fade to the new track
+            // Fait un fondu vers la nouvelle piste
             zenithNode.parameters.get('crossfade').linearRampToValueAtTime(endCrossfadeValue, currentTime + duration);
 
-            // Stop previous audio after fade out
+            // Arrête la piste précédente après le fondu
             setTimeout(() => {
                 prevAudio.pause();
                 prevAudio.currentTime = 0;
                 isFading = false;
-            }, duration * 1000); // Convert seconds to milliseconds
+            }, duration * 1000); // Convertit les secondes en millisecondes
         }
 
         function attachListeners(audioObj) {
@@ -1071,7 +1075,35 @@
                 let subtitle = ''; if (isPl) { subtitle = it.performer ? it.performer.name : 'Playlist'; } else { subtitle = isAlb ? it.artist.name : it.performer.name; }
                 let votesHTML = ''; if (it.like_count) { votesHTML = `<div class="vote-count"><i class="fas fa-heart"></i> ${it.like_count}</div>`; }
                 d.innerHTML=`${rankBadgeHTML}<div class="badges-container">${b}</div>${mediaElement}<h3>${it.name||it.title}</h3><p>${subtitle}</p>${votesHTML}`; 
-                d.onclick=()=>{ if(isAlb) openAlbum(it.id,src); else if(isPl) { if(src === 'ytmusic') openExternalPlaylist(it); else openPlaylist(it.id); } else { if(q){tracks=items; const idx=tracks.findIndex(x=>x.id===it.id); isRadioActive=false; document.getElementById('radioBadge').style.display='none'; loadTrack(idx!==-1?idx:0);} else{tracks=[it]; isRadioActive=false; document.getElementById('radioBadge').style.display='none'; loadTrack(0);} } }; 
+                d.onclick=()=>{ 
+                    if(isAlb) openAlbum(it.id,src); 
+                    else if(isPl) { 
+                        if(src === 'ytmusic') openExternalPlaylist(it); 
+                        else openPlaylist(it.id); 
+                    } else { // C'est une piste
+                        // Si la piste cliquée est déjà la piste actuelle et qu'elle est en lecture, ne rien faire
+                        if (currentTrackId === it.id && isPlaying) {
+                            play(); // S'assure qu'elle est en lecture (au cas où elle était en pause)
+                            return;
+                        }
+
+                        // Si c'est un résultat de recherche (q est vrai), met à jour 'tracks' avec les résultats de recherche
+                        if(q){
+                            tracks=items; // 'items' est la liste des résultats de recherche actuels
+                            const idx=tracks.findIndex(x=>x.id===it.id);
+                            isRadioActive=false;
+                            document.getElementById('radioBadge').style.display='none';
+                            loadTrack(idx!==-1?idx:0);
+                        } else { // C'est un clic direct sur une piste hors des résultats de recherche (ex: favoris, historique, album)
+                            // Définit la liste de lecture actuelle comme la liste affichée
+                            tracks = items; 
+                            const idx = tracks.findIndex(x => x.id === it.id);
+                            isRadioActive=false;
+                            document.getElementById('radioBadge').style.display='none';
+                            loadTrack(idx!==-1?idx:0);
+                        }
+                    } 
+                }; 
                 g.appendChild(d); 
             }); 
             updateActiveCard(); 
