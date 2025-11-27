@@ -38,7 +38,7 @@ except ImportError:
 
 # --- CONFIGURATION ---
 USER_ID = '7610812'
-TOKEN = 'wTJvd-7fc8haH3zdRrZYqcULUQ1wA6wJBLNmDkn38JaMrfRtHlaGpSVLHN0205rSQ23psXhJrnQNrRmEiGS-zw' 
+TOKEN = 'wTJvd-7fc8haH3zdRrZYqcULU1wA6wJBLNmDkn38JaMrfRtHlaGpSVLHN0205rSQ23psXhJrnQNrRmEiGS-zw' 
 APP_ID = '798273057'
 
 # --- CONFIGURATION SUBSONIC ---
@@ -690,11 +690,13 @@ def stream_track(track_id):
     if not client: return jsonify({"error": "Init error"}), 500
     # CORRECTIF : On utilise 'fmt' dans l'appel pour tester les formats (27, 7, 6, 5)
     # Au lieu de forcer '5' (MP3) à chaque fois
-    for fmt in [27, 7, 6, 5]:
+    for fmt in [27, 7, 6, 5]: # 27: Hi-Res, 7: CD, 6: MP3 320, 5: MP3 192
         try:
-            url_data = client.get_track_url(track_id, fmt)
+            url_data = client.get_track_url(track_id, fmt) # <-- Correction ici
             if 'url' in url_data: return redirect(f"{SUPABASE_PROXY_URL}?url={urllib.parse.quote(url_data['url'])}")
-        except: continue
+        except Exception as e:
+            logger.warning(f"Failed to get stream for track {track_id} with format {fmt}: {e}")
+            continue
     return jsonify({"error": "No URL found"}), 404
 
 @app.route('/get_subsonic_cover/<cover_id>')
