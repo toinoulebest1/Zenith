@@ -731,7 +731,7 @@
             audioObj.ontimeupdate = () => {
                 if (isRadioActive && currentIndex === tracks.length - 1 && !isFetchingRadio) {
                      const rem = audioObj.duration - audioObj.currentTime;
-                     if (rem < 20 && rem > 0) { triggerRadio(true); }
+                     if (rem < 40 && rem > 0) { triggerRadio(true); }
                 }
                 // Auto Next (Simple, sans crossfade)
                 if (audioObj === activeAudio && isPlaying && !nextTrackTriggered) {
@@ -1067,10 +1067,7 @@
                 if(d.tracks) d.tracks.forEach(x=>results.push({...x,type:'track'})); 
                 if(d.external_playlists) d.external_playlists.forEach(p=>results.push(p));
             } catch(e) { console.error(e); }
-            
-            // On marque les résultats comme venant d'une recherche
-            const finalResults = results.map(r => ({...r, fromSearch: true}));
-            renderGrid(finalResults, true); // Enable radio after search results
+            renderGrid(results, true); // Enable radio after search results
         }
 
         function openExternalPlaylist(playlist) {

@@ -310,36 +310,47 @@ def get_yt_recommendations(title, artist, banned_artists=set()):
 
         random.shuffle(candidates)
         
-        # 4. RESOLUTION QOBUZ/SUBSONIC
-        max_tries = 10
-        checked_count = 0
+        # 4. RESOLUTION PARALLÈLE (Optimisation Vitesse)
+        # On teste plusieurs candidats en même temps au lieu de un par un
         
-        for cand in candidates:
-            if checked_count >= max_tries: break
+        logger.info(f"🚀 [RADIO FAST] Lancement recherche parallèle sur {len(candidates)} candidats.")
+        
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            # On lance les recherches sur les 10 premiers candidats (pour ne pas saturer)
+            future_to_cand = {
+                executor.submit(try_resolve_track, c['title'], c['artist']): c 
+                for c in candidates[:10]
+            }
             
-            match = try_resolve_track(cand['title'], cand['artist'])
-            
-            if match:
-                source = match['source']
-                real_id = match['id']
-                
-                if source == 'qobuz' and client:
-                    try:
-                        meta = client.get_track_meta(real_id)
-                        meta['source'] = 'qobuz'
-                        fix_qobuz_title(meta)
-                        if meta.get('album', {}).get('image', {}).get('large'):
-                            meta['img'] = meta['album']['image']['large'].replace('_300', '_600')
-                        return meta
-                    except Exception as e: logger.error(f"Erreur fetch Qobuz meta: {e}")
-                
-                elif source == 'subsonic':
-                    try:
-                        song = get_subsonic_track_details(real_id)
-                        if song: return song
-                    except Exception as e: logger.error(f"Erreur fetch Subsonic meta: {e}")
-
-            checked_count += 1
+            # Dès qu'un thread a fini
+            for future in as_completed(future_to_cand):
+                try:
+                    match = future.result()
+                    if match:
+                        source = match['source']
+                        real_id = match['id']
+                        
+                        if source == 'qobuz' and client:
+                            try:
+                                meta = client.get_track_meta(real_id)
+                                meta['source'] = 'qobuz'
+                                fix_qobuz_title(meta)
+                                if meta.get('album', {}).get('image', {}).get('large'):
+                                    meta['img'] = meta['album']['image']['large'].replace('_300', '_600')
+                                logger.info(f"✅ [RADIO MATCH] Trouvé: {meta['title']}")
+                                return meta
+                            except Exception as e: logger.error(f"Erreur fetch Qobuz meta: {e}")
+                        
+                        elif source == 'subsonic':
+                            try:
+                                song = get_subsonic_track_details(real_id)
+                                if song: 
+                                    logger.info(f"✅ [RADIO MATCH] Trouvé (Subsonic): {song['title']}")
+                                    return song
+                            except Exception as e: logger.error(f"Erreur fetch Subsonic meta: {e}")
+                except Exception as e:
+                    logger.error(f"Thread Error: {e}")
+                    continue
             
         return None 
 
