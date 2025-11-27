@@ -15,7 +15,10 @@ class ZenithProcessor extends AudioWorkletProcessor {
         super();
         // Pour l'effet 8D
         this.orbitPhase = 0;
-        this.orbitSpeed = 0.0005; // Vitesse de rotation (ajustable)
+        this.orbitSpeed = 0.0005; // Vitesse de rotation
+        
+        // Pour l'effet Karaoké (Filtre Bass)
+        this.bassFilterState = 0;
     }
 
     process(inputs, outputs, parameters) {
@@ -32,61 +35,70 @@ class ZenithProcessor extends AudioWorkletProcessor {
 
         const channelCount = output.length; // Généralement 2 (Stéréo)
         
-        // Récupération des paramètres (lissage automatique si c'est un tableau)
+        // Récupération des paramètres
         const volParam = parameters.volume;
         const xfadeParam = parameters.crossfade;
         const isOrbit = parameters.orbitEnabled[0] > 0.5;
         const isKaraoke = parameters.karaokeEnabled[0] > 0.5;
 
+        // Calcul du coefficient pour le filtre passe-bas (cutoff ~150Hz)
+        // Alpha = (2 * PI * cutoff) / sampleRate
+        // sampleRate est une globale disponible dans le scope AudioWorklet
+        const bassCutoff = 150; 
+        const alpha = (2 * Math.PI * bassCutoff) / sampleRate;
+
         // Boucle sur chaque échantillon (128 par bloc)
         for (let i = 0; i < output[0].length; i++) {
             
             // 1. MIXAGE CROSSFADE (A vs B)
-            // On gère les tableaux de paramètres (automation) ou les valeurs fixes
             const xfade = xfadeParam.length > 1 ? xfadeParam[i] : xfadeParam[0];
             const vol = volParam.length > 1 ? volParam[i] : volParam[0];
 
-            // Equal Power Crossfade (plus pro que linéaire)
+            // Equal Power Crossfade
             const gainA = Math.cos(xfade * 0.5 * Math.PI);
             const gainB = Math.sin(xfade * 0.5 * Math.PI);
 
-            // Récupération des échantillons A et B (avec sécurité si mono/stéréo)
+            // Récupération des échantillons A et B
             let La = inputA.length > 0 ? inputA[0][i] : 0;
             let Ra = inputA.length > 1 ? inputA[1][i] : La;
             
             let Lb = inputB.length > 0 ? inputB[0][i] : 0;
             let Rb = inputB.length > 1 ? inputB[1][i] : Lb;
 
-            // Mixage
+            // Mixage initial
             let L = (La * gainA) + (Lb * gainB);
             let R = (Ra * gainA) + (Rb * gainB);
 
-            // 2. EFFET KARAOKÉ (Annulation de Phase "Center Cancel")
+            // 2. EFFET KARAOKÉ AMÉLIORÉ (Avec préservation des basses)
             if (isKaraoke) {
-                // La voix est souvent au centre (L=R). L - R annule le centre.
+                // A. Calcul du signal central (Mono)
+                const mid = (L + R) * 0.5;
+
+                // B. Filtre Passe-Bas simple (One-Pole Lowpass) pour isoler la basse
+                // y[n] = y[n-1] + alpha * (x[n] - y[n-1])
+                this.bassFilterState += alpha * (mid - this.bassFilterState);
+                const bass = this.bassFilterState;
+
+                // C. Annulation de phase (Side) = L - R
+                // Cela supprime tout ce qui est au centre (Voix + Basse)
                 const side = (L - R);
-                // On renvoie le signal "Side" sur les deux oreilles
-                L = side;
-                R = side;
+
+                // D. Reconstruction : On garde le Side (instruments stéréo) + la Basse filtrée
+                // La voix (Centre - Basse) est perdue
+                L = side + bass;
+                R = side + bass;
             }
 
             // 3. EFFET 8D ORBIT (Rotation Spatiale)
             if (isOrbit) {
-                // On incrémente la phase pour tourner
                 this.orbitPhase += this.orbitSpeed;
                 if (this.orbitPhase > 2 * Math.PI) this.orbitPhase -= 2 * Math.PI;
 
-                // Panoramique sinusoïdal (-1 à 1)
-                // On utilise une fonction Cosinus pour simuler le cercle autour de la tête
-                // Facteur d'atténuation pour simuler la distance (plus réaliste)
                 const pan = Math.sin(this.orbitPhase);
-                
-                // Application du Panoramique (Loi de puissance constante)
-                // Pan -1 (Gauche) -> Angle 0
-                // Pan +1 (Droite) -> Angle PI/2
                 const x = (pan + 1) / 2; // 0 à 1
                 const angle = x * Math.PI / 2;
                 
+                // Panoramique à puissance constante
                 L = L * Math.cos(angle);
                 R = R * Math.sin(angle);
             }
@@ -98,7 +110,7 @@ class ZenithProcessor extends AudioWorkletProcessor {
             }
         }
 
-        return true; // Garder le processeur vivant
+        return true;
     }
 }
 
