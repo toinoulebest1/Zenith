@@ -21,6 +21,7 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
     <script src="cast.js"></script>
+    <script src="zenith-processor.js"></script>
 </head>
 <body>
     <div id="ambientBg"></div> <div id="ambientOverlay"></div> <div id="orbitVisual" class="orbit-orb"></div>
@@ -336,8 +337,8 @@
         let currentGridItems = [];
 
         // LECTEURS AUDIO HTML5 (Source)
-        const playerA = new Audio(); playerA.id = "playerA"; playerA.preload = "auto"; playerA.crossOrigin = "anonymous";
-        const playerB = new Audio(); playerB.id = "playerB"; playerB.preload = "auto"; playerB.crossOrigin = "anonymous";
+        const playerA = new Audio(); playerA.id = "playerA"; playerA.preload = "auto"; playerA.crossOrigin = "anonymous"; playerA.volume = 1;
+        const playerB = new Audio(); playerB.id = "playerB"; playerB.preload = "auto"; playerB.crossOrigin = "anonymous"; playerB.volume = 1;
         document.body.appendChild(playerA);
         document.body.appendChild(playerB);
 
@@ -349,7 +350,6 @@
         let fadeInterval = null; let isFetchingRadio = false;
 
         // --- VARIABLES AUDIO WORKLET ---
-        // Ces variables sont conservées mais ne seront pas utilisées dans le mode simplifié
         let audioCtx, zenithNode, sourceA, sourceB;
         let masterGain; 
         let isOrbitOn = false, isKaraokeOn = false, isLimiterOn = false; 
@@ -386,14 +386,16 @@
         }
 
         function applySettings(settings) {
-            // En mode simplifié, limiter et crossfade sont ignorés pour l'audio
-            const isLimiter = (settings.limiter === true || settings.limiter === 'true'); 
-            document.getElementById('settingLimiter').checked = isLimiter; 
-            
+            isLimiterOn = (settings.limiter === true || settings.limiter === 'true'); 
+            document.getElementById('settingLimiter').checked = isLimiterOn; 
+            if (compressor && audioCtx) compressor.threshold.setTargetAtTime(isLimiterOn ? -10 : 0, audioCtx.currentTime, 0.05);
+            document.getElementById('limiterBtn').classList.toggle('active', isLimiterOn);
+
             const xfade = parseInt(settings.crossfade || 0); 
             document.getElementById('settingCrossfade').value = xfade; 
             document.getElementById('settingCrossfadeVal').innerText = xfade + "s"; 
             document.querySelector('.xfade-range').value = xfade;
+            if (zenithNode && audioCtx) zenithNode.parameters.get('crossfade').setTargetAtTime(xfade, audioCtx.currentTime, 0.05);
 
             const isMagic = (settings.magic === true || settings.magic === 'true'); 
             magicEnabled = isMagic; 
@@ -419,46 +421,181 @@
         window.loadUserFavorites = async function() { if(!supabaseClient) return; const { data: { user } } = await supabaseClient.auth.getUser(); if(!user) return; const { data, error } = await supabaseClient.from('favorites').select('*'); if(data) { favorites = data.map(f => f.track_data); updateLikeButtonState(); } window.loadProfile(); };
         function safePushState(data, title, url) { try { if (window.history && window.history.pushState) { window.history.pushState(data, title, url); } } catch (e) { console.warn("History pushState blocked", e); } }
         
-        // --- MOTEUR AUDIO SIMPLIFIÉ (Désactivation AudioWorklet pour diagnostic) ---
+        // --- MOTEUR AUDIO AVEC AUDIO WORKLET ---
         async function initAudioContext() {
-            console.log("🔇 Moteur AudioWorklet désactivé : Mode de diagnostic audio brut activé.");
-            // Création d'un AudioContext minimal pour la compatibilité, mais sans le Worklet
+            // 1. Create AudioContext
             const AudioContext = window.AudioContext || window.webkitAudioContext;
             if (!audioCtx) {
                 audioCtx = new AudioContext({ latencyHint: 'playback' });
             }
-            
-            // Connexion directe des lecteurs HTML5 à la destination audio
+
+            // 2. Load AudioWorklet Processor
+            try {
+                await audioCtx.audioWorklet.addModule('zenith-processor.js');
+                console.log("✅ AudioWorklet 'zenith-processor' chargé.");
+            } catch (e) {
+                console.error("❌ Erreur de chargement de l'AudioWorklet:", e);
+                showToast("Erreur AudioFX (Worklet non chargé).");
+                // Fallback to simple audio path if Worklet fails
+                sourceA = audioCtx.createMediaElementSource(playerA);
+                sourceB = audioCtx.createMediaElementSource(playerB);
+                masterGain = audioCtx.createGain();
+                masterGain.gain.value = globalVolume;
+                sourceA.connect(masterGain);
+                sourceB.connect(masterGain);
+                masterGain.connect(audioCtx.destination);
+                disableAudioFXButtons();
+                return;
+            }
+
+            // 3. Create MediaElementSource nodes
             sourceA = audioCtx.createMediaElementSource(playerA);
             sourceB = audioCtx.createMediaElementSource(playerB);
-            
-            // Création d'un gain master pour le volume global
-            masterGain = audioCtx.createGain();
-            masterGain.gain.value = globalVolume;
 
-            sourceA.connect(masterGain);
-            sourceB.connect(masterGain);
+            // 4. Create ZenithProcessor AudioWorkletNode
+            zenithNode = new AudioWorkletNode(audioCtx, 'zenith-processor', {
+                numberOfInputs: 2,
+                numberOfOutputs: 1,
+                outputChannelCount: [2],
+                parameterData: {
+                    volume: globalVolume, // Initial global volume
+                    crossfade: userSettings.crossfade,
+                    orbitEnabled: isOrbitOn ? 1 : 0,
+                    karaokeEnabled: isKaraokeOn ? 1 : 0
+                }
+            });
+
+            // 5. Create EQ Filters
+            eqFilters = [];
+            let lastNode = zenithNode; // Start connecting from zenithNode
+            eqFrequencies.forEach((freq, i) => {
+                const filter = audioCtx.createBiquadFilter();
+                filter.type = 'peaking';
+                filter.frequency.value = freq;
+                filter.Q.value = 1; // Q factor
+                filter.gain.value = 0; // Default to 0 gain
+                eqFilters.push(filter);
+                lastNode.connect(filter);
+                lastNode = filter;
+            });
+
+            // 6. Create Compressor (Limiter)
+            compressor = audioCtx.createDynamicsCompressor();
+            compressor.threshold.value = isLimiterOn ? -10 : 0; // dB
+            compressor.knee.value = 30; // dB
+            compressor.ratio.value = 12; // 12:1
+            compressor.attack.value = 0.005; // seconds
+            compressor.release.value = 0.050; // seconds
+            
+            // 7. Create Master Gain Node (after all effects)
+            masterGain = audioCtx.createGain();
+            masterGain.gain.value = 1; // Master gain is always 1, volume is controlled by zenithNode parameter
+
+            // Connect the nodes: zenithNode -> EQ filters -> Compressor -> MasterGain -> Destination
+            lastNode.connect(compressor);
+            compressor.connect(masterGain);
             masterGain.connect(audioCtx.destination);
 
-            // Désactivation des boutons d'effets pour éviter la confusion
+            // Connect sources to AudioWorkletNode
+            sourceA.connect(zenithNode, 0, 0); // Connect playerA to input 0 of worklet
+            sourceB.connect(zenithNode, 0, 1); // Connect playerB to input 1 of worklet
+
+            // Re-enable FX buttons
+            enableAudioFXButtons();
+            applySettings(userSettings); // Apply saved settings to newly created nodes
+            showToast("AudioFX activés !");
+        }
+
+        function disableAudioFXButtons() {
             document.getElementById('limiterBtn').disabled = true;
             document.getElementById('orbitBtn').disabled = true;
             document.getElementById('karaokeBtn').disabled = true;
             document.querySelectorAll('.eq-range').forEach(s => s.disabled = true);
             document.querySelector('.xfade-range').disabled = true;
             document.getElementById('eqView').querySelector('.eq-reset-btn').disabled = true;
-
-            showToast("AudioFX désactivés (Mode Diagnostic)");
-            return; // Ne pas charger le Worklet
         }
 
-        // Fonctions Audio FX (Désactivées en mode de diagnostic)
-        function toggleLimiter() { showToast("Normalisateur désactivé en mode Diagnostic"); }
-        function toggleKaraoke() { showToast("Karaoké désactivé en mode Diagnostic"); }
-        function toggleOrbit() { showToast("8D Orbit désactivé en mode Diagnostic"); }
-        function updateCrossfade(val) { showToast("Crossfade désactivé en mode Diagnostic"); }
-        function updateEQ(i,v) { /* No-op */ }
-        function resetEQ() { /* No-op */ }
+        function enableAudioFXButtons() {
+            document.getElementById('limiterBtn').disabled = false;
+            document.getElementById('orbitBtn').disabled = false;
+            document.getElementById('karaokeBtn').disabled = false;
+            document.querySelectorAll('.eq-range').forEach(s => s.disabled = false);
+            document.querySelector('.xfade-range').disabled = false;
+            document.getElementById('eqView').querySelector('.eq-reset-btn').disabled = false;
+        }
+
+        function setGlobalVolume(val) {
+            globalVolume = parseFloat(val);
+            if (zenithNode && audioCtx) {
+                zenithNode.parameters.get('volume').setTargetAtTime(globalVolume, audioCtx.currentTime, 0.05);
+            } else {
+                // Fallback if AudioWorklet is not ready/failed
+                playerA.volume = globalVolume;
+                playerB.volume = globalVolume;
+            }
+        }
+        
+        function toggleLimiter() {
+            if (!audioCtx || !compressor) return;
+            isLimiterOn = !isLimiterOn;
+            document.getElementById('limiterBtn').classList.toggle('active', isLimiterOn);
+            if (isLimiterOn) {
+                compressor.threshold.setTargetAtTime(-10, audioCtx.currentTime, 0.05);
+                showToast("Normalisateur activé 🎚️");
+            } else {
+                compressor.threshold.setTargetAtTime(0, audioCtx.currentTime, 0.05); // Effectively bypasses it
+                showToast("Normalisateur désactivé");
+            }
+            changeSetting('limiter', isLimiterOn);
+        }
+
+        function toggleKaraoke() {
+            if (!audioCtx || !zenithNode) return;
+            isKaraokeOn = !isKaraokeOn;
+            document.getElementById('karaokeBtn').classList.toggle('active', isKaraokeOn);
+            zenithNode.parameters.get('karaokeEnabled').setTargetAtTime(isKaraokeOn ? 1 : 0, audioCtx.currentTime, 0.05);
+            showToast(isKaraokeOn ? "Karaoké activé 🎤" : "Karaoké désactivé");
+        }
+
+        function toggleOrbit() {
+            if (!audioCtx || !zenithNode) return;
+            isOrbitOn = !isOrbitOn;
+            document.getElementById('orbitBtn').classList.toggle('active', isOrbitOn);
+            zenithNode.parameters.get('orbitEnabled').setTargetAtTime(isOrbitOn ? 1 : 0, audioCtx.currentTime, 0.05);
+            const orb = document.getElementById('orbitVisual');
+            if (isOrbitOn) {
+                orb.classList.add('orbiting');
+                orb.classList.remove('center-stage'); 
+                showToast("8D Orbit activé 🌐");
+            } else {
+                orb.classList.remove('orbiting');
+                orb.classList.add('center-stage'); 
+                showToast("8D Orbit désactivé");
+            }
+        }
+
+        function updateCrossfade(val) {
+            if (!audioCtx || !zenithNode) return;
+            const duration = parseFloat(val);
+            document.getElementById('xfadeVal').innerText = duration + "s";
+            zenithNode.parameters.get('crossfade').setTargetAtTime(duration, audioCtx.currentTime, 0.05);
+            changeSetting('crossfade', duration);
+        }
+
+        function updateEQ(index, value) {
+            if (!audioCtx || !eqFilters[index]) return;
+            eqFilters[index].gain.setTargetAtTime(parseFloat(value), audioCtx.currentTime, 0.05);
+        }
+
+        function resetEQ() {
+            if (!audioCtx || !eqFilters.length) return;
+            eqFilters.forEach((filter, i) => {
+                filter.gain.setTargetAtTime(0, audioCtx.currentTime, 0.05);
+                document.querySelectorAll('.eq-range')[i].value = 0; // Reset UI sliders
+            });
+            showToast("Égaliseur réinitialisé");
+        }
+
         function toggleEQ() { 
             const v=document.getElementById('eqView'); 
             if(v.style.display==='flex'){
@@ -467,16 +604,6 @@
             }else{
                 v.style.display='flex';
                 setTimeout(()=>v.classList.add('active'),10);
-            }
-            showToast("Égaliseur désactivé en mode Diagnostic"); 
-        }
-
-        function setGlobalVolume(val) {
-            globalVolume = parseFloat(val);
-            if (masterGain) masterGain.gain.setTargetAtTime(globalVolume, audioCtx.currentTime, 0.05);
-            else { // Fallback si AudioContext n'est pas encore prêt
-                playerA.volume = globalVolume;
-                playerB.volume = globalVolume;
             }
         }
         
@@ -496,14 +623,13 @@
                 return; 
             }
 
-            // Initialisation AudioContext (maintenant simplifié)
+            // Initialisation AudioContext
             if (!audioCtx) await initAudioContext();
             if (audioCtx.state === 'suspended') await audioCtx.resume();
 
             nextTrackTriggered = false; 
             const nextTrack = tracks[index];
             
-            // Logique A/B
             const nextAudio = (activeAudio === playerA) ? playerB : playerA; 
             const prevAudio = activeAudio;
             
@@ -520,17 +646,15 @@
             else url = `${API_BASE}/stream/${nextTrack.id}`;
 
             nextAudio.src = url;
-            nextAudio.volume = globalVolume; // Volume appliqué directement
+            // nextAudio.volume = globalVolume; // Volume now controlled by zenithNode's 'volume' parameter
 
             currentIndex = index; currentTrackId = nextTrack.id;
             updateInterfaceInfo(nextTrack);
             
             if(nextTrack.source !== 'yt_lazy' && nextTrack.source !== 'spotify_lazy') safePushState({}, "", `/?track=${nextTrack.id}&source=${nextTrack.source}`);
             
-            // Lecture sans crossfade complexe
-            prevAudio.pause(); 
-            prevAudio.currentTime = 0; 
-            if(autoPlay) nextAudio.play().catch(e=>{});
+            // Use crossfade logic
+            startCrossfade(prevAudio, nextAudio, autoPlay);
             
             activeAudio = nextAudio; 
             isPlaying = true; 
@@ -538,12 +662,58 @@
             
             setupMediaSession(nextTrack); fetchLyrics(nextTrack, nextTrack.performer ? nextTrack.performer.name : 'Artiste'); updateActiveCard();
             updateLikeButtonState();
-            // Appel à la nouvelle fonction d'ajout à l'historique Supabase
             setTimeout(() => { if(isPlaying && currentTrackId === nextTrack.id) saveTrackToHistory(nextTrack); }, 10000);
             
             if (index === tracks.length - 1 && !isFetchingRadio) { 
                 setTimeout(() => { if(currentIndex === tracks.length -1) triggerRadio(true); }, 5000);
             }
+        }
+
+        function startCrossfade(prevAudio, nextAudio, autoPlay) {
+            if (!audioCtx || !zenithNode) {
+                // Fallback if AudioWorklet is not active
+                prevAudio.pause();
+                prevAudio.currentTime = 0;
+                if (autoPlay) nextAudio.play().catch(e => {});
+                return;
+            }
+
+            const duration = userSettings.crossfade;
+            const currentTime = audioCtx.currentTime;
+
+            if (duration === 0) {
+                prevAudio.pause();
+                prevAudio.currentTime = 0;
+                if (autoPlay) nextAudio.play().catch(e => {});
+                // Reset crossfade parameter to ensure correct state for next track
+                zenithNode.parameters.get('crossfade').setValueAtTime(activeAudio === playerA ? 0 : 1, currentTime);
+                return;
+            }
+
+            isFading = true;
+            
+            // Determine which player is active and which is next
+            const currentIsPlayerA = (prevAudio === playerA);
+            const startCrossfadeValue = currentIsPlayerA ? 0 : 1; // 0 for A, 1 for B
+            const endCrossfadeValue = currentIsPlayerA ? 1 : 0; // 1 for B, 0 for A
+
+            // Set initial crossfade state
+            zenithNode.parameters.get('crossfade').cancelAndHoldAtTime(currentTime); // Stop any previous automation
+            zenithNode.parameters.get('crossfade').setValueAtTime(startCrossfadeValue, currentTime);
+
+            // Start next audio (volume controlled by worklet)
+            // The HTML5 audio element itself should play, the worklet handles its gain
+            if (autoPlay) nextAudio.play().catch(e => {});
+
+            // Fade to the new track
+            zenithNode.parameters.get('crossfade').linearRampToValueAtTime(endCrossfadeValue, currentTime + duration);
+
+            // Stop previous audio after fade out
+            setTimeout(() => {
+                prevAudio.pause();
+                prevAudio.currentTime = 0;
+                isFading = false;
+            }, duration * 1000); // Convert seconds to milliseconds
         }
 
         function attachListeners(audioObj) {
