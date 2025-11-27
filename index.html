@@ -742,8 +742,8 @@
             else if(p.get('album')) openAlbum(p.get('album'),p.get('source')); 
             else goHome(); 
             
-            // Appel de initAuth ici, après le chargement initial de la page
-            await initAuth(); 
+            // L'appel à initAuth a été déplacé dans auth.js sur DOMContentLoaded
+            // await initAuth(); 
         };
         async function openTrackDirect(id,s){ try{const r=await fetch(`${API_BASE}/track?id=${id}&source=${s||''}`); const d=await r.json(); if(d.id){ let i=d.source==='subsonic'?`${API_BASE}/get_subsonic_cover/${d.album.image.large}`:(d.album.image.large||'').replace('_300','_600'); tracks=[{...d,img:i,performer:d.performer||{name:d.artist?d.artist.name:"Artiste"},type:'track'}]; renderGrid(tracks,false); loadTrack(0, false); }}catch(e){}}
         function showTracks(){ document.getElementById('trackView').style.display='block'; document.getElementById('artistView').style.display='none'; document.getElementById('lyricsView').style.display='none'; document.getElementById('blindTestView').style.display='none'; document.getElementById('profileView').style.display='none'; document.getElementById('playlistView').style.display='none'; document.getElementById('allPlaylistsView').style.display='none'; document.getElementById('searchBarContainer').style.display='flex'; isLyricsMode=false; document.getElementById('introContainer').style.display='none'; document.getElementById('viewTitle').innerText="Résultats"; }

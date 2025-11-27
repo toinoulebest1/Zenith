@@ -285,10 +285,9 @@ function toggleAuthMode() {
         if (!isLoginMode) userField.focus();
     }
     document.getElementById('authTitle').innerText = isLoginMode ? 'Connexion' : 'Inscription';
-    document.getElementById('btnLoginAction').innerText = isLoginMode ? 'Se connecter' : "S'inscrire';
+    document.getElementById('btnLoginAction').innerText = isLoginMode ? 'Se connecter' : "S'inscrire";
     document.getElementById('btnToggleMode').innerHTML = isLoginMode ? 'Pas de compte ? <b>Créer un compte</b>' : 'Déjà un compte ? <b>Se connecter</b>';
     document.getElementById('authMessage').innerText = '';
 }
 
-// L'appel à initAuth est déplacé dans index.html pour s'assurer que tout est chargé.
-// document.addEventListener('DOMContentLoaded', initAuth);
+document.addEventListener('DOMContentLoaded', initAuth);
