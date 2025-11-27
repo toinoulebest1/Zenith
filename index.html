@@ -633,8 +633,7 @@
             const nextAudio = (activeAudio === playerA) ? playerB : playerA; 
             const prevAudio = activeAudio;
             
-            // isRadioActive est maintenant géré par renderGrid
-            // if (nextTrack.isRadio) { document.getElementById('radioBadge').style.display = 'block'; isRadioActive = true; } else { document.getElementById('radioBadge').style.display = 'none'; isRadioActive = false; }
+            if (nextTrack.isRadio) { document.getElementById('radioBadge').style.display = 'block'; isRadioActive = true; } else { document.getElementById('radioBadge').style.display = 'none'; isRadioActive = false; }
             if (typeof broadcastTrackChange === 'function') broadcastTrackChange(nextTrack);
             resetLyricsState();
 
@@ -1068,7 +1067,10 @@
                 if(d.tracks) d.tracks.forEach(x=>results.push({...x,type:'track'})); 
                 if(d.external_playlists) d.external_playlists.forEach(p=>results.push(p));
             } catch(e) { console.error(e); }
-            renderGrid(results, true); // Enable radio after search results
+            
+            // On marque les résultats comme venant d'une recherche
+            const finalResults = results.map(r => ({...r, fromSearch: true}));
+            renderGrid(finalResults, true); // Enable radio after search results
         }
 
         function openExternalPlaylist(playlist) {
@@ -1140,18 +1142,29 @@
                         if(src === 'ytmusic') openExternalPlaylist(it); 
                         else openPlaylist(it.id); 
                     } else { // C'est une piste
-                        // If the clicked track is already the current track and playing, just ensure it's playing
                         if (currentTrackId === it.id && isPlaying) {
                             play(); 
                             return;
                         }
 
-                        // Set tracks to the current grid items and find the index
-                        tracks = items; 
-                        const idx = tracks.findIndex(x=>x.id===it.id);
-                        
-                        // Radio active state is already set by renderGrid, no need to change here
-                        loadTrack(idx!==-1?idx:0);
+                        // Si le titre vient d'une recherche, on l'isole pour déclencher la radio ensuite
+                        if (it.fromSearch) {
+                            tracks = [it];
+                            isRadioActive = true;
+                            document.getElementById('radioBadge').style.display = 'block';
+                            loadTrack(0);
+                            // On déclenche le chargement de la radio immédiatement pour la suite
+                            triggerRadio(true);
+                        } else {
+                            // Comportement standard (playlist, album, etc.)
+                            tracks = items; 
+                            const idx = tracks.findIndex(x => x.id === it.id);
+                            // On respecte l'état radio passé en paramètre à renderGrid
+                            // (ex: false pour les albums, true pour top 10)
+                            isRadioActive = enableRadio;
+                            document.getElementById('radioBadge').style.display = isRadioActive ? 'block' : 'none';
+                            loadTrack(idx!==-1?idx:0);
+                        }
                     } 
                 }; 
                 g.appendChild(d); 
