@@ -134,6 +134,12 @@ async function syncSpotifyProfileData(user) {
 async function syncSpotifyFavorites(token) {
     console.log("🔄 Syncing Spotify Favorites...");
     try {
+        const { data: { user } } = await supabaseClient.auth.getUser();
+        if (!user) {
+            console.error("User not authenticated for Spotify sync.");
+            return;
+        }
+
         const response = await fetch('https://api.spotify.com/v1/me/tracks?limit=50', {
             headers: { 'Authorization': 'Bearer ' + token }
         });
@@ -149,34 +155,54 @@ async function syncSpotifyFavorites(token) {
                     title: t.name,
                     performer: { name: t.artists[0].name },
                     album: { title: t.album.name, image: { large: t.album.images[0]?.url } },
-                    source: 'spotify_lazy',
+                    source: 'spotify_lazy', // Indique que c'est un titre Spotify à résoudre
                     duration: t.duration_ms / 1000,
                     imported_from: 'spotify'
                 };
             });
 
-            if (typeof favorites !== 'undefined') {
-                let newCount = 0;
-                spotifyTracks.forEach(st => {
-                     const exists = favorites.some(f => 
-                        f.title.toLowerCase() === st.title.toLowerCase() && 
-                        f.performer.name.toLowerCase() === st.performer.name.toLowerCase()
-                     );
-                     if(!exists) {
-                         favorites.push(st);
-                         newCount++;
-                         // Note: On pourrait aussi insérer en DB ici si besoin
-                     }
-                });
-                
-                if(newCount > 0) {
-                    showToast(`✅ ${newCount} titres Spotify importés !`);
-                    if(typeof updateLikeButtonState === 'function') updateLikeButtonState();
+            // Récupérer les favoris existants de l'utilisateur pour éviter les doublons
+            const { data: existingFavorites, error: fetchError } = await supabaseClient
+                .from('favorites')
+                .select('track_id')
+                .eq('user_id', user.id);
+
+            if (fetchError) throw fetchError;
+
+            const existingTrackIds = new Set(existingFavorites.map(f => f.track_id));
+            let newCount = 0;
+            const tracksToInsert = [];
+
+            spotifyTracks.forEach(st => {
+                if (!existingTrackIds.has(st.id)) {
+                    tracksToInsert.push({
+                        user_id: user.id,
+                        track_id: st.id,
+                        track_data: st
+                    });
+                    newCount++;
                 }
+            });
+
+            if (tracksToInsert.length > 0) {
+                const { error: insertError } = await supabaseClient
+                    .from('favorites')
+                    .insert(tracksToInsert);
+
+                if (insertError) throw insertError;
+                
+                showToast(`✅ ${newCount} titres Spotify importés !`);
+                // Recharger les favoris pour mettre à jour l'interface
+                if (window.loadUserFavorites) {
+                    window.loadUserFavorites();
+                }
+            } else {
+                showToast("Aucun nouveau titre Spotify à importer.");
             }
         }
     } catch (e) {
         console.error("Spotify Sync Error:", e);
+        showToast("Erreur lors de l'import Spotify.");
     }
 }
 
