@@ -1203,6 +1203,12 @@
                 let b = ''; let rankBadgeHTML = ''; 
                 if(isAlb) b='<div class="type-badge badge-album">ALBUM</div>'; else if(isPl) b='<div class="type-badge badge-hires" style="background:#ff0055">PLAYLIST</div>'; 
                 if(src!=='subsonic' && src!=='ytmusic' && it.maximum_bit_depth>16 && !isPl) b+='<div class="type-badge badge-hires">HI-RES</div>'; 
+
+                // AJOUT DU BADGE SPOTIFY
+                if(it.imported_from === 'spotify' || src === 'spotify_lazy') {
+                     b+='<div class="type-badge" style="background:#1DB954; color:white; box-shadow:0 0 10px rgba(29, 185, 84, 0.4);"><i class="fab fa-spotify"></i></div>';
+                }
+
                 if(it.rank) { let rankClass = 'rank-other'; if(it.rank === 1) rankClass = 'rank-1'; else if(it.rank === 2) rankClass = 'rank-2'; else if(it.rank === 3) rankClass = 'rank-3'; rankBadgeHTML = `<div class="rank-badge ${rankClass}">#${it.rank}</div>`; }
                 let subtitle = ''; if (isPl) { subtitle = it.performer ? it.performer.name : 'Playlist'; } else { subtitle = isAlb ? it.artist.name : it.performer.name; }
                 let votesHTML = ''; if (it.like_count) { votesHTML = `<div class="vote-count"><i class="fas fa-heart"></i> ${it.like_count}</div>`; }
