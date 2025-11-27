@@ -481,6 +481,16 @@ body.zen-active.zen-idle {
 .badge-artist { background: #9d4edd; box-shadow: 0 0 10px #9d4edd; color: white; }
 .badge-tidal { background: var(--tidal-blue); color: white; font-weight: 900; }
 .badge-qobuz { background: #555; color: white; font-weight: 900; }
+.badge-spotify { 
+    background: #1DB954; 
+    color: white; 
+    box-shadow: 0 0 10px rgba(29, 185, 84, 0.4); 
+    font-size: 11px !important; 
+    padding: 3px 8px !important; 
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
 
 /* CREATE PLAYLIST CARD */
 .create-playlist-card {
