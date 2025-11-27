@@ -1,5 +1,7 @@
 // profile.js - Gestion du profil et upload d'avatar
 
+const DEFAULT_AVATAR = "https://mzxfcvzqxgslyopkkaej.supabase.co/storage/v1/object/public/avatar_nopersonalize/avatarno_personalize.png";
+
 async function loadProfile() {
     const { data: { user } } = await supabaseClient.auth.getUser();
     if (!user) return;
@@ -18,10 +20,10 @@ async function loadProfile() {
 
         if (data) {
             document.getElementById('profileUsername').value = data.username || '';
-            if (data.avatar_url) {
-                document.getElementById('profileAvatarPreview').src = data.avatar_url;
-                // Mise à jour aussi dans la sidebar si on veut
-            }
+            
+            // Si l'utilisateur a un avatar, on l'utilise, sinon on met l'image par défaut
+            const avatarUrl = data.avatar_url ? data.avatar_url : DEFAULT_AVATAR;
+            document.getElementById('profileAvatarPreview').src = avatarUrl;
         }
     } catch (error) {
         console.error('Erreur chargement profil:', error.message);
@@ -39,6 +41,7 @@ async function updateProfile() {
     btn.disabled = true;
     btn.innerText = "Sauvegarde...";
 
+    // On récupère l'URL actuelle (soit celle qu'on vient de charger, soit le défaut)
     let avatar_url = document.getElementById('profileAvatarPreview').src;
 
     try {
