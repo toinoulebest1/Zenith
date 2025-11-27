@@ -103,6 +103,12 @@ function handleSession(session) {
         hasSyncedSpotifySession = false;
         console.log("handleSession: No session found, showing login screen.");
         
+        // STOP AUDIO & RESET
+        if (typeof window.pause === 'function') window.pause();
+        // On vide les sources pour éviter que ça ne continue en arrière-plan ou ne reprenne
+        if (window.playerA) { window.playerA.src = ''; window.playerA.load(); }
+        if (window.playerB) { window.playerB.src = ''; window.playerB.load(); }
+        
         if (loginScreen) loginScreen.style.display = 'flex';
         if (appLayout) appLayout.classList.remove('layout-visible');
     }
