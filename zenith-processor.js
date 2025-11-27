@@ -6,8 +6,7 @@ class ZenithProcessor extends AudioWorkletProcessor {
         return [
             { name: 'volume', defaultValue: 1.0, minValue: 0.0, maxValue: 1.0 },
             { name: 'crossfade', defaultValue: 0.0, minValue: 0.0, maxValue: 1.0 }, // 0=A, 1=B
-            { name: 'orbitEnabled', defaultValue: 0.0 }, // 0 ou 1
-            { name: 'karaokeEnabled', defaultValue: 0.0 } // 0 ou 1
+            { name: 'orbitEnabled', defaultValue: 0.0 } // 0 ou 1
         ];
     }
 
@@ -16,9 +15,6 @@ class ZenithProcessor extends AudioWorkletProcessor {
         // Pour l'effet 8D
         this.orbitPhase = 0;
         this.orbitSpeed = 0.0005; // Vitesse de rotation
-        
-        // Pour l'effet Karaoké (Filtre Bass)
-        this.bassFilterState = 0;
     }
 
     process(inputs, outputs, parameters) {
@@ -39,13 +35,6 @@ class ZenithProcessor extends AudioWorkletProcessor {
         const volParam = parameters.volume;
         const xfadeParam = parameters.crossfade;
         const isOrbit = parameters.orbitEnabled[0] > 0.5;
-        const isKaraoke = parameters.karaokeEnabled[0] > 0.5;
-
-        // Calcul du coefficient pour le filtre passe-bas (cutoff ~150Hz)
-        // Alpha = (2 * PI * cutoff) / sampleRate
-        // sampleRate est une globale disponible dans le scope AudioWorklet
-        const bassCutoff = 150; 
-        const alpha = (2 * Math.PI * bassCutoff) / sampleRate;
 
         // Boucle sur chaque échantillon (128 par bloc)
         for (let i = 0; i < output[0].length; i++) {
@@ -69,27 +58,7 @@ class ZenithProcessor extends AudioWorkletProcessor {
             let L = (La * gainA) + (Lb * gainB);
             let R = (Ra * gainA) + (Rb * gainB);
 
-            // 2. EFFET KARAOKÉ AMÉLIORÉ (Avec préservation des basses)
-            if (isKaraoke) {
-                // A. Calcul du signal central (Mono)
-                const mid = (L + R) * 0.5;
-
-                // B. Filtre Passe-Bas simple (One-Pole Lowpass) pour isoler la basse
-                // y[n] = y[n-1] + alpha * (x[n] - y[n-1])
-                this.bassFilterState += alpha * (mid - this.bassFilterState);
-                const bass = this.bassFilterState;
-
-                // C. Annulation de phase (Side) = L - R
-                // Cela supprime tout ce qui est au centre (Voix + Basse)
-                const side = (L - R);
-
-                // D. Reconstruction : On garde le Side (instruments stéréo) + la Basse filtrée
-                // La voix (Centre - Basse) est perdue
-                L = side + bass;
-                R = side + bass;
-            }
-
-            // 3. EFFET 8D ORBIT (Rotation Spatiale)
+            // 2. EFFET 8D ORBIT (Rotation Spatiale)
             if (isOrbit) {
                 this.orbitPhase += this.orbitSpeed;
                 if (this.orbitPhase > 2 * Math.PI) this.orbitPhase -= 2 * Math.PI;
@@ -103,7 +72,7 @@ class ZenithProcessor extends AudioWorkletProcessor {
                 R = R * Math.sin(angle);
             }
 
-            // 4. VOLUME MASTER & SORTIE
+            // 3. VOLUME MASTER & SORTIE
             output[0][i] = L * vol;
             if (channelCount > 1) {
                 output[1][i] = R * vol;

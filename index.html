@@ -275,7 +275,6 @@
             </div>
             <button class="limiter-btn" id="limiterBtn" onclick="toggleLimiter()"><i class="fas fa-compress-arrows-alt"></i> NORMALISATEUR</button>
             <button class="orbit-btn" id="orbitBtn" onclick="toggleOrbit()"><i class="fas fa-globe-americas"></i> 8D ORBIT (WORKLET)</button>
-            <button class="karaoke-btn" id="karaokeBtn" onclick="toggleKaraoke()"><i class="fas fa-microphone-slash"></i> NO VOCAL (PHASE)</button>
             <button class="eq-reset-btn" onclick="resetEQ()">Réinitialiser EQ</button>
         </div>
 
@@ -352,7 +351,7 @@
         // --- VARIABLES AUDIO WORKLET ---
         let audioCtx, zenithNode, sourceA, sourceB;
         let masterGain; 
-        let isOrbitOn = false, isKaraokeOn = false, isLimiterOn = false; 
+        let isOrbitOn = false, isLimiterOn = false; 
         let eqFilters = []; const eqFrequencies = [60, 230, 910, 4000, 14000];
         let compressor; 
 
@@ -461,8 +460,7 @@
                 parameterData: {
                     volume: globalVolume, // Initial global volume
                     crossfade: userSettings.crossfade,
-                    orbitEnabled: isOrbitOn ? 1 : 0,
-                    karaokeEnabled: isKaraokeOn ? 1 : 0
+                    orbitEnabled: isOrbitOn ? 1 : 0
                 }
             });
 
@@ -510,7 +508,6 @@
         function disableAudioFXButtons() {
             document.getElementById('limiterBtn').disabled = true;
             document.getElementById('orbitBtn').disabled = true;
-            document.getElementById('karaokeBtn').disabled = true;
             document.querySelectorAll('.eq-range').forEach(s => s.disabled = true);
             document.querySelector('.xfade-range').disabled = true;
             document.getElementById('eqView').querySelector('.eq-reset-btn').disabled = true;
@@ -519,7 +516,6 @@
         function enableAudioFXButtons() {
             document.getElementById('limiterBtn').disabled = false;
             document.getElementById('orbitBtn').disabled = false;
-            document.getElementById('karaokeBtn').disabled = false;
             document.querySelectorAll('.eq-range').forEach(s => s.disabled = false);
             document.querySelector('.xfade-range').disabled = false;
             document.getElementById('eqView').querySelector('.eq-reset-btn').disabled = false;
@@ -548,14 +544,6 @@
                 showToast("Normalisateur désactivé");
             }
             changeSetting('limiter', isLimiterOn);
-        }
-
-        function toggleKaraoke() {
-            if (!audioCtx || !zenithNode) return;
-            isKaraokeOn = !isKaraokeOn;
-            document.getElementById('karaokeBtn').classList.toggle('active', isKaraokeOn);
-            zenithNode.parameters.get('karaokeEnabled').setTargetAtTime(isKaraokeOn ? 1 : 0, audioCtx.currentTime, 0.05);
-            showToast(isKaraokeOn ? "Karaoké activé 🎤" : "Karaoké désactivé");
         }
 
         function toggleOrbit() {
