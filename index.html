@@ -263,7 +263,7 @@
         <div class="eq-overlay" id="eqView">
             <div class="eq-header"><h3>Audio FX</h3><button class="close-eq" onclick="toggleEQ()"><i class="fas fa-times"></i></button></div>
             <div class="xfade-section">
-                <div style="display:flex; justify-content:space-between; margin-bottom:5px;"><span style="font-size:12px; color:#888; font-weight:bold;">CROSSFADE</span><span id="xfadeVal" style="font-size:12px; color:var(--primary);">0s</span></div>
+                <div style="display:flex; justify-content:space-between; margin-bottom:5px;"><span style="font-size:12px; color:#888; font-weight:bold;">DURÉE CROSSFADE</span><span id="xfadeVal" style="font-size:12px; color:var(--primary);">0s</span></div>
                 <input type="range" class="xfade-range" min="0" max="12" step="1" value="0" oninput="updateCrossfade(this.value)">
             </div>
             <div class="eq-sliders">
@@ -395,7 +395,8 @@
             document.getElementById('settingCrossfade').value = xfade; 
             document.getElementById('settingCrossfadeVal').innerText = xfade + "s"; 
             document.querySelector('.xfade-range').value = xfade;
-            if (zenithNode && audioCtx) zenithNode.parameters.get('crossfade').setTargetAtTime(xfade, audioCtx.currentTime, 0.05);
+            // FIXED: Removed direct crossfade parameter update which was causing audio cut out
+            // if (zenithNode && audioCtx) zenithNode.parameters.get('crossfade').setTargetAtTime(xfade, audioCtx.currentTime, 0.05);
 
             const isMagic = (settings.magic === true || settings.magic === 'true'); 
             magicEnabled = isMagic; 
@@ -575,10 +576,11 @@
         }
 
         function updateCrossfade(val) {
-            if (!audioCtx || !zenithNode) return;
+            // if (!audioCtx || !zenithNode) return; // Not strictly needed
             const duration = parseFloat(val);
             document.getElementById('xfadeVal').innerText = duration + "s";
-            zenithNode.parameters.get('crossfade').setTargetAtTime(duration, audioCtx.currentTime, 0.05);
+            // FIXED: Removed direct crossfade parameter update
+            // zenithNode.parameters.get('crossfade').setTargetAtTime(duration, audioCtx.currentTime, 0.05);
             changeSetting('crossfade', duration);
         }
 
