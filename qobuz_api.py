@@ -38,14 +38,13 @@ class Bundle:
     
     def __init__(self):
         self._session = requests.Session()
-        # Timeout ajouté ici aussi pour l'initialisation
-        response = self._session.get(f"{self._BASE_URL}/login", timeout=10)
+        response = self._session.get(f"{self._BASE_URL}/login")
         response.raise_for_status()
         bundle_url_match = self._BUNDLE_URL_REGEX.search(response.text)
         if not bundle_url_match:
             raise NotImplementedError("Bundle URL not found")
         bundle_url = bundle_url_match.group(1)
-        response = self._session.get(self._BASE_URL + bundle_url, timeout=10)
+        response = self._session.get(self._BASE_URL + bundle_url)
         response.raise_for_status()
         self._bundle = response.text
         

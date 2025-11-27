@@ -277,11 +277,17 @@ audio.addEventListener('ended', player.next);
                 compressor = audioCtx.createDynamicsCompressor();
                 
                 // INITIALISATION CORRECTE DU COMPRESSEUR EN FONCTION DES RÉGLAGES
-                // Le compresseur est initialisé pour être transparent par défaut
-                compressor.threshold.value = 0;
-                compressor.ratio.value = 1; 
-                compressor.attack.value = 0.003; 
-                compressor.release.value = 0.25;
+                if (isLimiterOn) {
+                    compressor.threshold.value = -12;
+                    compressor.knee.value = 30;
+                    compressor.ratio.value = 12;
+                    compressor.attack.value = 0.003; 
+                    compressor.release.value = 0.25;
+                } else {
+                    // Transparent par défaut
+                    compressor.threshold.value = 0;
+                    compressor.ratio.value = 1; 
+                }
 
                 prevNode.connect(compressor);
                 compressor.connect(audioCtx.destination);
@@ -305,7 +311,6 @@ audio.addEventListener('ended', player.next);
             
             // Mise à jour visuelle
             document.getElementById('limiterBtn').classList.toggle('active', isLimiterOn);
-            console.log("Limiter state:", isLimiterOn ? "ON" : "OFF"); // Ajout d'un log
             
             // Application Audio Réelle
             if (compressor && audioCtx) {
@@ -539,7 +544,7 @@ audio.addEventListener('ended', player.next);
         function showToast(msg) { const t=document.getElementById('toast'); t.innerText=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),2000); }
         function copyLink() { if(!currentTrackId) return; const t=tracks[currentIndex]; navigator.clipboard.writeText(`${window.location.origin}/?track=${t.id}&source=${t.source}`).then(()=>showToast('Lien copié !')); }
         async function toggleLike() { const btn = document.getElementById('btnLike'); if(btn.disabled) return; btn.disabled = true; try { const t = tracks[currentIndex]; if(!t) return; const { data: { user } } = await supabaseClient.auth.getUser(); if(!user) { showToast("Connectez-vous pour liker !"); return; } const idx = favorites.findIndex(f => String(f.id) === String(t.id)); if (idx === -1) { favorites.push(t); btn.innerHTML = '<i class="fas fa-heart"></i>'; btn.style.color = 'var(--secondary)'; showToast('Liké ❤️'); try { await supabaseClient.from('favorites').insert({ user_id: user.id, track_id: String(t.id), track_data: t }); } catch(e) { console.error(e); } } else { favorites.splice(idx, 1); btn.innerHTML = '<i class="far fa-heart"></i>'; btn.style.color = 'var(--text-dim)'; showToast('Disliké 💔'); try { await supabaseClient.from('favorites').delete().match({ user_id: user.id, track_id: String(t.id) }); } catch(e) { console.error(e); } } } finally { btn.disabled = false; } }
-        function updateLikeButtonState() { const t = tracks[currentIndex]; if(!t) return; const idx = favorites.findIndex(f => String(f.id) === String(t.id)); const btn = document.getElementById('btnLike'); if(idx !== -1) { btn.innerHTML = '<i class="fas fa-heart></i>'; btn.style.color = 'var(--secondary)'; } else { btn.innerHTML = '<i class="far fa-heart"></i>'; btn.style.color = 'var(--text-dim)'; } }
+        function updateLikeButtonState() { const t = tracks[currentIndex]; if(!t) return; const idx = favorites.findIndex(f => String(f.id) === String(t.id)); const btn = document.getElementById('btnLike'); if(idx !== -1) { btn.innerHTML = '<i class="fas fa-heart"></i>'; btn.style.color = 'var(--secondary)'; } else { btn.innerHTML = '<i class="far fa-heart"></i>'; btn.style.color = 'var(--text-dim)'; } }
         
         // Nouvelle fonction pour ajouter un titre à l'historique Supabase
         async function saveTrackToHistory(track) {
@@ -850,7 +855,3 @@ audio.addEventListener('ended', player.next);
                 syncLyricsUI();
             }
         });
-    </script>
-    <script src="shortcuts.js"></script>
-</body>
-</html>
