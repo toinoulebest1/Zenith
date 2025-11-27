@@ -8,7 +8,7 @@ let supabaseClient = null;
 let currentUserId = null; // Pour éviter les rechargements inutiles
 let hasSyncedSpotifySession = false; 
 
-function initAuth() {
+async function initAuth() { // Rendre la fonction asynchrone
     if (typeof window.supabase === 'undefined') {
         console.error("Supabase lib not loaded");
         return;
@@ -18,14 +18,27 @@ function initAuth() {
     
     checkUrlForErrors();
 
-    // Écouter les changements d'état
+    // 1. Vérifier et gérer la session initiale immédiatement
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    handleSession(session); // Gérer la session initiale
+
+    // 2. Écouter les changements d'état futurs
     supabaseClient.auth.onAuthStateChange((event, session) => {
-        if (event === 'TOKEN_REFRESHED') return;
-        // On ignore aussi si c'est juste un changement de focus sans changement réel de session
-        if (event === 'SIGNED_IN' && session && session.user.id === currentUserId) return;
+        // Nous nous intéressons aux changements réels de session ou à la configuration initiale.
+        // La session initiale est déjà gérée par getSession() ci-dessus.
+        // Pour SIGNED_IN, nous voulons nous assurer que l'interface utilisateur est mise à jour s'il s'agit d'une nouvelle session ou d'un nouveau chargement.
+        // Pour SIGNED_OUT, nous voulons toujours mettre à jour.
+        // TOKEN_REFRESHED ne nécessite pas de modifications de l'interface utilisateur.
+        // USER_UPDATED pourrait nécessiter un rechargement du profil, mais pas une gestion complète de la session.
+
+        if (event === 'TOKEN_REFRESHED') {
+            console.log("Auth Event: TOKEN_REFRESHED");
+            // Pas de changement d'interface utilisateur nécessaire, juste rafraîchir le jeton
+            return;
+        }
         
         console.log("Auth Event:", event);
-        handleSession(session);
+        handleSession(session); // Appeler handleSession pour tous les autres événements pertinents
     });
 }
 
@@ -243,8 +256,8 @@ async function signup(email, password) {
 
 async function logout() {
     await supabaseClient.auth.signOut();
-    currentUserId = null;
-    window.location.reload();
+    // La fonction handleSession(null) sera appelée automatiquement par l'écouteur onAuthStateChange avec l'événement 'SIGNED_OUT'.
+    // Il n'est donc pas nécessaire de recharger la page manuellement.
 }
 
 function showAuthError(msg, isSuccess = false) {
