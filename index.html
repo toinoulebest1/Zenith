@@ -347,6 +347,7 @@
         let isPlaying = false; let isRadioActive = false; let isLyricsMode = false;
         let lyricsData = []; let firstLineTime = null; let currentTrackId = null;
         let fadeInterval = null; let isFetchingRadio = false;
+        let crossfadeTimeout = null; // Nouvelle variable globale
 
         // --- VARIABLES AUDIO WORKLET ---
         let audioCtx, zenithNode, sourceA, sourceB;
@@ -685,6 +686,12 @@
 
             const xfadeParam = zenithNode.parameters.get('crossfade');
 
+            // --- CORRECTION CRITIQUE : Annuler le timeout précédent pour ne pas couper le son ---
+            if (crossfadeTimeout) {
+                clearTimeout(crossfadeTimeout);
+                crossfadeTimeout = null;
+            }
+
             if (duration === 0) {
                 prevAudio.pause();
                 prevAudio.currentTime = 0;
@@ -705,10 +712,11 @@
             xfadeParam.linearRampToValueAtTime(targetValue, currentTime + duration);
 
             // Arrête la piste précédente après le fondu
-            setTimeout(() => {
+            crossfadeTimeout = setTimeout(() => {
                 prevAudio.pause();
                 prevAudio.currentTime = 0;
                 isFading = false;
+                crossfadeTimeout = null;
             }, duration * 1000); 
         }
 
