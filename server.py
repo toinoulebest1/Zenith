@@ -432,37 +432,59 @@ def threaded_qobuz_search(query, limit=25, type='track'):
     except: return []
 
 def try_resolve_track(title, artist):
-    """Tente de trouver un ID Qobuz ou Subsonic pour un titre/artiste donné"""
+    """Tente de trouver un ID Qobuz ou Subsonic avec vérification stricte de l'artiste"""
     search_query = f"{title} {artist}"
+    target_artist_clean = clean_string(artist)
+    target_title_clean = clean_string(title)
     
     # 1. Qobuz
     if client:
         try:
-            q_resp = client.api_call("track/search", query=search_query, limit=1)
+            # On demande plus de résultats (5) pour avoir le choix
+            q_resp = client.api_call("track/search", query=search_query, limit=5)
             items = q_resp.get('tracks', {}).get('items', [])
-            if items:
-                rec = items[0]
+            
+            for rec in items:
+                rec_title_clean = clean_string(rec['title'])
+                performer_dict = rec.get('performer') or rec.get('artist') or {}
+                rec_artist_clean = clean_string(performer_dict.get('name', ''))
                 
-                # Logique de matching Robuste (Fonctionne SANS RapidFuzz)
-                t1 = clean_string(rec['title'])
-                t2 = clean_string(title)
-                
-                is_match = False
+                # A. Vérification Artiste (Strict ou Fuzzy)
+                artist_match = False
                 if FUZZ_AVAILABLE:
-                    if fuzz.ratio(t1, t2) > 50: is_match = True
+                    if fuzz.ratio(target_artist_clean, rec_artist_clean) > 65: artist_match = True
+                    elif target_artist_clean in rec_artist_clean or rec_artist_clean in target_artist_clean: artist_match = True
                 else:
-                    # Fallback si rapidfuzz manque : vérification d'inclusion simple
-                    if t2 in t1 or t1 in t2: is_match = True
-                    
-                if is_match:
-                    return {'id': rec['id'], 'source': 'qobuz'}
+                    if target_artist_clean in rec_artist_clean or rec_artist_clean in target_artist_clean: artist_match = True
+                
+                if not artist_match: continue
+
+                # B. Vérification Titre
+                title_match = False
+                if FUZZ_AVAILABLE:
+                    if fuzz.ratio(target_title_clean, rec_title_clean) > 60: title_match = True
+                else:
+                    if target_title_clean in rec_title_clean or rec_title_clean in target_title_clean: title_match = True
+                
+                if not title_match: continue
+
+                # C. Filtre Anti-Cover (Si le mot cover n'est pas dans la requête)
+                if "cover" not in target_title_clean and "cover" in rec_title_clean: continue
+                if "tribute" not in target_title_clean and "tribute" in rec_title_clean: continue
+                if "karaoke" not in target_title_clean and "karaoke" in rec_title_clean: continue
+
+                # Si tout est bon, on prend celui-là
+                return {'id': rec['id'], 'source': 'qobuz'}
+
         except Exception as e:
             logger.error(f"Resolve Qobuz error: {e}")
     
     # 2. Subsonic
-    subs = fetch_subsonic_tracks(search_query, limit=1)
-    if subs:
-        return {'id': subs[0]['id'], 'source': 'subsonic'}
+    subs = fetch_subsonic_tracks(search_query, limit=5)
+    for song in subs:
+        s_artist = clean_string(song['performer']['name'])
+        if target_artist_clean in s_artist or s_artist in target_artist_clean:
+             return {'id': song['id'], 'source': 'subsonic'}
     
     return None
 
