@@ -675,37 +675,40 @@
 
             const duration = userSettings.crossfade;
             const currentTime = audioCtx.currentTime;
-            
-            // Calculer la valeur cible basée sur le PROCHAIN lecteur (0 pour A, 1 pour B)
-            const targetValue = (nextAudio === playerA) ? 0 : 1;
-
-            const xfadeParam = zenithNode.parameters.get('crossfade');
 
             if (duration === 0) {
                 prevAudio.pause();
                 prevAudio.currentTime = 0;
-                
-                // IMPORTANT: Annuler les automations précédentes et appliquer la valeur immédiatement
-                xfadeParam.cancelScheduledValues(currentTime);
-                xfadeParam.setValueAtTime(targetValue, currentTime);
+                // nextAudio.play().catch(e => {}); // Supprimé, play() le gérera
+                // Réinitialise le paramètre de crossfade pour assurer un état correct pour la piste suivante
+                zenithNode.parameters.get('crossfade').setValueAtTime(activeAudio === playerA ? 0 : 1, currentTime);
                 return;
             }
 
             isFading = true;
             
-            // Pour le fondu, on part de la valeur du lecteur précédent
-            const startValue = (prevAudio === playerA) ? 0 : 1;
+            // Détermine quel lecteur est actif et lequel est le suivant
+            const currentIsPlayerA = (prevAudio === playerA);
+            const startCrossfadeValue = currentIsPlayerA ? 0 : 1; // 0 pour A, 1 pour B
+            const endCrossfadeValue = currentIsPlayerA ? 1 : 0; // 1 pour B, 0 pour A
 
-            xfadeParam.cancelScheduledValues(currentTime);
-            xfadeParam.setValueAtTime(startValue, currentTime);
-            xfadeParam.linearRampToValueAtTime(targetValue, currentTime + duration);
+            // Définit l'état initial du crossfade
+            zenithNode.parameters.get('crossfade').cancelAndHoldAtTime(currentTime); // Arrête toute automatisation précédente
+            zenithNode.parameters.get('crossfade').setValueAtTime(startCrossfadeValue, currentTime);
+
+            // Démarre la lecture de la piste suivante (le volume est contrôlé par le worklet)
+            // L'élément audio HTML5 lui-même doit jouer, le worklet gère son gain
+            // nextAudio.play().catch(e => {}); // Supprimé, play() le gérera
+
+            // Fait un fondu vers la nouvelle piste
+            zenithNode.parameters.get('crossfade').linearRampToValueAtTime(endCrossfadeValue, currentTime + duration);
 
             // Arrête la piste précédente après le fondu
             setTimeout(() => {
                 prevAudio.pause();
                 prevAudio.currentTime = 0;
                 isFading = false;
-            }, duration * 1000); 
+            }, duration * 1000); // Convertit les secondes en millisecondes
         }
 
         function attachListeners(audioObj) {
@@ -828,6 +831,9 @@
 
             console.log(`saveTrackToHistory: Tentative de sauvegarde pour l'utilisateur ${user.id}, titre ${track.id}`);
 
+            // NETTOYAGE : On enlève le flag isRadio avant de sauvegarder pour ne pas polluer l'historique
+            const cleanTrack = { ...track, isRadio: false };
+
             try {
                 // 1. Vérifier si le titre existe déjà dans l'historique de l'utilisateur
                 const { data: existingHistory, error: fetchError } = await supabaseClient
@@ -862,7 +868,7 @@
                     .insert({
                         user_id: user.id,
                         track_id: String(track.id),
-                        track_data: track,
+                        track_data: cleanTrack,
                         played_at: new Date().toISOString()
                     });
 
@@ -939,8 +945,8 @@
                 }
 
                 if (data) {
-                    // FORCE fromSearch: false pour que le lecteur traite l'historique comme une playlist
-                    history = data.map(item => ({ ...item.track_data, fromSearch: false }));
+                    // FORCE fromSearch: false et isRadio: false pour que le lecteur traite l'historique comme une playlist normale
+                    history = data.map(item => ({ ...item.track_data, fromSearch: false, isRadio: false }));
                     console.log(`loadUserHistory: ${history.length} titres chargés.`);
                 } else {
                     history = [];
