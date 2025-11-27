@@ -727,7 +727,7 @@
         function showToast(msg) { const t=document.getElementById('toast'); t.innerText=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),2000); }
         function copyLink() { if(!currentTrackId) return; const t=tracks[currentIndex]; navigator.clipboard.writeText(`${window.location.origin}/?track=${t.id}&source=${t.source}`).then(()=>showToast('Lien copié !')); }
         async function toggleLike() { const btn = document.getElementById('btnLike'); if(btn.disabled) return; btn.disabled = true; try { const t = tracks[currentIndex]; if(!t) return; const { data: { user } } = await supabaseClient.auth.getUser(); if(!user) { showToast("Connectez-vous pour liker !"); return; } const idx = favorites.findIndex(f => String(f.id) === String(t.id)); if (idx === -1) { favorites.push(t); btn.innerHTML = '<i class="fas fa-heart"></i>'; btn.style.color = 'var(--secondary)'; showToast('Liké ❤️'); try { await supabaseClient.from('favorites').insert({ user_id: user.id, track_id: String(t.id), track_data: t }); } catch(e) { console.error(e); } } else { favorites.splice(idx, 1); btn.innerHTML = '<i class="far fa-heart"></i>'; btn.style.color = 'var(--text-dim)'; showToast('Disliké 💔'); try { await supabaseClient.from('favorites').delete().match({ user_id: user.id, track_id: String(t.id) }); } catch(e) { console.error(e); } } } finally { btn.disabled = false; } }
-        function updateLikeButtonState() { const t = tracks[currentIndex]; if(!t) return; const idx = favorites.findIndex(f => String(f.id) === String(t.id)); const btn = document.getElementById('btnLike'); if(idx !== -1) { btn.innerHTML = '<i class="fas fa-heart></i>'; btn.style.color = 'var(--secondary)'; } else { btn.innerHTML = '<i class="far fa-heart"></i>'; btn.style.color = 'var(--text-dim)'; } }
+        function updateLikeButtonState() { const t = tracks[currentIndex]; if(!t) return; const idx = favorites.findIndex(f => String(f.id) === String(t.id)); const btn = document.getElementById('btnLike'); if(idx !== -1) { btn.innerHTML = '<i class="fas fa-heart"></i>'; btn.style.color = 'var(--secondary)'; } else { btn.innerHTML = '<i class="far fa-heart"></i>'; btn.style.color = 'var(--text-dim)'; } }
         
         // Nouvelle fonction pour ajouter un titre à l'historique Supabase
         async function saveTrackToHistory(track) {
@@ -891,7 +891,7 @@
             showTracks();
             document.getElementById('searchBarContainer').style.display='none';
             renderGrid([...history], true, "Votre historique est vide.<br>Écoutez des titres pour les retrouver ici !<br>Nous gardons vos 50 dernières écoutes.");
-            document.getElementById('viewTitle').innerText="Historique 🕒";
+            document.getElementById('viewTitle').innerText="Historique des 50 dernières chansons 🕒";
         }
         function showPlaylists(){ resetNavStack(); showTracks(); document.getElementById('trackView').style.display='none'; document.getElementById('allPlaylistsView').style.display='block'; document.getElementById('searchBarContainer').style.display='none'; renderAllPlaylists(); }
         function toggleLyrics(){ isLyricsMode=!isLyricsMode; if(isLyricsMode){ document.getElementById('trackView').style.display='none'; document.getElementById('artistView').style.display='none'; document.getElementById('blindTestView').style.display='none'; document.getElementById('profileView').style.display='none'; document.getElementById('lyricsView').style.display='block'; renderSyncedLyrics(); }else showTracks(); }
