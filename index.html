@@ -675,40 +675,37 @@
 
             const duration = userSettings.crossfade;
             const currentTime = audioCtx.currentTime;
+            
+            // Calculer la valeur cible basée sur le PROCHAIN lecteur (0 pour A, 1 pour B)
+            const targetValue = (nextAudio === playerA) ? 0 : 1;
+
+            const xfadeParam = zenithNode.parameters.get('crossfade');
 
             if (duration === 0) {
                 prevAudio.pause();
                 prevAudio.currentTime = 0;
-                // nextAudio.play().catch(e => {}); // Supprimé, play() le gérera
-                // Réinitialise le paramètre de crossfade pour assurer un état correct pour la piste suivante
-                zenithNode.parameters.get('crossfade').setValueAtTime(activeAudio === playerA ? 0 : 1, currentTime);
+                
+                // IMPORTANT: Annuler les automations précédentes et appliquer la valeur immédiatement
+                xfadeParam.cancelScheduledValues(currentTime);
+                xfadeParam.setValueAtTime(targetValue, currentTime);
                 return;
             }
 
             isFading = true;
             
-            // Détermine quel lecteur est actif et lequel est le suivant
-            const currentIsPlayerA = (prevAudio === playerA);
-            const startCrossfadeValue = currentIsPlayerA ? 0 : 1; // 0 pour A, 1 pour B
-            const endCrossfadeValue = currentIsPlayerA ? 1 : 0; // 1 pour B, 0 pour A
+            // Pour le fondu, on part de la valeur du lecteur précédent
+            const startValue = (prevAudio === playerA) ? 0 : 1;
 
-            // Définit l'état initial du crossfade
-            zenithNode.parameters.get('crossfade').cancelAndHoldAtTime(currentTime); // Arrête toute automatisation précédente
-            zenithNode.parameters.get('crossfade').setValueAtTime(startCrossfadeValue, currentTime);
-
-            // Démarre la lecture de la piste suivante (le volume est contrôlé par le worklet)
-            // L'élément audio HTML5 lui-même doit jouer, le worklet gère son gain
-            // nextAudio.play().catch(e => {}); // Supprimé, play() le gérera
-
-            // Fait un fondu vers la nouvelle piste
-            zenithNode.parameters.get('crossfade').linearRampToValueAtTime(endCrossfadeValue, currentTime + duration);
+            xfadeParam.cancelScheduledValues(currentTime);
+            xfadeParam.setValueAtTime(startValue, currentTime);
+            xfadeParam.linearRampToValueAtTime(targetValue, currentTime + duration);
 
             // Arrête la piste précédente après le fondu
             setTimeout(() => {
                 prevAudio.pause();
                 prevAudio.currentTime = 0;
                 isFading = false;
-            }, duration * 1000); // Convertit les secondes en millisecondes
+            }, duration * 1000); 
         }
 
         function attachListeners(audioObj) {
@@ -740,6 +737,29 @@
                 }
             };
             audioObj.onended = () => { if(audioObj === activeAudio && !nextTrackTriggered) handleNext(); };
+            
+            // AJOUT DU HANDLER D'ERREUR (Nouvelle logique)
+            audioObj.onerror = () => {
+                if (audioObj === activeAudio && audioObj.src) {
+                    console.error("Erreur Audio:", audioObj.error);
+                    const t = tracks[currentIndex];
+                    // Si c'est un titre 'lazy' (Spotify/YT), l'erreur 404 signifie qu'on a rien trouvé
+                    if (t && (t.source === 'spotify_lazy' || t.source === 'yt_lazy')) {
+                        showToast(`⚠️ Titre introuvable : ${t.title}`);
+                    } else {
+                        showToast("Erreur lors de la lecture audio ❌");
+                    }
+                    
+                    document.getElementById('playIcon').className = 'fas fa-exclamation-triangle';
+                    
+                    // Auto-skip après délai si dans une liste
+                    if (tracks.length > 1 && currentIndex < tracks.length - 1) {
+                        setTimeout(() => {
+                            if (activeAudio === audioObj && audioObj.error) handleNext();
+                        }, 2000);
+                    }
+                }
+            };
         }
         attachListeners(playerA); attachListeners(playerB);
 
