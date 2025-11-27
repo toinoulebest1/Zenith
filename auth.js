@@ -8,7 +8,8 @@ let supabaseClient = null;
 let currentUserId = null; // Pour éviter les rechargements inutiles
 let hasSyncedSpotifySession = false; 
 
-async function initAuth() { // Rendre la fonction asynchrone
+async function initAuth() {
+    console.log("initAuth: Starting authentication initialization.");
     if (typeof window.supabase === 'undefined') {
         console.error("Supabase lib not loaded");
         return;
@@ -20,25 +21,18 @@ async function initAuth() { // Rendre la fonction asynchrone
 
     // 1. Vérifier et gérer la session initiale immédiatement
     const { data: { session } } = await supabaseClient.auth.getSession();
-    handleSession(session); // Gérer la session initiale
+    console.log("initAuth: Initial session check result:", session);
+    handleSession(session);
 
     // 2. Écouter les changements d'état futurs
     supabaseClient.auth.onAuthStateChange((event, session) => {
-        // Nous nous intéressons aux changements réels de session ou à la configuration initiale.
-        // La session initiale est déjà gérée par getSession() ci-dessus.
-        // Pour SIGNED_IN, nous voulons nous assurer que l'interface utilisateur est mise à jour s'il s'agit d'une nouvelle session ou d'un nouveau chargement.
-        // Pour SIGNED_OUT, nous voulons toujours mettre à jour.
-        // TOKEN_REFRESHED ne nécessite pas de modifications de l'interface utilisateur.
-        // USER_UPDATED pourrait nécessiter un rechargement du profil, mais pas une gestion complète de la session.
-
         if (event === 'TOKEN_REFRESHED') {
             console.log("Auth Event: TOKEN_REFRESHED");
-            // Pas de changement d'interface utilisateur nécessaire, juste rafraîchir le jeton
             return;
         }
         
-        console.log("Auth Event:", event);
-        handleSession(session); // Appeler handleSession pour tous les autres événements pertinents
+        console.log("Auth Event:", event, "Session:", session);
+        handleSession(session);
     });
 }
 
@@ -60,6 +54,7 @@ function checkUrlForErrors() {
         }
         setTimeout(() => {
             if (typeof showToast === 'function') showToast(userMessage);
+            // IMPORTANT: Clear the URL parameters after processing to avoid re-triggering errors or redirects.
             window.history.replaceState({}, document.title, window.location.pathname);
         }, 1000);
     }
@@ -69,6 +64,8 @@ function handleSession(session) {
     const loginScreen = document.getElementById('loginScreen');
     const appLayout = document.querySelector('.app-layout');
     
+    console.log("handleSession called with session:", session);
+
     if (session) {
         // Utilisateur connecté
         if (loginScreen) loginScreen.style.display = 'none';
@@ -82,6 +79,7 @@ function handleSession(session) {
         // Si c'est un nouvel utilisateur ou première charge
         if (userId !== currentUserId) {
             currentUserId = userId;
+            console.log("handleSession: User ID changed, loading user data.");
             
             // CHARGEMENT DES DONNÉES (Favoris + Profil)
             if (window.loadUserFavorites) {
@@ -95,12 +93,15 @@ function handleSession(session) {
                 syncSpotifyProfileData(session.user);
                 if (session.provider_token) syncSpotifyFavorites(session.provider_token);
             }
+        } else {
+            console.log("handleSession: User ID is the same, no need to reload user data.");
         }
         
     } else {
         // Déconnexion
         currentUserId = null;
         hasSyncedSpotifySession = false;
+        console.log("handleSession: No session found, showing login screen.");
         
         if (loginScreen) loginScreen.style.display = 'flex';
         if (appLayout) appLayout.classList.remove('layout-visible');
@@ -256,8 +257,9 @@ async function signup(email, password) {
 
 async function logout() {
     await supabaseClient.auth.signOut();
-    // La fonction handleSession(null) sera appelée automatiquement par l'écouteur onAuthStateChange avec l'événement 'SIGNED_OUT'.
-    // Il n'est donc pas nécessaire de recharger la page manuellement.
+    currentUserId = null; // Explicitly clear
+    hasSyncedSpotifySession = false; // Explicitly clear
+    // handleSession(null) sera appelée automatiquement par l'écouteur onAuthStateChange avec l'événement 'SIGNED_OUT'.
 }
 
 function showAuthError(msg, isSuccess = false) {
@@ -283,9 +285,10 @@ function toggleAuthMode() {
         if (!isLoginMode) userField.focus();
     }
     document.getElementById('authTitle').innerText = isLoginMode ? 'Connexion' : 'Inscription';
-    document.getElementById('btnLoginAction').innerText = isLoginMode ? 'Se connecter' : "S'inscrire";
+    document.getElementById('btnLoginAction').innerText = isLoginMode ? 'Se connecter' : "S'inscrire';
     document.getElementById('btnToggleMode').innerHTML = isLoginMode ? 'Pas de compte ? <b>Créer un compte</b>' : 'Déjà un compte ? <b>Se connecter</b>';
     document.getElementById('authMessage').innerText = '';
 }
 
-document.addEventListener('DOMContentLoaded', initAuth);
+// L'appel à initAuth est déplacé dans index.html pour s'assurer que tout est chargé.
+// document.addEventListener('DOMContentLoaded', initAuth);
