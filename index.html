@@ -1122,9 +1122,8 @@
             const g=document.getElementById('trackGrid'); g.innerHTML=''; 
             if(!items||items.length===0){ g.innerHTML=`<div style="grid-column:1/-1;text-align:center;padding:50px;color:#555;"><i class="far fa-folder-open" style="font-size:30px;margin-bottom:10px;"></i><p>${emptyMsg}</p></div>`; return; } 
             
-            // Set isRadioActive based on the new parameter
-            isRadioActive = enableRadio;
-            document.getElementById('radioBadge').style.display = isRadioActive ? 'block' : 'none';
+            // NOTE : Le badge radio est géré dynamiquement par loadTrack().
+            // On ne modifie plus l'état global ici pour éviter les bugs d'affichage.
 
             items.forEach(it=>{ 
                 const isAlb=it.type==='album'; const isPl=it.type==='playlist'; const src=it.source; 
@@ -1164,7 +1163,9 @@
                             // On respecte l'état radio passé en paramètre à renderGrid
                             // (ex: false pour les albums, true pour top 10)
                             isRadioActive = enableRadio;
-                            document.getElementById('radioBadge').style.display = isRadioActive ? 'block' : 'none';
+                            // On met à jour l'état visuel du badge uniquement si on lance une radio
+                            // document.getElementById('radioBadge').style.display = isRadioActive ? 'block' : 'none';
+                            // Note: loadTrack mettra à jour le badge selon que le titre est une radio ou non
                             loadTrack(idx!==-1?idx:0);
                         }
                     } 
