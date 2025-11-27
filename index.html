@@ -394,6 +394,10 @@
             document.getElementById('settingCrossfade').value = xfade; 
             document.getElementById('settingCrossfadeVal').innerText = xfade + "s"; 
             document.querySelector('.xfade-range').value = xfade;
+            // Correction affichage UI Audio FX
+            const fxLabel = document.getElementById('xfadeVal');
+            if(fxLabel) fxLabel.innerText = xfade + "s";
+
             // FIXED: Removed direct crossfade parameter update which was causing audio cut out
             // if (zenithNode && audioCtx) zenithNode.parameters.get('crossfade').setTargetAtTime(xfade, audioCtx.currentTime, 0.05);
 
@@ -600,7 +604,7 @@
         function resetLyricsState() { lyricsData = []; firstLineTime = null; const view = document.getElementById('lyricsView'); view.innerHTML = '<div style="margin-top: 100px; color: #888; animation: pulseText 1.5s infinite;">Recherche des paroles...</div>'; document.getElementById('introContainer').style.display = 'none'; }
 
         // CHARGEMENT PISTE
-        async function loadTrack(index, autoPlay = true) {
+        async function loadTrack(index, autoPlay = true, useCrossfade = true) {
             if(index < 0 || index >= tracks.length) return;
             
             if (typeof ZenithCast !== 'undefined' && ZenithCast.isCasting) {
@@ -644,7 +648,7 @@
             if(nextTrack.source !== 'yt_lazy' && nextTrack.source !== 'spotify_lazy') safePushState({}, "", `/?track=${nextTrack.id}&source=${nextTrack.source}`);
             
             // Utilise la logique de crossfade
-            startCrossfade(prevAudio, nextAudio); // autoPlay n'est plus passé ici
+            startCrossfade(prevAudio, nextAudio, useCrossfade); 
             
             activeAudio = nextAudio; 
             // isPlaying et l'icône de lecture sont maintenant gérés par la fonction play()
@@ -664,7 +668,7 @@
             }
         }
 
-        function startCrossfade(prevAudio, nextAudio) { // autoPlay n'est plus un paramètre
+        function startCrossfade(prevAudio, nextAudio, enableFade) { // autoPlay n'est plus un paramètre
             if (!audioCtx || !zenithNode) {
                 // Fallback si AudioWorklet n'est pas actif
                 prevAudio.pause();
@@ -673,7 +677,7 @@
                 return;
             }
 
-            const duration = userSettings.crossfade;
+            const duration = enableFade ? userSettings.crossfade : 0;
             const currentTime = audioCtx.currentTime;
             
             // Calculer la valeur cible basée sur le PROCHAIN lecteur (0 pour A, 1 pour B)
@@ -755,7 +759,10 @@
                     // Auto-skip après délai si dans une liste
                     if (tracks.length > 1 && currentIndex < tracks.length - 1) {
                         setTimeout(() => {
-                            if (activeAudio === audioObj && audioObj.error) handleNext();
+                            if (activeAudio === audioObj && audioObj.error) {
+                                // CORRECTION: Force le passage suivant SANS crossfade pour éviter le silence
+                                loadTrack(currentIndex + 1, true, false); 
+                            }
                         }, 2000);
                     }
                 }
