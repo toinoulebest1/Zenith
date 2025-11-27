@@ -226,7 +226,7 @@ audio.addEventListener('ended', player.next);
             if (audioCtx) return;
             try {
                 const AudioContext = window.AudioContext || window.webkitAudioContext;
-                // 1. Suppression sampleRate forcé
+                sampleRate: 48000
                 audioCtx = new AudioContext({ latencyHint: 'playback' });
 
                 // --- FALLBACK HTTP (Si AudioWorklet non dispo) ---
