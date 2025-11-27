@@ -349,17 +349,18 @@
         let fadeInterval = null; let isFetchingRadio = false;
 
         // --- VARIABLES AUDIO WORKLET ---
+        // Ces variables sont conservées mais ne seront pas utilisées dans le mode simplifié
         let audioCtx, zenithNode, sourceA, sourceB;
-        let masterGain; // Pour le mode fallback
-        let isOrbitOn = false, isKaraokeOn = false, isLimiterOn = false; // LIMITER OFF PAR DÉFAUT
+        let masterGain; 
+        let isOrbitOn = false, isKaraokeOn = false, isLimiterOn = false; 
         let eqFilters = []; const eqFrequencies = [60, 230, 910, 4000, 14000];
-        let compressor; // Variable globale pour le compresseur
+        let compressor; 
 
-        let userSettings = { limiter: false, crossfade: 0, magic: true }; // LIMITER FALSE PAR DÉFAUT
+        let userSettings = { limiter: false, crossfade: 0, magic: true }; 
         let magicEnabled = true; 
         
         let favorites = [];
-        let history = []; // L'historique sera maintenant géré par Supabase
+        let history = []; 
 
         let navStack = [];
 
@@ -385,15 +386,29 @@
         }
 
         function applySettings(settings) {
-            const isLimiter = (settings.limiter === true || settings.limiter === 'true'); isLimiterOn = isLimiter; document.getElementById('settingLimiter').checked = isLimiter; if (audioCtx) toggleLimiter(isLimiter, true);
-            const xfade = parseInt(settings.crossfade || 0); crossfadeDuration = xfade; document.getElementById('settingCrossfade').value = xfade; document.getElementById('settingCrossfadeVal').innerText = xfade + "s"; document.querySelector('.xfade-range').value = xfade;
-            const isMagic = (settings.magic === true || settings.magic === 'true'); magicEnabled = isMagic; document.getElementById('settingMagic').checked = isMagic; if(!magicEnabled) { document.body.className = ''; document.getElementById('wandContainer').classList.remove('active'); if(typeof stopEffects === 'function') stopEffects(); }
+            // En mode simplifié, limiter et crossfade sont ignorés pour l'audio
+            const isLimiter = (settings.limiter === true || settings.limiter === 'true'); 
+            document.getElementById('settingLimiter').checked = isLimiter; 
+            
+            const xfade = parseInt(settings.crossfade || 0); 
+            document.getElementById('settingCrossfade').value = xfade; 
+            document.getElementById('settingCrossfadeVal').innerText = xfade + "s"; 
+            document.querySelector('.xfade-range').value = xfade;
+
+            const isMagic = (settings.magic === true || settings.magic === 'true'); 
+            magicEnabled = isMagic; 
+            document.getElementById('settingMagic').checked = isMagic; 
+            if(!magicEnabled) { 
+                document.body.className = ''; 
+                document.getElementById('wandContainer').classList.remove('active'); 
+                if(typeof stopEffects === 'function') stopEffects(); 
+            }
         }
         async function changeSetting(key, value) { userSettings[key] = value; applySettings(userSettings); localStorage.setItem('zenith_pref_' + key, value); if(!supabaseClient) return; const { data: { user } } = await supabaseClient.auth.getUser(); if(user) { try { await supabaseClient.from('profiles').update({ settings: userSettings }).eq('id', user.id); } catch(e) { console.error("Sync settings error", e); } } }
         function loadLocalSettings() { 
             const sLimiter = localStorage.getItem('zenith_pref_limiter'); 
             if(sLimiter !== null) userSettings.limiter = (sLimiter === 'true'); 
-            else userSettings.limiter = false; // Valeur par défaut explicite
+            else userSettings.limiter = false; 
 
             const sXfade = localStorage.getItem('zenith_pref_crossfade'); if(sXfade !== null) userSettings.crossfade = parseInt(sXfade); 
             const sMagic = localStorage.getItem('zenith_pref_magic'); if(sMagic !== null) userSettings.magic = (sMagic === 'true'); 
@@ -404,150 +419,67 @@
         window.loadUserFavorites = async function() { if(!supabaseClient) return; const { data: { user } } = await supabaseClient.auth.getUser(); if(!user) return; const { data, error } = await supabaseClient.from('favorites').select('*'); if(data) { favorites = data.map(f => f.track_data); updateLikeButtonState(); } window.loadProfile(); };
         function safePushState(data, title, url) { try { if (window.history && window.history.pushState) { window.history.pushState(data, title, url); } } catch (e) { console.warn("History pushState blocked", e); } }
         
-        // --- MOTEUR AUDIO WORKLET (ANTI-COUPURE) ---
+        // --- MOTEUR AUDIO SIMPLIFIÉ (Désactivation AudioWorklet pour diagnostic) ---
         async function initAudioContext() {
-            if (audioCtx) return;
-            try {
-                const AudioContext = window.AudioContext || window.webkitAudioContext;
-                // 1. Suppression sampleRate forcé
+            console.log("🔇 Moteur AudioWorklet désactivé : Mode de diagnostic audio brut activé.");
+            // Création d'un AudioContext minimal pour la compatibilité, mais sans le Worklet
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            if (!audioCtx) {
                 audioCtx = new AudioContext({ latencyHint: 'playback' });
-
-                // --- FALLBACK HTTP (Si AudioWorklet non dispo) ---
-                if (!audioCtx.audioWorklet) {
-                    console.warn("⚠️ AudioWorklet non disponible (HTTP). Mode Fallback activé.");
-                    showToast("AudioFX désactivés (HTTP)");
-
-                    // Création Master Gain
-                    masterGain = audioCtx.createGain();
-                    masterGain.gain.value = globalVolume;
-
-                    // Connexion directe
-                    sourceA = audioCtx.createMediaElementSource(playerA);
-                    sourceB = audioCtx.createMediaElementSource(playerB);
-                    sourceA.connect(masterGain);
-                    sourceB.connect(masterGain);
-                    masterGain.connect(audioCtx.destination);
-                    return;
-                }
-                
-                // 2. Chargement Module
-                await audioCtx.audioWorklet.addModule('zenith-processor.js');
-                
-                // 3. Création Nœud Zenith
-                zenithNode = new AudioWorkletNode(audioCtx, 'zenith-processor', {
-                    numberOfInputs: 2,
-                    numberOfOutputs: 1,
-                    parameterData: { volume: globalVolume }
-                });
-
-                // 4. Connexions Sources
-                sourceA = audioCtx.createMediaElementSource(playerA);
-                sourceB = audioCtx.createMediaElementSource(playerB);
-                sourceA.connect(zenithNode, 0, 0);
-                sourceB.connect(zenithNode, 0, 1);
-
-                // 5. Chaîne d'effets (EQ + Compresseur)
-                let prevNode = zenithNode;
-                eqFilters = eqFrequencies.map((freq, i) => {
-                    const filter = audioCtx.createBiquadFilter();
-                    filter.type = i===0?'lowshelf':(i===4?'highshelf':'peaking');
-                    filter.frequency.value = freq;
-                    prevNode.connect(filter);
-                    prevNode = filter;
-                    return filter;
-                });
-
-                compressor = audioCtx.createDynamicsCompressor();
-                
-                // INITIALISATION CORRECTE DU COMPRESSEUR EN FONCTION DES RÉGLAGES
-                if (isLimiterOn) {
-                    compressor.threshold.value = -12;
-                    compressor.knee.value = 30;
-                    compressor.ratio.value = 12;
-                    compressor.attack.value = 0.003; 
-                    compressor.release.value = 0.25;
-                } else {
-                    // Transparent par défaut
-                    compressor.threshold.value = 0;
-                    compressor.ratio.value = 1; 
-                }
-
-                prevNode.connect(compressor);
-                compressor.connect(audioCtx.destination);
-                
-                console.log("🚀 Moteur Zenith AudioWorklet activé");
-
-            } catch (e) { console.error("Erreur AudioWorklet:", e); }
-        }
-
-        // Helpers Audio
-        function setWorkletParam(name, val, ramp=0.1) {
-            if(zenithNode) {
-                const p = zenithNode.parameters.get(name);
-                p.cancelScheduledValues(audioCtx.currentTime);
-                p.linearRampToValueAtTime(val, audioCtx.currentTime + ramp);
             }
+            
+            // Connexion directe des lecteurs HTML5 à la destination audio
+            sourceA = audioCtx.createMediaElementSource(playerA);
+            sourceB = audioCtx.createMediaElementSource(playerB);
+            
+            // Création d'un gain master pour le volume global
+            masterGain = audioCtx.createGain();
+            masterGain.gain.value = globalVolume;
+
+            sourceA.connect(masterGain);
+            sourceB.connect(masterGain);
+            masterGain.connect(audioCtx.destination);
+
+            // Désactivation des boutons d'effets pour éviter la confusion
+            document.getElementById('limiterBtn').disabled = true;
+            document.getElementById('orbitBtn').disabled = true;
+            document.getElementById('karaokeBtn').disabled = true;
+            document.querySelectorAll('.eq-range').forEach(s => s.disabled = true);
+            document.querySelector('.xfade-range').disabled = true;
+            document.getElementById('eqView').querySelector('.eq-reset-btn').disabled = true;
+
+            showToast("AudioFX désactivés (Mode Diagnostic)");
+            return; // Ne pas charger le Worklet
         }
 
-        function toggleLimiter(forceState = null, silent = false) {
-            if(forceState!==null) isLimiterOn = forceState; else isLimiterOn = !isLimiterOn;
-            
-            // Mise à jour visuelle
-            document.getElementById('limiterBtn').classList.toggle('active', isLimiterOn);
-            
-            // Application Audio Réelle
-            if (compressor && audioCtx) {
-                const t = audioCtx.currentTime;
-                if (isLimiterOn) {
-                    compressor.threshold.setValueAtTime(-12, t);
-                    compressor.ratio.setValueAtTime(12, t);
-                } else {
-                    // Retour à la transparence (Bypass virtuel)
-                    compressor.threshold.setValueAtTime(0, t);
-                    compressor.ratio.setValueAtTime(1, t);
-                }
+        // Fonctions Audio FX (Désactivées en mode de diagnostic)
+        function toggleLimiter() { showToast("Normalisateur désactivé en mode Diagnostic"); }
+        function toggleKaraoke() { showToast("Karaoké désactivé en mode Diagnostic"); }
+        function toggleOrbit() { showToast("8D Orbit désactivé en mode Diagnostic"); }
+        function updateCrossfade(val) { showToast("Crossfade désactivé en mode Diagnostic"); }
+        function updateEQ(i,v) { /* No-op */ }
+        function resetEQ() { /* No-op */ }
+        function toggleEQ() { 
+            const v=document.getElementById('eqView'); 
+            if(v.style.display==='flex'){
+                v.classList.remove('active');
+                setTimeout(()=>v.style.display='none',300);
+            }else{
+                v.style.display='flex';
+                setTimeout(()=>v.classList.add('active'),10);
             }
-
-            if(!silent) showToast(isLimiterOn ? "Normalisateur Activé" : "Désactivé (Hi-Fi)");
-        }
-
-        function toggleKaraoke() {
-            if (!audioCtx) initAudioContext();
-            if (!zenithNode) { showToast("Non disponible en HTTP"); return; }
-            isKaraokeOn = !isKaraokeOn;
-            document.getElementById('karaokeBtn').classList.toggle('active', isKaraokeOn);
-            setWorkletParam('karaokeEnabled', isKaraokeOn ? 1 : 0);
-            showToast(isKaraokeOn ? "No Vocal Activé" : "Normal");
-        }
-
-        function toggleOrbit() {
-            if (!audioCtx) initAudioContext();
-            if (!zenithNode) { showToast("Non disponible en HTTP"); return; }
-            isOrbitOn = !isOrbitOn;
-            document.getElementById('orbitBtn').classList.toggle('active', isOrbitOn);
-            setWorkletParam('orbitEnabled', isOrbitOn ? 1 : 0);
-            
-            const orb = document.getElementById('orbitVisual');
-            if (isOrbitOn) { orb.className = 'orbit-orb'; void orb.offsetWidth; orb.classList.add('center-stage', 'orbiting'); }
-            else { orb.classList.remove('orbiting', 'center-stage'); }
-            showToast(isOrbitOn ? "8D Orbit Activé" : "Désactivé");
-        }
-
-        function updateCrossfade(val) {
-            crossfadeDuration = parseInt(val);
-            document.getElementById('xfadeVal').innerText = val + "s";
-            document.getElementById('settingCrossfadeVal').innerText = val + "s";
+            showToast("Égaliseur désactivé en mode Diagnostic"); 
         }
 
         function setGlobalVolume(val) {
             globalVolume = parseFloat(val);
-            if (zenithNode) setWorkletParam('volume', globalVolume, 0.05);
-            else if (masterGain) masterGain.gain.setTargetAtTime(globalVolume, audioCtx.currentTime, 0.05);
+            if (masterGain) masterGain.gain.setTargetAtTime(globalVolume, audioCtx.currentTime, 0.05);
+            else { // Fallback si AudioContext n'est pas encore prêt
+                playerA.volume = globalVolume;
+                playerB.volume = globalVolume;
+            }
         }
         
-        function updateEQ(i,v) { if(audioCtx && eqFilters[i]) eqFilters[i].gain.value = parseFloat(v); }
-        function resetEQ() { document.querySelectorAll('.eq-range').forEach((s, i) => { s.value=0; updateEQ(i, 0); }); }
-
         function resetLyricsState() { lyricsData = []; firstLineTime = null; const view = document.getElementById('lyricsView'); view.innerHTML = '<div style="margin-top: 100px; color: #888; animation: pulseText 1.5s infinite;">Recherche des paroles...</div>'; document.getElementById('introContainer').style.display = 'none'; }
 
         // CHARGEMENT PISTE
@@ -564,7 +496,7 @@
                 return; 
             }
 
-            // Initialisation Audio
+            // Initialisation AudioContext (maintenant simplifié)
             if (!audioCtx) await initAudioContext();
             if (audioCtx.state === 'suspended') await audioCtx.resume();
 
@@ -574,8 +506,7 @@
             // Logique A/B
             const nextAudio = (activeAudio === playerA) ? playerB : playerA; 
             const prevAudio = activeAudio;
-            const targetCrossfade = (nextAudio === playerB) ? 1 : 0;
-
+            
             if (nextTrack.isRadio) { document.getElementById('radioBadge').style.display = 'block'; isRadioActive = true; } else { document.getElementById('radioBadge').style.display = 'none'; isRadioActive = false; }
             if (typeof broadcastTrackChange === 'function') broadcastTrackChange(nextTrack);
             resetLyricsState();
@@ -589,28 +520,17 @@
             else url = `${API_BASE}/stream/${nextTrack.id}`;
 
             nextAudio.src = url;
-            nextAudio.volume = 1; // Worklet ou Gain gère le volume réel
+            nextAudio.volume = globalVolume; // Volume appliqué directement
 
             currentIndex = index; currentTrackId = nextTrack.id;
             updateInterfaceInfo(nextTrack);
             
             if(nextTrack.source !== 'yt_lazy' && nextTrack.source !== 'spotify_lazy') safePushState({}, "", `/?track=${nextTrack.id}&source=${nextTrack.source}`);
             
-            // CROSSFADE VIA WORKLET
-            if (autoPlay && isPlaying && crossfadeDuration > 0) {
-                nextAudio.play().catch(e=>{});
-                if (zenithNode) {
-                    const param = zenithNode.parameters.get('crossfade');
-                    param.cancelScheduledValues(audioCtx.currentTime);
-                    param.setValueAtTime(param.value, audioCtx.currentTime);
-                    param.linearRampToValueAtTime(targetCrossfade, audioCtx.currentTime + crossfadeDuration);
-                }
-                setTimeout(() => { prevAudio.pause(); prevAudio.currentTime = 0; }, crossfadeDuration * 1000);
-            } else { 
-                if (zenithNode) zenithNode.parameters.get('crossfade').setValueAtTime(targetCrossfade, audioCtx.currentTime);
-                prevAudio.pause(); prevAudio.currentTime = 0; 
-                if(autoPlay) nextAudio.play().catch(e=>{});
-            }
+            // Lecture sans crossfade complexe
+            prevAudio.pause(); 
+            prevAudio.currentTime = 0; 
+            if(autoPlay) nextAudio.play().catch(e=>{});
             
             activeAudio = nextAudio; 
             isPlaying = true; 
@@ -639,10 +559,14 @@
                      const rem = audioObj.duration - audioObj.currentTime;
                      if (rem < 20 && rem > 0) { triggerRadio(true); }
                 }
-                // Auto Next (Crossfade trigger)
-                if (audioObj === activeAudio && isPlaying && crossfadeDuration > 0 && !nextTrackTriggered) {
-                    let remaining = audioObj.duration - audioObj.currentTime;
-                    if (remaining <= crossfadeDuration && remaining > 0.5) { nextTrackTriggered = true; handleNext(); return; }
+                // Auto Next (Simple, sans crossfade)
+                if (audioObj === activeAudio && isPlaying && !nextTrackTriggered) {
+                    let d = audioObj.duration;
+                    if (d > 0 && audioObj.currentTime >= d - 0.5) { // 0.5s avant la fin réelle
+                        nextTrackTriggered = true; 
+                        handleNext(); 
+                        return; 
+                    }
                 }
                 if(audioObj === activeAudio && !document.hidden) {
                     let d = audioObj.duration; if((!d || !isFinite(d)) && tracks[currentIndex].duration) d = tracks[currentIndex].duration;
@@ -720,7 +644,6 @@
         }
 
         async function openArtistProfile(name) { safePushState({}, "", `/?artist_profile=${encodeURIComponent(name)}`); document.getElementById('trackView').style.display='none'; document.getElementById('lyricsView').style.display='none'; const view = document.getElementById('artistView'); view.style.display='block'; document.getElementById('artistProfileName').innerText = name; document.getElementById('artistProfileBio').innerText = "Chargement..."; document.getElementById('artistTopTracks').innerHTML = '<p style="text-align:center;">Chargement...</p>'; document.getElementById('artistProfileImg').src = 'https://via.placeholder.com/200'; document.getElementById('artistHeaderBg').src = ''; document.getElementById('artistFans').style.display = 'none'; try { const res = await fetch(`${API_BASE}/artist_bio?name=${encodeURIComponent(name)}`); const data = await res.json(); if(data.bio) document.getElementById('artistProfileBio').innerText = data.bio; if(data.image) { document.getElementById('artistProfileImg').src = data.image; document.getElementById('artistHeaderBg').src = data.image; } if(data.nb_fans) { let formatted = data.nb_fans.toLocaleString('fr-FR'); document.getElementById('artistFans').innerHTML = `<i class="fas fa-users"></i> ${formatted} Fans`; document.getElementById('artistFans').style.display = 'inline-flex'; } else { document.getElementById('artistFans').style.display = 'none'; } const grid = document.getElementById('artistTopTracks'); grid.innerHTML = ''; if(data.top_tracks) { data.top_tracks.forEach(t => { const div = document.createElement('div'); div.className = 'track-card'; div.dataset.id = t.id; let b = ''; if(t.source !== 'subsonic' && t.maximum_bit_depth > 16) { b = '<div class="type-badge badge-hires">HI-RES</div>'; } div.innerHTML = `<div class="badges-container">${b}</div><img src="${t.image || 'https://via.placeholder.com/300'}"><h3>${t.title}</h3><p>${t.artist}</p>`; div.onclick = () => { tracks = data.top_tracks.map(x => ({ id: x.id, title: x.title, performer: { name: x.artist }, album: { title: 'Top Tracks', image: { large: x.image } }, source: x.source, maximum_bit_depth: x.maximum_bit_depth, duration: x.duration })); const idx = tracks.findIndex(tr => tr.id === t.id); loadTrack(idx !== -1 ? idx : 0); }; grid.appendChild(div); }); updateActiveCard(); } } catch(e) { console.log(e); } }
-        function toggleEQ() { const v=document.getElementById('eqView'); if(!audioCtx)initAudioContext(); if(v.style.display==='flex'){v.classList.remove('active');setTimeout(()=>v.style.display='none',300);}else{v.style.display='flex';setTimeout(()=>v.classList.add('active'),10);} }
         function play() { if(audioCtx && audioCtx.state === 'suspended') audioCtx.resume(); activeAudio.play().then(() => { isPlaying = true; document.getElementById('playIcon').className = 'fas fa-pause'; updateMediaSessionState(); if('mediaSession' in navigator) navigator.mediaSession.playbackState = "playing"; if (typeof broadcastPlay === 'function') broadcastPlay(); }).catch(e => {}); }
         function pause() { playerA.pause(); playerB.pause(); isPlaying = false; document.getElementById('playIcon').className = 'fas fa-play'; if('mediaSession' in navigator) navigator.mediaSession.playbackState = "paused"; if (typeof broadcastPause === 'function') broadcastPause(); }
         function fmtTime(s) { if(!s || isNaN(s)) return "0:00"; let m=Math.floor(s/60), sec=Math.floor(s%60); return m+":"+(sec<10?"0":"")+sec; }
@@ -1027,14 +950,7 @@
                 console.log("Foreground mode");
                 const t = tracks[currentIndex];
                 if (t && magicEnabled && typeof checkMagic === 'function') checkMagic(t.title, t.performer ? t.performer.name : t.artist);
-                if (isOrbitOn) {
-                     const orb = document.getElementById('orbitVisual');
-                     if(orb) { 
-                         orb.className = 'orbit-orb'; 
-                         void orb.offsetWidth; 
-                         orb.classList.add('center-stage', 'orbiting');
-                     }
-                }
+                // L'effet Orbit est désactivé en mode diagnostic, donc pas besoin de le réactiver ici.
                 syncLyricsUI();
             }
         });
