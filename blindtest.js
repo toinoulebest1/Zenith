@@ -113,7 +113,7 @@ function renderGameInterface(container) {
             </div>
 
             <div class="bt-cover-container">
-                <img id="btCoverImg" class="bt-cover-img" src="https://via.placeholder.com/300">
+                <img id="btCoverImg" class="bt-cover-img" src="https://placehold.co/300x300/1a1a1a/666666?text=?">
                 <div id="btLoading" style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); font-weight:bold;">Prêt ?</div>
             </div>
 
@@ -251,7 +251,7 @@ function nextRound() {
     
     // Image floutée et placeholder
     if(imgEl) {
-        imgEl.src = 'https://via.placeholder.com/300/111/111?text=?';
+        imgEl.src = 'https://placehold.co/300x300/111/444?text=?';
         imgEl.classList.remove('revealed');
     }
 
@@ -265,7 +265,7 @@ function nextRound() {
          if (currentTrackMeta.album && currentTrackMeta.album.image && currentTrackMeta.album.image.large) {
              currentTrackMeta.img = currentTrackMeta.album.image.large.replace('_300', '_600');
          } else {
-             currentTrackMeta.img = 'https://via.placeholder.com/300';
+             currentTrackMeta.img = 'https://placehold.co/300x300/1a1a1a/666666?text=Music';
          }
     }
 

@@ -186,7 +186,7 @@
             <div class="artist-view" id="artistView">
                 <div class="artist-header-content">
                     <img id="artistHeaderBg" class="artist-header-bg">
-                    <img id="artistProfileImg" class="artist-profile-img" src="https://via.placeholder.com/200">
+                    <img id="artistProfileImg" class="artist-profile-img" src="https://placehold.co/200x200/1a1a1a/666666?text=Artist">
                     <div class="artist-info">
                         <h1 id="artistProfileName" class="artist-name-large">Artiste</h1>
                         <div id="artistFans" class="artist-fans-badge"><i class="fas fa-users"></i> 0 fans</div>
@@ -250,7 +250,7 @@
         <aside class="right-panel">
             <div class="xl-image-wrapper">
                 <div id="xlBadge" class="xl-badge smooth-fade">HI-RES</div>
-                <img src="https://via.placeholder.com/600/222/222" id="xlArt" class="album-art-xl smooth-fade">
+                <img src="https://placehold.co/600x600/1a1a1a/444444?text=Zenith" id="xlArt" class="album-art-xl smooth-fade">
             </div>
             <h2 id="xlTitle" class="smooth-fade" style="font-size: 1.2rem; margin-bottom: 5px;">Prêt</h2>
             <p id="xlArtist" class="smooth-fade" style="color: var(--primary); font-size: 1rem;">...</p>
@@ -281,7 +281,7 @@
         <div class="player-capsule">
             <div class="radio-badge" id="radioBadge">RADIO AUTO</div>
             <div class="cap-info">
-                <img src="https://via.placeholder.com/60" id="capArt" class="cap-img smooth-fade">
+                <img src="https://placehold.co/60x60/1a1a1a/444444?text=Z" id="capArt" class="cap-img smooth-fade">
                 <div style="display:flex; align-items:center; flex:1; overflow:hidden;">
                     <div class="cap-text">
                         <div id="capTitle" class="cap-title smooth-fade">Titre</div>
@@ -824,6 +824,7 @@
 
         function updateInterfaceInfo(t) {
             let img = ''; if(t.source === 'subsonic') img = `${API_BASE}/get_subsonic_cover/${t.album.image.large}`; else img = (t.album.image.large||'').replace('_300','_600');
+            if (!img) img = "https://placehold.co/600x600/1a1a1a/666666?text=Zenith";
             let artistName = t.performer ? t.performer.name : 'Artiste';
             const xlArt = document.getElementById('xlArt'); const capArt = document.getElementById('capArt'); const amb = document.getElementById('ambientBg');
             const textEls = [ 'xlTitle', 'xlArtist', 'xlBadge', 'capTitle', 'capArtist' ].map(id=>document.getElementById(id));
@@ -842,7 +843,7 @@
             } else { if(amb.style.opacity != '1') { amb.style.backgroundImage = `url('${img}')`; amb.style.opacity = '1'; } }
         }
 
-        async function openArtistProfile(name) { safePushState({}, "", `/?artist_profile=${encodeURIComponent(name)}`); document.getElementById('trackView').style.display='none'; document.getElementById('lyricsView').style.display='none'; const view = document.getElementById('artistView'); view.style.display='block'; document.getElementById('artistProfileName').innerText = name; document.getElementById('artistProfileBio').innerText = "Chargement..."; document.getElementById('artistTopTracks').innerHTML = '<p style="text-align:center;">Chargement...</p>'; document.getElementById('artistProfileImg').src = 'https://via.placeholder.com/200'; document.getElementById('artistHeaderBg').src = ''; document.getElementById('artistFans').style.display = 'none'; try { const res = await fetch(`${API_BASE}/artist_bio?name=${encodeURIComponent(name)}`); const data = await res.json(); if(data.bio) document.getElementById('artistProfileBio').innerText = data.bio; if(data.image) { document.getElementById('artistProfileImg').src = data.image; document.getElementById('artistHeaderBg').src = data.image; } if(data.nb_fans) { let formatted = data.nb_fans.toLocaleString('fr-FR'); document.getElementById('artistFans').innerHTML = `<i class="fas fa-users"></i> ${formatted} Fans`; document.getElementById('artistFans').style.display = 'inline-flex'; } else { document.getElementById('artistFans').style.display = 'none'; } const grid = document.getElementById('artistTopTracks'); grid.innerHTML = ''; if(data.top_tracks) { data.top_tracks.forEach(t => { const div = document.createElement('div'); div.className = 'track-card'; div.dataset.id = t.id; let b = ''; if(t.source !== 'subsonic' && t.maximum_bit_depth > 16) { b = '<div class="type-badge badge-hires">HI-RES</div>'; } div.innerHTML = `<div class="badges-container">${b}</div><img src="${t.image || 'https://via.placeholder.com/300'}"><h3>${t.title}</h3><p>${t.artist}</p>`; div.onclick = () => { tracks = data.top_tracks.map(x => ({ id: x.id, title: x.title, performer: { name: x.artist }, album: { title: 'Top Tracks', image: { large: x.image } }, source: x.source, maximum_bit_depth: x.maximum_bit_depth, duration: x.duration })); const idx = tracks.findIndex(tr => tr.id === t.id); loadTrack(idx !== -1 ? idx : 0); }; grid.appendChild(div); }); updateActiveCard(); } } catch(e) { console.log(e); } }
+        async function openArtistProfile(name) { safePushState({}, "", `/?artist_profile=${encodeURIComponent(name)}`); document.getElementById('trackView').style.display='none'; document.getElementById('lyricsView').style.display='none'; const view = document.getElementById('artistView'); view.style.display='block'; document.getElementById('artistProfileName').innerText = name; document.getElementById('artistProfileBio').innerText = "Chargement..."; document.getElementById('artistTopTracks').innerHTML = '<p style="text-align:center;">Chargement...</p>'; document.getElementById('artistProfileImg').src = 'https://placehold.co/200x200/1a1a1a/666666?text=Artist'; document.getElementById('artistHeaderBg').src = ''; document.getElementById('artistFans').style.display = 'none'; try { const res = await fetch(`${API_BASE}/artist_bio?name=${encodeURIComponent(name)}`); const data = await res.json(); if(data.bio) document.getElementById('artistProfileBio').innerText = data.bio; if(data.image) { document.getElementById('artistProfileImg').src = data.image; document.getElementById('artistHeaderBg').src = data.image; } if(data.nb_fans) { let formatted = data.nb_fans.toLocaleString('fr-FR'); document.getElementById('artistFans').innerHTML = `<i class="fas fa-users"></i> ${formatted} Fans`; document.getElementById('artistFans').style.display = 'inline-flex'; } else { document.getElementById('artistFans').style.display = 'none'; } const grid = document.getElementById('artistTopTracks'); grid.innerHTML = ''; if(data.top_tracks) { data.top_tracks.forEach(t => { const div = document.createElement('div'); div.className = 'track-card'; div.dataset.id = t.id; let b = ''; if(t.source !== 'subsonic' && t.maximum_bit_depth > 16) { b = '<div class="type-badge badge-hires">HI-RES</div>'; } div.innerHTML = `<div class="badges-container">${b}</div><img src="${t.image || 'https://placehold.co/300x300/1a1a1a/666666?text=Music'}"><h3>${t.title}</h3><p>${t.artist}</p>`; div.onclick = () => { tracks = data.top_tracks.map(x => ({ id: x.id, title: x.title, performer: { name: x.artist }, album: { title: 'Top Tracks', image: { large: x.image } }, source: x.source, maximum_bit_depth: x.maximum_bit_depth, duration: x.duration })); const idx = tracks.findIndex(tr => tr.id === t.id); loadTrack(idx !== -1 ? idx : 0); }; grid.appendChild(div); }); updateActiveCard(); } } catch(e) { console.log(e); } }
         function play() { if(audioCtx && audioCtx.state === 'suspended') audioCtx.resume(); activeAudio.play().then(() => { isPlaying = true; document.getElementById('playIcon').className = 'fas fa-pause'; updateMediaSessionState(); if('mediaSession' in navigator) navigator.mediaSession.playbackState = "playing"; if (typeof broadcastPlay === 'function') broadcastPlay(); }).catch(e => {}); }
         function pause() { playerA.pause(); playerB.pause(); isPlaying = false; document.getElementById('playIcon').className = 'fas fa-play'; if('mediaSession' in navigator) navigator.mediaSession.playbackState = "paused"; if (typeof broadcastPause === 'function') broadcastPause(); }
         function fmtTime(s) { if(!s || isNaN(s)) return "0:00"; let m=Math.floor(s/60), sec=Math.floor(s%60); return m+":"+(sec<10?"0":"")+sec; }
@@ -1175,7 +1176,7 @@
                     if(!details.tracks || details.tracks.length === 0) { g.innerHTML = '<p style="padding:20px;">Vide.</p>'; return; }
                     g.innerHTML = ''; 
                     details.tracks.forEach((it) => {
-                        const displayImg = it.img || it.album.image.large || 'https://via.placeholder.com/300'; 
+                        const displayImg = it.img || it.album.image.large || 'https://placehold.co/300x300/1a1a1a/666666?text=Music'; 
                         const div = document.createElement('div'); div.className = 'track-card'; div.dataset.id = it.id;
                         div.innerHTML = `<div class="badges-container"></div><img src="${displayImg}"><h3>${it.title}</h3><p>${it.performer.name}</p>`;
                         div.onclick = () => { tracks = details.tracks.map(t => ({ ...t, img: t.img || t.album.image.large, type: 'track' })); const idx = tracks.findIndex(x => x.id === it.id); loadTrack(idx !== -1 ? idx : 0); };
@@ -1197,7 +1198,7 @@
             items.forEach(it=>{ 
                 const isAlb=it.type==='album'; const isPl=it.type==='playlist'; const src=it.source; 
                 let mediaElement = '';
-                if (isPl) { if (typeof getPlaylistCoverHTML === 'function' && src !== 'ytmusic') { mediaElement = getPlaylistCoverHTML(it); } else { let imgUrl = it.image || 'https://via.placeholder.com/300'; mediaElement = `<img src="${imgUrl}">`; } } else { let u = ''; if(src==='subsonic'){ u=`${API_BASE}/get_subsonic_cover/${isAlb?it.image.large:it.album.image.large}`; } else { u=(isAlb?it.image.large:it.album.image.large)||''; u=u.replace('_300','_600'); } if(!u)u='https://via.placeholder.com/300'; mediaElement = `<img src="${u}">`; } 
+                if (isPl) { if (typeof getPlaylistCoverHTML === 'function' && src !== 'ytmusic') { mediaElement = getPlaylistCoverHTML(it); } else { let imgUrl = it.image || 'https://placehold.co/300x300/1a1a1a/666666?text=Playlist'; mediaElement = `<img src="${imgUrl}">`; } } else { let u = ''; if(src==='subsonic'){ u=`${API_BASE}/get_subsonic_cover/${isAlb?it.image.large:it.album.image.large}`; } else { u=(isAlb?it.image.large:it.album.image.large)||''; u=u.replace('_300','_600'); } if(!u)u='https://placehold.co/300x300/1a1a1a/666666?text=Music'; mediaElement = `<img src="${u}">`; } 
                 const d=document.createElement('div'); d.className='track-card'; if(it.type==='artist') d.classList.add('artist-card'); d.dataset.id=it.id; 
                 let b = ''; let rankBadgeHTML = ''; 
                 if(isAlb) b='<div class="type-badge badge-album">ALBUM</div>'; else if(isPl) b='<div class="type-badge badge-hires" style="background:#ff0055">PLAYLIST</div>'; 
@@ -1264,7 +1265,7 @@
         
         function setupMediaSession(t) {
             if ('mediaSession' in navigator) {
-                let img = 'https://via.placeholder.com/300';
+                let img = 'https://placehold.co/300x300/1a1a1a/666666?text=Music';
                 if(t.source === 'subsonic') img = `${API_BASE}/get_subsonic_cover/${t.album.image.large}`;
                 else if(t.album && t.album.image) img = t.album.image.large.replace('_300','_600');
                 navigator.mediaSession.metadata = new MediaMetadata({ title: t.title, artist: t.performer ? t.performer.name : 'Artiste', album: t.album ? t.album.title : '', artwork: [{ src: img, sizes: '512x512', type: 'image/jpeg' }] });

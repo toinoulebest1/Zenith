@@ -75,7 +75,7 @@ const ZenithCast = {
             ? `${window.location.origin}/stream_subsonic/${track.id}`
             : `${window.location.origin}/stream/${track.id}`;
 
-        let imgUrl = 'https://via.placeholder.com/300';
+        let imgUrl = 'https://placehold.co/300x300/1a1a1a/666666?text=Cast';
         if(track.source === 'subsonic') imgUrl = `${window.location.origin}/get_subsonic_cover/${track.album.image.large}`;
         else if(track.album && track.album.image) imgUrl = track.album.image.large.replace('_300','_600');
 

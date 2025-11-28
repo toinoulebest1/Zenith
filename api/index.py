@@ -119,7 +119,7 @@ def fix_qobuz_title(track):
 
 def get_hq_yt_image(url):
     """Transforme une URL de miniature YT standard en version HD Carrée."""
-    if not url: return 'https://via.placeholder.com/300'
+    if not url: return 'https://placehold.co/300x300/1a1a1a/666666?text=Music'
     return re.sub(r'w\d+-h\d+(-l\d+)?', 'w600-h600-l100', url)
 
 def ms_to_lrc(ms):
@@ -767,7 +767,7 @@ def get_yt_playlist_details():
         else: details = yt.get_playlist(playlist_id, limit=100) 
         
         formatted_tracks = []
-        album_art = 'https://via.placeholder.com/300'
+        album_art = 'https://placehold.co/300x300/1a1a1a/666666?text=Music'
         if details.get('thumbnails'): album_art = get_hq_yt_image(details['thumbnails'][-1]['url'])
         
         tracks_source = details.get('tracks', [])
@@ -859,8 +859,6 @@ def stream_subsonic(track_id):
 @app.route('/stream/<track_id>')
 def stream_track(track_id):
     if not client: return jsonify({"error": "Init error"}), 500
-    # CORRECTIF : On utilise 'fmt' dans l'appel pour tester les formats (27, 7, 6, 5)
-    # Au lieu de forcer '5' (MP3) à chaque fois
     for fmt in [27, 7, 6, 5]: # 27: Hi-Res, 7: CD, 6: MP3 320, 5: MP3 192
         try:
             url_data = client.get_track_url(track_id, fmt) # <-- Correction ici
@@ -894,6 +892,7 @@ def get_lyrics():
 
         plain, synced = lyrics_engine.search_lyrics(artist, title, album, dur_int)
         if synced: return jsonify({"type": "synced", "lyrics": synced, "source": "LRCLib"})
+        
         if plain: return jsonify({"type": "plain", "lyrics": plain, "source": "LRCLib"})
         
     except Exception as e:
@@ -904,16 +903,8 @@ def get_lyrics():
 @app.route('/artist_bio')
 def get_artist_bio(): return jsonify({})
 
-# ROUTE PAR DEFAUT : SERVIR LE FRONTEND (index.html, css, js)
-@app.route('/')
-def serve_index():
-    return send_from_directory(PROJECT_ROOT, 'index.html')
-
-@app.route('/<path:path>')
-def serve_static(path):
-    return send_from_directory(PROJECT_ROOT, path)
-
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 8000))
-    print(f"🚀 Serveur Docker lancé sur le port {port}")
+    # init_client() n'est pas défini dans ce scope, retiré pour éviter une erreur locale
+    port = int(os.environ.get("PORT", 5000))
+    print(f"🚀 Serveur local lancé sur le port {port}")
     app.run(host='0.0.0.0', port=port)
