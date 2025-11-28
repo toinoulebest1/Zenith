@@ -855,7 +855,7 @@
         function showToast(msg) { const t=document.getElementById('toast'); t.innerText=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),2000); }
         function copyLink() { if(!currentTrackId) return; const t=tracks[currentIndex]; navigator.clipboard.writeText(`${window.location.origin}/?track=${t.id}&source=${t.source}`).then(()=>showToast('Lien copié !')); }
         
-        // MODIFICATION : Protection anti-suppression des likes Spotify
+        // MODIFICATION : Protection anti-suppression des likes Spotify RETIRÉE
         async function toggleLike() { 
             const btn = document.getElementById('btnLike'); 
             if(btn.disabled) return; 
@@ -878,14 +878,7 @@
                     showToast('Liké ❤️'); 
                     try { await supabaseClient.from('favorites').insert({ user_id: user.id, track_id: String(t.id), track_data: t }); } catch(e) { console.error(e); } 
                 } else { 
-                    // RETRAIT (Vérification de la source)
-                    const favTrack = favorites[idx];
-                    if (favTrack.imported_from === 'spotify') {
-                        showToast("🔒 Like Spotify protégé");
-                        btn.disabled = false;
-                        return;
-                    }
-
+                    // RETRAIT (Débloqué pour tous les titres)
                     favorites.splice(idx, 1); 
                     btn.innerHTML = '<i class="far fa-heart"></i>'; 
                     btn.style.color = 'var(--text-dim)'; 

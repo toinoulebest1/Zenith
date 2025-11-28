@@ -92,11 +92,12 @@ async function updateProfile() {
 }
 
 // Outil de réparation pour les favoris pollués par le Party Mode
+// VERSION OPTIMISÉE ET ROBUSTE
 async function fixSpotifyTags() {
-    if (!confirm("Cette action va retirer le badge 'Spotify' de vos favoris actuels pour corriger les erreurs d'affichage et permettre leur suppression. Continuer ?")) return;
+    if (!confirm("Nettoyer les badges Spotify erronés ? Cela retirera le logo Spotify de vos favoris actuels.")) return;
 
     const btn = document.getElementById('btnFixSpotify');
-    if(btn) { btn.disabled = true; btn.innerText = "Nettoyage en cours..."; }
+    if(btn) { btn.disabled = true; btn.innerText = "Traitement en cours..."; }
 
     try {
         const { data: { user } } = await supabaseClient.auth.getUser();
@@ -110,35 +111,42 @@ async function fixSpotifyTags() {
 
         if (error) throw error;
 
-        let count = 0;
-
-        // 2. Parcourir et nettoyer
+        // 2. Préparer les mises à jour en parallèle
+        const updates = [];
+        
         for (const fav of favs) {
             // Si le titre est marqué comme importé de Spotify
             if (fav.track_data && fav.track_data.imported_from === 'spotify') {
                 const cleanData = { ...fav.track_data };
                 delete cleanData.imported_from; // On retire le tag
                 
-                // On met à jour la ligne en base
-                await supabaseClient
-                    .from('favorites')
-                    .update({ track_data: cleanData })
-                    .eq('id', fav.id);
-                
-                count++;
+                // On ajoute la promesse de mise à jour
+                updates.push(
+                    supabaseClient
+                        .from('favorites')
+                        .update({ track_data: cleanData })
+                        .eq('id', fav.id)
+                );
             }
         }
 
-        showToast(`✅ Terminé ! ${count} titres corrigés.`);
-        
-        // 3. Rafraîchir l'interface
-        if (window.loadUserFavorites) window.loadUserFavorites();
+        if (updates.length > 0) {
+            await Promise.all(updates);
+            showToast(`✅ ${updates.length} titres nettoyés !`);
+            
+            // 3. Rafraîchir l'interface après un court délai pour la propagation
+            setTimeout(() => {
+                if (window.loadUserFavorites) window.loadUserFavorites();
+            }, 1000);
+        } else {
+            showToast("Aucun titre nécessitant une correction.");
+        }
 
     } catch (e) {
         console.error(e);
         showToast("Erreur lors du nettoyage.");
     } finally {
-        if(btn) { btn.disabled = false; btn.innerText = "Réparer les badges Spotify (Party Bug)"; }
+        if(btn) { btn.disabled = false; btn.innerText = "Réparer les badges Spotify"; }
     }
 }
 
