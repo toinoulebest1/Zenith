@@ -490,6 +490,141 @@ def try_resolve_track(title, artist):
 
 # --- ROUTES ---
 
+@app.route('/blind_test_tracks')
+def get_blind_test_tracks():
+    """
+    Retourne une liste de titres pour le blind test en fonction d'un thème.
+    Recherche une playlist sur YouTube, puis tente de résoudre chaque titre sur Qobuz/Subsonic.
+    """
+    theme = request.args.get('theme', 'Global Hits')
+    
+    logger.info(f"🎲 Blind Test: Thème demandé = {theme}")
+
+    if not client: 
+        return jsonify({"error": "Client not initialized"}), 500
+
+    tracks_found = []
+
+    # 1. Si thème générique, on utilise Qobuz direct (plus rapide)
+    if theme in ['Global Hits', 'Pop Global']:
+        try:
+            resp = client.api_call("track/search", query=theme, limit=40)
+            items = resp.get('tracks', {}).get('items', [])
+            random.shuffle(items)
+            candidates = items[:15]
+            for track in candidates:
+                tracks_found.append({
+                    'id': track['id'],
+                    'title': track['title'],
+                    'artist': track.get('performer', {}).get('name', track.get('artist', {}).get('name', 'Unknown')),
+                    'album': track['album']['title'],
+                    'img': track.get('album', {}).get('image', {}).get('large', '').replace('_300', '_600'),
+                    'duration': track['duration'],
+                    'source': 'qobuz'
+                })
+            return jsonify(tracks_found)
+        except Exception as e:
+            logger.error(f"Blind Test Classic Error: {e}")
+            return jsonify({"error": "Failed to fetch tracks"}), 500
+
+    # 2. Sinon, Recherche Playlist YouTube
+    try:
+        search_results = yt.search(theme, filter='playlists', limit=3)
+        if not search_results:
+            return jsonify({"error": "No playlist found"}), 404
+            
+        # On prend la première playlist
+        target_playlist = search_results[0]
+        playlist_id = target_playlist['browseId']
+        logger.info(f"🎲 Blind Test: Playlist YT trouvée = {target_playlist.get('title')} ({playlist_id})")
+        
+        # Récupération des titres
+        playlist_data = yt.get_playlist(playlist_id, limit=50)
+        yt_tracks = playlist_data.get('tracks', [])
+        random.shuffle(yt_tracks)
+        
+        # On essaie de résoudre les 15 premiers titres vers Qobuz/Subsonic pour avoir l'audio
+        candidates_to_resolve = yt_tracks[:15]
+        
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            future_to_track = {}
+            for t in candidates_to_resolve:
+                title = t.get('title')
+                artists = t.get('artists', [])
+                artist = artists[0]['name'] if artists else "Unknown"
+                if title and artist:
+                    future_to_track[executor.submit(try_resolve_track, title, artist)] = (title, artist)
+
+            for future in as_completed(future_to_track):
+                orig_title, orig_artist = future_to_track[future]
+                try:
+                    match = future.result()
+                    if match:
+                        real_id = match['id']
+                        source = match['source']
+                        
+                        final_track = None
+                        
+                        if source == 'qobuz':
+                             meta = client.get_track_meta(real_id)
+                             final_track = {
+                                'id': meta['id'],
+                                'title': meta['title'],
+                                'artist': meta.get('performer', {}).get('name', 'Unknown'),
+                                'album': meta.get('album', {}).get('title'),
+                                'img': meta.get('album', {}).get('image', {}).get('large', '').replace('_300', '_600'),
+                                'duration': meta['duration'],
+                                'source': 'qobuz'
+                             }
+                        elif source == 'subsonic':
+                             meta = get_subsonic_track_details(real_id)
+                             if meta:
+                                 final_track = {
+                                    'id': meta['id'],
+                                    'title': meta['title'],
+                                    'artist': meta['performer']['name'],
+                                    'album': meta['album']['title'],
+                                    'img': f"{API_BASE}/get_subsonic_cover/{meta['album']['image']['large']}" if meta['album']['image']['large'] else "",
+                                    'duration': meta['duration'],
+                                    'source': 'subsonic'
+                                 }
+                        
+                        if final_track:
+                            tracks_found.append(final_track)
+                            
+                except Exception as e:
+                    logger.error(f"Resolution error for {orig_title}: {e}")
+
+        # Si on a pas assez de titres résolus, on complète avec du générique Qobuz
+        if len(tracks_found) < 4:
+            logger.warning("Not enough resolved tracks, filling with Qobuz search")
+            q_resp = client.api_call("track/search", query=theme, limit=10)
+            items = q_resp.get('tracks', {}).get('items', [])
+            for track in items:
+                 tracks_found.append({
+                    'id': track['id'],
+                    'title': track['title'],
+                    'artist': track.get('performer', {}).get('name', 'Unknown'),
+                    'album': track['album']['title'],
+                    'img': track.get('album', {}).get('image', {}).get('large', '').replace('_300', '_600'),
+                    'duration': track['duration'],
+                    'source': 'qobuz'
+                })
+        
+        # Dédoublonnage par ID
+        seen = set()
+        unique_tracks = []
+        for t in tracks_found:
+            if t['id'] not in seen:
+                unique_tracks.append(t)
+                seen.add(t['id'])
+
+        return jsonify(unique_tracks[:10])
+
+    except Exception as e:
+        logger.error(f"Blind Test YT Error: {e}")
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/recommend')
 def recommend_tracks():
     original_artist = request.args.get('artist', '')
@@ -770,25 +905,138 @@ def get_subsonic_cover(cover_id):
 # --- ROUTE BLIND TEST ---
 @app.route('/blind_test_tracks')
 def get_blind_test_tracks():
-    if not client: return jsonify({"error": "Client not initialized"}), 500
+    """
+    Retourne une liste de titres pour le blind test en fonction d'un thème.
+    Recherche une playlist sur YouTube, puis tente de résoudre chaque titre sur Qobuz/Subsonic.
+    """
+    theme = request.args.get('theme', 'Global Hits')
+    
+    logger.info(f"🎲 Blind Test: Thème demandé = {theme}")
+
+    if not client: 
+        return jsonify({"error": "Client not initialized"}), 500
+
+    tracks_found = []
+
+    # 1. Si thème générique, on utilise Qobuz direct (plus rapide)
+    if theme in ['Global Hits', 'Pop Global']:
+        try:
+            resp = client.api_call("track/search", query=theme, limit=40)
+            items = resp.get('tracks', {}).get('items', [])
+            random.shuffle(items)
+            candidates = items[:15]
+            for track in candidates:
+                tracks_found.append({
+                    'id': track['id'],
+                    'title': track['title'],
+                    'artist': track.get('performer', {}).get('name', track.get('artist', {}).get('name', 'Unknown')),
+                    'album': track['album']['title'],
+                    'img': track.get('album', {}).get('image', {}).get('large', '').replace('_300', '_600'),
+                    'duration': track['duration'],
+                    'source': 'qobuz'
+                })
+            return jsonify(tracks_found)
+        except Exception as e:
+            logger.error(f"Blind Test Classic Error: {e}")
+            return jsonify({"error": "Failed to fetch tracks"}), 500
+
+    # 2. Sinon, Recherche Playlist YouTube
     try:
-        resp = client.api_call("track/search", query="Global Hits", limit=30)
-        items = resp.get('tracks', {}).get('items', [])
-        random.shuffle(items)
-        tracks_for_game = items[:10]
-        normalized_tracks = []
-        for track in tracks_for_game:
-            normalized_tracks.append({
-                'id': track['id'], 'title': track['title'],
-                'artist': track.get('performer', {}).get('name', track.get('artist', {}).get('name', 'Unknown')),
-                'album': track['album']['title'],
-                'img': track.get('album', {}).get('image', {}).get('large', '').replace('_300', '_600'),
-                'duration': track['duration']
-            })
-        return jsonify(normalized_tracks)
+        search_results = yt.search(theme, filter='playlists', limit=3)
+        if not search_results:
+            return jsonify({"error": "No playlist found"}), 404
+            
+        # On prend la première playlist
+        target_playlist = search_results[0]
+        playlist_id = target_playlist['browseId']
+        logger.info(f"🎲 Blind Test: Playlist YT trouvée = {target_playlist.get('title')} ({playlist_id})")
+        
+        # Récupération des titres
+        playlist_data = yt.get_playlist(playlist_id, limit=50)
+        yt_tracks = playlist_data.get('tracks', [])
+        random.shuffle(yt_tracks)
+        
+        # On essaie de résoudre les 15 premiers titres vers Qobuz/Subsonic pour avoir l'audio
+        candidates_to_resolve = yt_tracks[:15]
+        
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            future_to_track = {}
+            for t in candidates_to_resolve:
+                title = t.get('title')
+                artists = t.get('artists', [])
+                artist = artists[0]['name'] if artists else "Unknown"
+                if title and artist:
+                    future_to_track[executor.submit(try_resolve_track, title, artist)] = (title, artist)
+
+            for future in as_completed(future_to_track):
+                orig_title, orig_artist = future_to_track[future]
+                try:
+                    match = future.result()
+                    if match:
+                        real_id = match['id']
+                        source = match['source']
+                        
+                        final_track = None
+                        
+                        if source == 'qobuz':
+                             meta = client.get_track_meta(real_id)
+                             final_track = {
+                                'id': meta['id'],
+                                'title': meta['title'],
+                                'artist': meta.get('performer', {}).get('name', 'Unknown'),
+                                'album': meta.get('album', {}).get('title'),
+                                'img': meta.get('album', {}).get('image', {}).get('large', '').replace('_300', '_600'),
+                                'duration': meta['duration'],
+                                'source': 'qobuz'
+                             }
+                        elif source == 'subsonic':
+                             meta = get_subsonic_track_details(real_id)
+                             if meta:
+                                 final_track = {
+                                    'id': meta['id'],
+                                    'title': meta['title'],
+                                    'artist': meta['performer']['name'],
+                                    'album': meta['album']['title'],
+                                    'img': f"{API_BASE}/get_subsonic_cover/{meta['album']['image']['large']}" if meta['album']['image']['large'] else "",
+                                    'duration': meta['duration'],
+                                    'source': 'subsonic'
+                                 }
+                        
+                        if final_track:
+                            tracks_found.append(final_track)
+                            
+                except Exception as e:
+                    logger.error(f"Resolution error for {orig_title}: {e}")
+
+        # Si on a pas assez de titres résolus, on complète avec du générique Qobuz
+        if len(tracks_found) < 4:
+            logger.warning("Not enough resolved tracks, filling with Qobuz search")
+            q_resp = client.api_call("track/search", query=theme, limit=10)
+            items = q_resp.get('tracks', {}).get('items', [])
+            for track in items:
+                 tracks_found.append({
+                    'id': track['id'],
+                    'title': track['title'],
+                    'artist': track.get('performer', {}).get('name', 'Unknown'),
+                    'album': track['album']['title'],
+                    'img': track.get('album', {}).get('image', {}).get('large', '').replace('_300', '_600'),
+                    'duration': track['duration'],
+                    'source': 'qobuz'
+                })
+        
+        # Dédoublonnage par ID
+        seen = set()
+        unique_tracks = []
+        for t in tracks_found:
+            if t['id'] not in seen:
+                unique_tracks.append(t)
+                seen.add(t['id'])
+
+        return jsonify(unique_tracks[:10])
+
     except Exception as e:
-        logger.error(f"Blind Test Error: {e}")
-        return jsonify({"error": "Failed to fetch blind test tracks"}), 500
+        logger.error(f"Blind Test YT Error: {e}")
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/lyrics')
 def get_lyrics():

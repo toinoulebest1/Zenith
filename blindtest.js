@@ -1,4 +1,4 @@
-// blindtest.js - Nouvelle Logique QCM
+// blindtest.js - Nouvelle Logique QCM avec Thèmes
 
 const BLIND_TEST_API = '/blind_test_tracks';
 const ROUND_DURATION = 15; // 15 secondes pour deviner
@@ -21,7 +21,91 @@ function setupBlindTestUI() {
     const viewContainer = document.getElementById('blindTestView');
     if (!viewContainer) return;
     
-    viewContainer.innerHTML = `
+    // On vide le conteneur pour être sûr
+    viewContainer.innerHTML = '';
+    
+    // Si on n'a pas encore choisi de thème (pas de tracks chargés), on affiche le sélecteur
+    if (gameTracks.length === 0) {
+        renderThemeSelector(viewContainer);
+    } else {
+        renderGameInterface(viewContainer);
+    }
+}
+
+function renderThemeSelector(container) {
+    const themes = [
+        { name: "Global Hits", icon: "fa-globe", query: "Global Hits" },
+        { name: "Années 80", icon: "fa-compact-disc", query: "Best of 80s" },
+        { name: "Années 90", icon: "fa-child", query: "Best of 90s" },
+        { name: "Années 2000", icon: "fa-mobile-alt", query: "Best of 2000s" },
+        { name: "Disney", icon: "fa-magic", query: "Disney Hits" },
+        { name: "Rap US", icon: "fa-music", query: "Hip Hop Classics" },
+        { name: "Rock Legends", icon: "fa-guitar", query: "Rock Classics" },
+        { name: "Cinéma", icon: "fa-film", query: "Movie Soundtracks" },
+        { name: "Anime", icon: "fa-dragon", query: "Anime Openings" },
+        { name: "K-Pop", icon: "fa-heart", query: "K-Pop Hits" }
+    ];
+
+    let html = `
+        <div class="bt-container">
+            <h1 style="margin-bottom:10px;">Blind Test 🎵</h1>
+            <p style="color:#aaa; margin-bottom:30px;">Choisissez un thème pour commencer</p>
+            
+            <div class="bt-theme-grid">
+    `;
+
+    themes.forEach(t => {
+        html += `
+            <div class="bt-theme-card" onclick="launchGame('${t.query.replace(/'/g, "\\'")}')">
+                <i class="fas ${t.icon}"></i>
+                <span>${t.name}</span>
+            </div>
+        `;
+    });
+
+    html += `
+            </div>
+            
+            <div style="margin-top:30px; display:flex; gap:10px; justify-content:center;">
+                <input type="text" id="customThemeInput" class="login-input" style="width:200px; margin:0;" placeholder="Thème perso (ex: Rihanna)...">
+                <button class="login-btn" style="width:auto; margin:0;" onclick="launchGame(document.getElementById('customThemeInput').value)">GO</button>
+            </div>
+            
+             <button onclick="document.getElementById('trackView').style.display='block'; document.getElementById('blindTestView').style.display='none';" class="login-btn" style="width:auto; background:transparent; border:1px solid #333; margin-top:30px;">Retour</button>
+        </div>
+        
+        <style>
+            .bt-theme-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+                gap: 15px;
+            }
+            .bt-theme-card {
+                background: rgba(255,255,255,0.05);
+                border: 1px solid rgba(255,255,255,0.1);
+                border-radius: 15px;
+                padding: 20px;
+                cursor: pointer;
+                transition: 0.2s;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                gap: 10px;
+            }
+            .bt-theme-card i { font-size: 24px; color: var(--primary); }
+            .bt-theme-card:hover {
+                background: rgba(255,255,255,0.15);
+                transform: translateY(-5px);
+                border-color: var(--primary);
+            }
+        </style>
+    `;
+    
+    container.innerHTML = html;
+}
+
+function renderGameInterface(container) {
+    container.innerHTML = `
         <div class="bt-container">
             <div class="bt-header">
                 <div class="bt-score-pill"><i class="fas fa-flag"></i> Manche <span id="btRound">1</span>/${GAME_MAX_ROUNDS}</div>
@@ -46,6 +130,10 @@ function setupBlindTestUI() {
             <button id="btNextBtn" style="margin-top:20px; padding:12px 30px; background:white; color:black; border:none; border-radius:30px; font-weight:bold; cursor:pointer; display:none;">
                 Suivant <i class="fas fa-arrow-right"></i>
             </button>
+            
+            <div style="margin-top:20px;">
+                <button onclick="stopBlindTest()" style="background:transparent; border:none; color:#666; cursor:pointer;">Quitter la partie</button>
+            </div>
         </div>
     `;
     
@@ -54,30 +142,44 @@ function setupBlindTestUI() {
 
 // --- LOGIQUE DU JEU ---
 
-window.startBlindTest = async function() {
+window.startBlindTest = function() {
     // 1. Setup UI
     document.getElementById('trackView').style.display = 'none';
     document.getElementById('lyricsView').style.display = 'none';
     document.getElementById('blindTestView').style.display = 'block';
+    document.getElementById('artistView').style.display = 'none';
     
     // Stop main player if playing
     if(typeof pause === 'function') pause();
-
-    setupBlindTestUI();
     
-    // 2. Reset Stats
+    // Reset game state
+    gameTracks = [];
     currentRound = 0;
     score = 0;
+
+    setupBlindTestUI();
+}
+
+window.launchGame = async function(theme) {
+    if (!theme) theme = "Global Hits";
     
-    // 3. Fetch Tracks
-    document.getElementById('btMessage').innerText = "Chargement des pistes...";
+    // Afficher écran de chargement
+    const viewContainer = document.getElementById('blindTestView');
+    viewContainer.innerHTML = `
+        <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:60vh;">
+            <i class="fas fa-compact-disc fa-spin" style="font-size:50px; color:var(--primary); margin-bottom:20px;"></i>
+            <h2>Préparation du Blind Test...</h2>
+            <p style="color:#888;">Recherche playlist : "${theme}"</p>
+            <p style="color:#666; font-size:12px; margin-top:10px;">Cela peut prendre quelques secondes.</p>
+        </div>
+    `;
+
     try {
-        const res = await fetch(API_BASE + BLIND_TEST_API);
+        const res = await fetch(`${API_BASE}${BLIND_TEST_API}?theme=${encodeURIComponent(theme)}`);
         if (!res.ok) throw new Error("API Error");
         
         const data = await res.json();
         
-        // Vérification que c'est bien un tableau
         if (Array.isArray(data)) {
             gameTracks = data;
         } else if (data.tracks) {
@@ -86,18 +188,36 @@ window.startBlindTest = async function() {
             throw new Error("Format de données invalide");
         }
         
-        // On a besoin d'au moins 4 pistes pour faire un QCM
         if (gameTracks.length < 4) {
-             document.getElementById('btMessage').innerText = "Erreur: Pas assez de pistes trouvées.";
+             viewContainer.innerHTML = `
+                <div class="bt-container">
+                    <h2>Oups !</h2>
+                    <p>Pas assez de titres trouvés pour le thème "${theme}".</p>
+                    <button class="login-btn" onclick="startBlindTest()">Essayer un autre thème</button>
+                </div>`;
              return;
         }
 
+        // Démarrer la partie
+        setupBlindTestUI(); // Affiche l'interface de jeu car gameTracks est rempli
         nextRound();
 
     } catch (e) {
         console.error("BlindTest Error:", e);
-        document.getElementById('btMessage').innerText = "Erreur connexion (" + e.message + ")";
+        viewContainer.innerHTML = `
+            <div class="bt-container">
+                <h2>Erreur</h2>
+                <p>Impossible de lancer la partie.</p>
+                <p style="font-size:12px; color:#666;">${e.message}</p>
+                <button class="login-btn" onclick="startBlindTest()">Retour</button>
+            </div>`;
     }
+}
+
+window.stopBlindTest = function() {
+    btAudio.pause();
+    btAudio.src = "";
+    startBlindTest(); // Retour à la sélection
 }
 
 function nextRound() {
@@ -140,7 +260,7 @@ function nextRound() {
     const trackIndex = (currentRound - 1) % gameTracks.length;
     currentTrackMeta = gameTracks[trackIndex];
     
-    // Traitement de l'image (Qobuz vs Subsonic)
+    // Traitement de l'image
     if (!currentTrackMeta.img) {
          if (currentTrackMeta.album && currentTrackMeta.album.image && currentTrackMeta.album.image.large) {
              currentTrackMeta.img = currentTrackMeta.album.image.large.replace('_300', '_600');
@@ -154,7 +274,12 @@ function nextRound() {
     renderOptions(options);
 
     // 2. Audio
-    const streamUrl = `${API_BASE}/stream/${currentTrackMeta.id}`;
+    let streamUrl = '';
+    if (currentTrackMeta.source === 'subsonic') {
+        streamUrl = `${API_BASE}/stream_subsonic/${currentTrackMeta.id}`;
+    } else {
+        streamUrl = `${API_BASE}/stream/${currentTrackMeta.id}`;
+    }
     
     btAudio.src = streamUrl;
     btAudio.volume = 1;
