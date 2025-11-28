@@ -2,10 +2,10 @@
 
 const BLIND_TEST_API = '/blind_test_tracks';
 const ROUND_DURATION = 15; // 15 secondes pour deviner
-const GAME_MAX_ROUNDS = 5;
 
 let gameTracks = [];
 let currentRound = 0;
+let totalRounds = 5; // Valeur par défaut
 let score = 0;
 let currentTrackMeta = null;
 let timerInterval = null;
@@ -49,7 +49,17 @@ function renderThemeSelector(container) {
     let html = `
         <div class="bt-container">
             <h1 style="margin-bottom:10px;">Blind Test 🎵</h1>
-            <p style="color:#aaa; margin-bottom:30px;">Choisissez un thème pour commencer</p>
+            <p style="color:#aaa; margin-bottom:20px;">Configurez votre partie</p>
+            
+            <div style="background:rgba(255,255,255,0.05); padding:20px; border-radius:15px; margin-bottom:30px; border:1px solid rgba(255,255,255,0.1);">
+                <div style="display:flex; justify-content:space-between; margin-bottom:10px;">
+                    <span style="font-weight:bold;">Nombre de musiques</span>
+                    <span id="lblRoundsDisplay" style="color:var(--primary); font-weight:bold;">5</span>
+                </div>
+                <input type="range" id="btRoundInput" min="3" max="20" value="5" step="1" style="width:100%; cursor:pointer;" oninput="document.getElementById('lblRoundsDisplay').innerText = this.value">
+            </div>
+
+            <p style="color:#aaa; margin-bottom:15px;">Choisissez un thème :</p>
             
             <div class="bt-theme-grid">
     `;
@@ -108,7 +118,7 @@ function renderGameInterface(container) {
     container.innerHTML = `
         <div class="bt-container">
             <div class="bt-header">
-                <div class="bt-score-pill"><i class="fas fa-flag"></i> Manche <span id="btRound">1</span>/${GAME_MAX_ROUNDS}</div>
+                <div class="bt-score-pill"><i class="fas fa-flag"></i> Manche <span id="btRound">1</span>/${totalRounds}</div>
                 <div class="bt-score-pill" style="color:var(--primary)"><i class="fas fa-trophy"></i> Score: <span id="btScore">0</span></div>
             </div>
 
@@ -163,19 +173,23 @@ window.startBlindTest = function() {
 window.launchGame = async function(theme) {
     if (!theme) theme = "Global Hits";
     
+    // Récupérer le nombre de rounds choisi
+    const roundsInput = document.getElementById('btRoundInput');
+    totalRounds = roundsInput ? parseInt(roundsInput.value) : 5;
+    
     // Afficher écran de chargement
     const viewContainer = document.getElementById('blindTestView');
     viewContainer.innerHTML = `
         <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:60vh;">
             <i class="fas fa-compact-disc fa-spin" style="font-size:50px; color:var(--primary); margin-bottom:20px;"></i>
             <h2>Préparation du Blind Test...</h2>
-            <p style="color:#888;">Recherche playlist : "${theme}"</p>
+            <p style="color:#888;">Thème : "${theme}" (${totalRounds} titres)</p>
             <p style="color:#666; font-size:12px; margin-top:10px;">Cela peut prendre quelques secondes.</p>
         </div>
     `;
 
     try {
-        const res = await fetch(`${API_BASE}${BLIND_TEST_API}?theme=${encodeURIComponent(theme)}`);
+        const res = await fetch(`${API_BASE}${BLIND_TEST_API}?theme=${encodeURIComponent(theme)}&limit=${totalRounds}`);
         if (!res.ok) throw new Error("API Error");
         
         const data = await res.json();
@@ -188,6 +202,8 @@ window.launchGame = async function(theme) {
             throw new Error("Format de données invalide");
         }
         
+        // On vérifie qu'on a au moins assez de pistes pour faire une question (1 bonne + 3 mauvaises = 4 min)
+        // Mais idéalement on veut le nombre demandé.
         if (gameTracks.length < 4) {
              viewContainer.innerHTML = `
                 <div class="bt-container">
@@ -197,6 +213,9 @@ window.launchGame = async function(theme) {
                 </div>`;
              return;
         }
+        
+        // Ajuster le totalRounds si on a trouvé moins de musiques que prévu
+        totalRounds = Math.min(totalRounds, gameTracks.length);
 
         // Démarrer la partie
         setupBlindTestUI(); // Affiche l'interface de jeu car gameTracks est rempli
@@ -225,7 +244,7 @@ function nextRound() {
     btAudio.pause();
     btAudio.currentTime = 0;
     
-    if (currentRound >= GAME_MAX_ROUNDS) {
+    if (currentRound >= totalRounds) {
         endGame();
         return;
     }
@@ -404,7 +423,7 @@ function endGame() {
     
     container.innerHTML = `
         <h1>Partie Terminée !</h1>
-        <p style="font-size:24px; margin:20px 0;">Score Final : <strong style="color:var(--primary)">${score} / ${GAME_MAX_ROUNDS}</strong></p>
+        <p style="font-size:24px; margin:20px 0;">Score Final : <strong style="color:var(--primary)">${score} / ${totalRounds}</strong></p>
         
         <div style="display:flex; gap:10px; justify-content:center;">
             <button onclick="startBlindTest()" class="login-btn" style="width:auto;">Rejouer</button>
