@@ -212,7 +212,19 @@ const Party = {
         }
     },
 
-    // ... Rest of playback handling (unchanged) ...
+    // --- AUDIO HANDLING ---
+
+    // Nettoie les métadonnées pour éviter que le récepteur ne pense que c'est SA musique Spotify
+    cleanTrack: function(track) {
+        if (!track) return null;
+        const clean = { ...track };
+        // On supprime l'origine de l'import pour débloquer le like/dislike local
+        delete clean.imported_from;
+        delete clean.added_at;
+        // On garde 'source' (ex: spotify_lazy) car le backend en a besoin pour résoudre l'URL
+        return clean;
+    },
+
     handlePlaybackEvent: function(data) {
         this.isRemoteUpdate = true;
         try {
@@ -221,18 +233,57 @@ const Party = {
                 case 'pause': if (isPlaying && typeof pause === 'function') pause(); break;
                 case 'seek': if (activeAudio) activeAudio.currentTime = data.time; break;
                 case 'track':
-                    if (!tracks[currentIndex] || tracks[currentIndex].id !== data.track.id) {
-                        let idx = tracks.findIndex(t => t.id === data.track.id);
-                        if (idx !== -1) { if (typeof loadTrack === 'function') loadTrack(idx); } 
-                        else { tracks.push(data.track); if (typeof loadTrack === 'function') loadTrack(tracks.length - 1); }
+                    const safeTrack = this.cleanTrack(data.track);
+                    if (!tracks[currentIndex] || tracks[currentIndex].id !== safeTrack.id) {
+                        let idx = tracks.findIndex(t => t.id === safeTrack.id);
+                        if (idx !== -1) { 
+                            if (typeof loadTrack === 'function') loadTrack(idx); 
+                        } else { 
+                            tracks.push(safeTrack); 
+                            if (typeof loadTrack === 'function') loadTrack(tracks.length - 1); 
+                        }
                     }
                     break;
             }
         } catch (e) { console.error(e); } 
         finally { setTimeout(() => { this.isRemoteUpdate = false; }, 500); }
     },
-    handleSyncRequest: function() { if (!isPlaying || !tracks[currentIndex]) return; this.send('sync_response', { track: tracks[currentIndex], isPlaying: isPlaying, time: activeAudio ? activeAudio.currentTime : 0, timestamp: Date.now() }); },
-    handleSyncResponse: function(data) { this.isRemoteUpdate = true; try { let idx = tracks.findIndex(t => t.id === data.track.id); if (idx === -1) { tracks.push(data.track); idx = tracks.length - 1; } if (currentTrackId !== data.track.id) { if (typeof loadTrack === 'function') loadTrack(idx, false); } const latency = (Date.now() - data.timestamp) / 1000; const targetTime = data.time + (data.isPlaying ? latency : 0); if (activeAudio) { activeAudio.currentTime = targetTime; if (data.isPlaying) play(); else pause(); } } catch(e) {} setTimeout(() => { this.isRemoteUpdate = false; }, 1000); },
+
+    handleSyncRequest: function() { 
+        if (!isPlaying || !tracks[currentIndex]) return; 
+        this.send('sync_response', { 
+            track: tracks[currentIndex], // Le nettoyage se fera à la réception
+            isPlaying: isPlaying, 
+            time: activeAudio ? activeAudio.currentTime : 0, 
+            timestamp: Date.now() 
+        }); 
+    },
+
+    handleSyncResponse: function(data) { 
+        this.isRemoteUpdate = true; 
+        try { 
+            const safeTrack = this.cleanTrack(data.track);
+            let idx = tracks.findIndex(t => t.id === safeTrack.id); 
+            if (idx === -1) { 
+                tracks.push(safeTrack); 
+                idx = tracks.length - 1; 
+            } 
+            
+            if (currentTrackId !== safeTrack.id) { 
+                if (typeof loadTrack === 'function') loadTrack(idx, false); 
+            } 
+            
+            const latency = (Date.now() - data.timestamp) / 1000; 
+            const targetTime = data.time + (data.isPlaying ? latency : 0); 
+            
+            if (activeAudio) { 
+                activeAudio.currentTime = targetTime; 
+                if (data.isPlaying) play(); else pause(); 
+            } 
+        } catch(e) {} 
+        setTimeout(() => { this.isRemoteUpdate = false; }, 1000); 
+    },
+
     copyLink: function() { if(!this.roomId) return; const url = `${window.location.origin}/?party=${this.roomId}`; navigator.clipboard.writeText(url).then(() => showToast("Lien copié ! 🔗")); }
 };
 

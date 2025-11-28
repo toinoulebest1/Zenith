@@ -1204,8 +1204,8 @@
                 if(isAlb) b='<div class="type-badge badge-album">ALBUM</div>'; else if(isPl) b='<div class="type-badge badge-hires" style="background:#ff0055">PLAYLIST</div>'; 
                 if(src!=='subsonic' && src!=='ytmusic' && it.maximum_bit_depth>16 && !isPl) b+='<div class="type-badge badge-hires">HI-RES</div>'; 
 
-                // AJOUT DU BADGE SPOTIFY
-                if(it.imported_from === 'spotify' || src === 'spotify_lazy') {
+                // FIX DU BADGE SPOTIFY : On n'affiche que si c'est réellement importé de la librairie de l'utilisateur
+                if(it.imported_from === 'spotify') {
                      b+='<div class="type-badge badge-spotify"><i class="fab fa-spotify" style="font-size:14px;"></i> SPOTIFY</div>';
                 }
 
