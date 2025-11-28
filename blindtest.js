@@ -2,7 +2,7 @@
 
 const BLIND_TEST_API = '/blind_test_tracks';
 const ROUND_DURATION = 15; // 15 secondes pour deviner
-const GAME_MAX_ROUNDS = 5;
+let GAME_MAX_ROUNDS = 10; // Valeur par défaut modifiable
 
 let gameTracks = [];
 let currentRound = 0;
@@ -21,10 +21,8 @@ function setupBlindTestUI() {
     const viewContainer = document.getElementById('blindTestView');
     if (!viewContainer) return;
     
-    // On vide le conteneur pour être sûr
     viewContainer.innerHTML = '';
     
-    // Si on n'a pas encore choisi de thème (pas de tracks chargés), on affiche le sélecteur
     if (gameTracks.length === 0) {
         renderThemeSelector(viewContainer);
     } else {
@@ -49,7 +47,17 @@ function renderThemeSelector(container) {
     let html = `
         <div class="bt-container">
             <h1 style="margin-bottom:10px;">Blind Test 🎵</h1>
-            <p style="color:#aaa; margin-bottom:30px;">Choisissez un thème pour commencer</p>
+            <p style="color:#aaa; margin-bottom:20px;">Configurez votre partie</p>
+            
+            <div style="margin-bottom:30px; background:rgba(255,255,255,0.05); padding:15px; border-radius:12px; display:inline-flex; align-items:center; gap:15px; border:1px solid rgba(255,255,255,0.1);">
+                <span style="font-weight:bold;"><i class="fas fa-list-ol"></i> Nombre de musiques :</span>
+                <select id="btRoundSelector" style="background:black; color:white; border:1px solid #555; padding:5px 10px; border-radius:5px; font-weight:bold; cursor:pointer;">
+                    <option value="5">5</option>
+                    <option value="10" selected>10</option>
+                    <option value="15">15</option>
+                    <option value="20">20</option>
+                </select>
+            </div>
             
             <div class="bt-theme-grid">
     `;
@@ -143,16 +151,13 @@ function renderGameInterface(container) {
 // --- LOGIQUE DU JEU ---
 
 window.startBlindTest = function() {
-    // 1. Setup UI
     document.getElementById('trackView').style.display = 'none';
     document.getElementById('lyricsView').style.display = 'none';
     document.getElementById('blindTestView').style.display = 'block';
     document.getElementById('artistView').style.display = 'none';
     
-    // Stop main player if playing
     if(typeof pause === 'function') pause();
     
-    // Reset game state
     gameTracks = [];
     currentRound = 0;
     score = 0;
@@ -163,19 +168,23 @@ window.startBlindTest = function() {
 window.launchGame = async function(theme) {
     if (!theme) theme = "Global Hits";
     
-    // Afficher écran de chargement
+    // Récupérer le nombre de rounds choisi
+    const roundSelect = document.getElementById('btRoundSelector');
+    GAME_MAX_ROUNDS = roundSelect ? parseInt(roundSelect.value) : 10;
+    
     const viewContainer = document.getElementById('blindTestView');
     viewContainer.innerHTML = `
         <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:60vh;">
             <i class="fas fa-compact-disc fa-spin" style="font-size:50px; color:var(--primary); margin-bottom:20px;"></i>
             <h2>Préparation du Blind Test...</h2>
-            <p style="color:#888;">Recherche playlist : "${theme}"</p>
+            <p style="color:#888;">Thème: "${theme}" (${GAME_MAX_ROUNDS} titres)</p>
             <p style="color:#666; font-size:12px; margin-top:10px;">Cela peut prendre quelques secondes.</p>
         </div>
     `;
 
     try {
-        const res = await fetch(`${API_BASE}${BLIND_TEST_API}?theme=${encodeURIComponent(theme)}`);
+        // On passe le paramètre limit à l'API
+        const res = await fetch(`${API_BASE}${BLIND_TEST_API}?theme=${encodeURIComponent(theme)}&limit=${GAME_MAX_ROUNDS}`);
         if (!res.ok) throw new Error("API Error");
         
         const data = await res.json();
@@ -188,6 +197,7 @@ window.launchGame = async function(theme) {
             throw new Error("Format de données invalide");
         }
         
+        // Vérification qu'on a assez de titres pour faire au moins un tour avec des choix
         if (gameTracks.length < 4) {
              viewContainer.innerHTML = `
                 <div class="bt-container">
@@ -197,9 +207,13 @@ window.launchGame = async function(theme) {
                 </div>`;
              return;
         }
+        
+        // Si on a moins de titres que demandé, on ajuste le nombre de rounds
+        if (gameTracks.length < GAME_MAX_ROUNDS) {
+            GAME_MAX_ROUNDS = gameTracks.length;
+        }
 
-        // Démarrer la partie
-        setupBlindTestUI(); // Affiche l'interface de jeu car gameTracks est rempli
+        setupBlindTestUI();
         nextRound();
 
     } catch (e) {
@@ -217,11 +231,10 @@ window.launchGame = async function(theme) {
 window.stopBlindTest = function() {
     btAudio.pause();
     btAudio.src = "";
-    startBlindTest(); // Retour à la sélection
+    startBlindTest();
 }
 
 function nextRound() {
-    // Stop audio précédent
     btAudio.pause();
     btAudio.currentTime = 0;
     
@@ -230,7 +243,6 @@ function nextRound() {
         return;
     }
 
-    // Reset UI
     isRoundActive = true;
     currentRound++;
     
@@ -249,18 +261,14 @@ function nextRound() {
     if(timerFill) timerFill.style.width = '100%';
     if(loadingEl) loadingEl.style.display = 'block';
     
-    // Image floutée et placeholder
     if(imgEl) {
         imgEl.src = 'https://via.placeholder.com/300/111/111?text=?';
         imgEl.classList.remove('revealed');
     }
 
-    // Choix du morceau courant
-    // Attention à l'index bounds
     const trackIndex = (currentRound - 1) % gameTracks.length;
     currentTrackMeta = gameTracks[trackIndex];
     
-    // Traitement de l'image
     if (!currentTrackMeta.img) {
          if (currentTrackMeta.album && currentTrackMeta.album.image && currentTrackMeta.album.image.large) {
              currentTrackMeta.img = currentTrackMeta.album.image.large.replace('_300', '_600');
@@ -269,11 +277,9 @@ function nextRound() {
          }
     }
 
-    // 1. Génération des choix (1 correct + 3 faux)
     const options = generateOptions(currentTrackMeta, gameTracks);
     renderOptions(options);
 
-    // 2. Audio
     let streamUrl = '';
     if (currentTrackMeta.source === 'subsonic') {
         streamUrl = `${API_BASE}/stream_subsonic/${currentTrackMeta.id}`;
@@ -284,28 +290,22 @@ function nextRound() {
     btAudio.src = streamUrl;
     btAudio.volume = 1;
     
-    // On attend que ça charge un peu
     btAudio.onloadeddata = () => {
-         if(!isRoundActive) return; // Si l'utilisateur a quitté entre temps
-         
-         // Random start si le morceau est long (> 30s)
+         if(!isRoundActive) return;
          if (btAudio.duration > 30) {
              const maxStart = btAudio.duration - 20;
              btAudio.currentTime = Math.floor(Math.random() * maxStart);
          }
-         
          btAudio.play().then(() => {
              if(loadingEl) loadingEl.style.display = 'none';
              startTimer();
          }).catch(e => {
              console.error("Auto-play blocked", e);
              if(msgEl) msgEl.innerText = "Cliquez pour lire";
-             // Fallback click to play
              document.body.onclick = () => { btAudio.play(); document.body.onclick = null; }
          });
     };
     
-    // Fallback si ça charge pas
     btAudio.onerror = () => {
          console.error("Audio Error", btAudio.error);
          if(msgEl) msgEl.innerText = "Erreur lecture, on passe...";
@@ -314,15 +314,10 @@ function nextRound() {
 }
 
 function generateOptions(correctTrack, allTracks) {
-    // Filtrer pour ne pas avoir le bon titre dans les faux
     const wrongTracks = allTracks.filter(t => t.id !== correctTrack.id);
-    // Mélanger les faux
     const shuffledWrong = wrongTracks.sort(() => 0.5 - Math.random());
-    // Prendre 3 faux
     const selection = shuffledWrong.slice(0, 3);
-    // Ajouter le vrai
     selection.push(correctTrack);
-    // Mélanger le tout
     return selection.sort(() => 0.5 - Math.random());
 }
 
@@ -358,7 +353,7 @@ function startTimer() {
         if(fill) fill.style.width = `${pct}%`;
         
         if (timeLeft <= 0) {
-            handleAnswer(null, null); // Time out
+            handleAnswer(null, null);
         }
     }, 100);
 }
@@ -372,7 +367,6 @@ function handleAnswer(selectedTrack, btnElement) {
     const isCorrect = selectedTrack && selectedTrack.id === currentTrackMeta.id;
     const btns = document.querySelectorAll('.bt-option-btn');
     
-    // Reveal Visuals
     const imgEl = document.getElementById('btCoverImg');
     if(imgEl) {
         imgEl.src = currentTrackMeta.img;
@@ -388,8 +382,6 @@ function handleAnswer(selectedTrack, btnElement) {
     } else {
         document.getElementById('btMessage').innerText = "❌ RATÉ !";
         if (btnElement) btnElement.classList.add('wrong');
-        
-        // Montrer la bonne réponse
         btns.forEach(b => {
             if (b.innerHTML.includes(currentTrackMeta.title)) {
                 b.classList.add('correct');
