@@ -645,7 +645,9 @@
                 
                 el.className = itemClass;
                 
-                let img = t.img || (t.album ? t.album.image.large : null) || 'https://placehold.co/40x40/222/666?text=M';
+                // PRIORITY: thumbnail > img > album.image > placeholder
+                let img = t.thumbnail || t.img || (t.album ? t.album.image.large : null) || 'https://placehold.co/40x40/222/666?text=M';
+                
                 if(t.source === 'subsonic' && !img.startsWith('http')) {
                      img = `${API_BASE}/get_subsonic_cover/${t.album.image.large}`;
                 } else if (img && img.includes('_300')) {
@@ -911,7 +913,10 @@
             let img = ''; 
             
             // 1. PRIORITÉ ABSOLUE À L'IMAGE DIRECTE (Pour la Radio YT)
-            if (t.img) {
+            // Ajout du support de t.thumbnail
+            if (t.thumbnail) {
+                img = t.thumbnail;
+            } else if (t.img) {
                 img = t.img;
             } 
             // 2. Gestion Subsonic
@@ -1317,7 +1322,9 @@
                     let u = ''; 
                     
                     // PRIORITE A LA PROPRIETE IMG DIRECTE (Pour YouTube / Radio)
-                    if (it.img) {
+                    if (it.thumbnail) {
+                        u = it.thumbnail;
+                    } else if (it.img) {
                         u = it.img;
                     } 
                     else if(src==='subsonic'){ 

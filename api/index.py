@@ -448,8 +448,6 @@ def get_radio_queue():
             
             # Gestion de la durée (YT renvoie parfois une string "3:45", parfois des secondes)
             duration = t.get("duration") or t.get("length")
-            # Si c'est une string "mm:ss", on la garde telle quelle ou on la convertit si nécessaire
-            # Pour l'instant, on la passe, le frontend gérera ou ignorera
                 
             follow_tracks.append({
                 "id": t.get("videoId"),
@@ -457,6 +455,7 @@ def get_radio_queue():
                 "performer": { "name": artist_name },
                 "album": { "title": album_name, "image": { "large": img_url } },
                 "img": img_url,
+                "thumbnail": img_url, # CLÉ AJOUTÉE POUR COMPATIBILITÉ
                 "duration": duration,
                 "source": "yt_lazy",
                 "isRadio": True
