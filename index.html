@@ -908,8 +908,23 @@
         }
 
         function updateInterfaceInfo(t) {
-            let img = ''; if(t.source === 'subsonic') img = `${API_BASE}/get_subsonic_cover/${t.album.image.large}`; else img = (t.album.image.large||'').replace('_300','_600');
+            let img = ''; 
+            
+            // 1. PRIORITÉ ABSOLUE À L'IMAGE DIRECTE (Pour la Radio YT)
+            if (t.img) {
+                img = t.img;
+            } 
+            // 2. Gestion Subsonic
+            else if (t.source === 'subsonic') {
+                img = `${API_BASE}/get_subsonic_cover/${t.album.image.large}`; 
+            } 
+            // 3. Gestion Qobuz (Fallback)
+            else {
+                img = (t.album.image.large||'').replace('_300','_600');
+            }
+
             if (!img) img = "https://placehold.co/600x600/1a1a1a/666666?text=Zenith";
+            
             let artistName = t.performer ? t.performer.name : 'Artiste';
             const xlArt = document.getElementById('xlArt'); const capArt = document.getElementById('capArt'); const amb = document.getElementById('ambientBg');
             const textEls = [ 'xlTitle', 'xlArtist', 'xlBadge', 'capTitle', 'capArtist' ].map(id=>document.getElementById(id));
@@ -1298,7 +1313,24 @@
             items.forEach(it=>{ 
                 const isAlb=it.type==='album'; const isPl=it.type==='playlist'; const src=it.source; 
                 let mediaElement = '';
-                if (isPl) { if (typeof getPlaylistCoverHTML === 'function' && src !== 'ytmusic') { mediaElement = getPlaylistCoverHTML(it); } else { let imgUrl = it.image || 'https://placehold.co/300x300/1a1a1a/666666?text=Playlist'; mediaElement = `<img src="${imgUrl}">`; } } else { let u = ''; if(src==='subsonic'){ u=`${API_BASE}/get_subsonic_cover/${isAlb?it.image.large:it.album.image.large}`; } else { u=(isAlb?it.image.large:it.album.image.large)||''; u=u.replace('_300','_600'); } if(!u)u='https://placehold.co/300x300/1a1a1a/666666?text=Music'; mediaElement = `<img src="${u}">`; } 
+                if (isPl) { if (typeof getPlaylistCoverHTML === 'function' && src !== 'ytmusic') { mediaElement = getPlaylistCoverHTML(it); } else { let imgUrl = it.image || 'https://placehold.co/300x300/1a1a1a/666666?text=Playlist'; mediaElement = `<img src="${imgUrl}">`; } } else { 
+                    let u = ''; 
+                    
+                    // PRIORITE A LA PROPRIETE IMG DIRECTE (Pour YouTube / Radio)
+                    if (it.img) {
+                        u = it.img;
+                    } 
+                    else if(src==='subsonic'){ 
+                        u=`${API_BASE}/get_subsonic_cover/${isAlb?it.image.large:it.album.image.large}`; 
+                    } 
+                    else { 
+                        u=(isAlb?it.image.large:it.album.image.large)||''; 
+                        u=u.replace('_300','_600'); 
+                    } 
+                    
+                    if(!u)u='https://placehold.co/300x300/1a1a1a/666666?text=Music'; 
+                    mediaElement = `<img src="${u}">`; 
+                } 
                 const d=document.createElement('div'); d.className='track-card'; if(it.type==='artist') d.classList.add('artist-card'); d.dataset.id=it.id; 
                 let b = ''; let rankBadgeHTML = ''; 
                 if(isAlb) b='<div class="type-badge badge-album">ALBUM</div>'; else if(isPl) b='<div class="type-badge badge-hires" style="background:#ff0055">PLAYLIST</div>'; 
