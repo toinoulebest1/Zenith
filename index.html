@@ -143,6 +143,7 @@
             </div>
             <div class="nav-item" onclick="toggleEQ()" title="Audio FX"><i class="fas fa-sliders-h"></i></div>
             <div class="nav-item" onclick="showProfileSettings()" title="Mon Compte"><i class="fas fa-user"></i></div>
+            <div class="nav-item" onclick="BluetoothManager.toggle()" title="Bluetooth"><i class="fab fa-bluetooth-b" id="btBtnIcon"></i></div>
             <div class="nav-item" onclick="ZenithCast.triggerMenu()" title="Caster sur TV"><i class="fab fa-chromecast" id="castBtnIcon"></i></div>
             <div class="nav-item" onclick="logout()" title="Déconnexion" style="margin-top: auto;"><i class="fas fa-sign-out-alt"></i></div>
         </nav>
@@ -325,6 +326,7 @@
     <script src="blindtest.js"></script>
     <script src="party.js"></script>
     <script src="tv.js"></script>
+    <script src="bluetooth.js"></script>
     
     <script>
         if ('serviceWorker' in navigator) {
