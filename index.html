@@ -872,43 +872,38 @@
             
             const cur = tracks[currentIndex]; 
             const artist = cur.performer ? cur.performer.name : cur.artist;
-            let artistHistory = [];
-            const startIndex = Math.max(0, currentIndex - 4);
-            const recentTracks = tracks.slice(startIndex, currentIndex + 1);
-            recentTracks.forEach(t => {
-                 let a = 'Inconnu';
-                 if(t.performer && t.performer.name) a = t.performer.name;
-                 else if(t.artist && t.artist.name) a = t.artist.name;
-                 artistHistory.push(a);
-            });
 
             try {
-                const historyStr = encodeURIComponent(artistHistory.join('|'));
-                const res = await fetch(`${API_BASE}/recommend?artist=${encodeURIComponent(artist)}&title=${encodeURIComponent(cur.title)}&current_id=${cur.id}&recent_artists=${historyStr}`);
-                const raw = await res.json();
-                if(raw && raw.id) {
-                    let hd = ''; if(raw.source === 'subsonic') hd = `${API_BASE}/get_subsonic_cover/${raw.album.image.large}`; else hd = (raw.album.image.large||'').replace('_300','_600');
-                    if(!raw.performer) raw.performer = { name: raw.artist ? raw.artist.name : 'Artiste' };
+                // APPEL DE LA NOUVELLE ROUTE QUI UTILISE LA LOGIQUE YOUTUBE WATCH NEXT
+                const res = await fetch(`${API_BASE}/radio_queue?artist=${encodeURIComponent(artist)}&title=${encodeURIComponent(cur.title)}`);
+                const nextTracks = await res.json();
+                
+                if(Array.isArray(nextTracks) && nextTracks.length > 0) {
+                    let addedCount = 0;
+                    nextTracks.forEach(raw => {
+                        // On n'ajoute que si ce n'est pas déjà le titre courant ou le suivant immédiat
+                        // (vérification basique pour éviter les doublons immédiats)
+                        if (raw.id !== cur.id) {
+                            tracks.push(raw);
+                            addedCount++;
+                        }
+                    });
                     
-                    tracks.push({ ...raw, img: hd, type: 'track', isRadio: true });
-                    const specificIndex = tracks.length - 1;
-                    
-                    const div = document.createElement('div'); div.className = 'track-card'; div.dataset.id = raw.id;
-                    div.innerHTML = `<div class="badges-container"><div class="type-badge" style="background:var(--primary)">RADIO</div></div><img src="${hd}"><h3>${raw.title}</h3><p style="color:var(--primary)">${raw.performer.name}</p>`;
-                    div.onclick = () => { loadTrack(specificIndex); }; 
-                    
-                    document.getElementById('trackGrid').appendChild(div);
-                    if (!isBackground) { 
-                        loadTrack(tracks.length - 1); 
-                        setTimeout(() => div.scrollIntoView({behavior: "smooth", block: "center"}), 100); 
-                    } else {
-                        // Rafraîchir la file d'attente pour voir le nouveau titre ajouté
-                        if(document.getElementById('queuePanel').classList.contains('active')) renderQueueList();
+                    if (addedCount > 0) {
+                        // Si on vient de lancer la radio manuellement, on passe au morceau suivant
+                        if (!isBackground) { 
+                            loadTrack(currentIndex + 1); 
+                        } else {
+                            // Rafraîchir la file d'attente pour voir les nouveaux titres ajoutés
+                            if(document.getElementById('queuePanel').classList.contains('active')) renderQueueList();
+                        }
                     }
+                } else {
+                    if(!isBackground) showToast("Aucune recommandation trouvée.");
                 }
             } catch(e) { 
                 console.error(e);
-                if(!isBackground && currentIndex < tracks.length-1) loadTrack(currentIndex+1); 
+                if(!isBackground) showToast("Erreur radio."); 
             } finally { isFetchingRadio = false; }
         }
 

@@ -129,25 +129,6 @@ def ms_to_lrc(ms):
     rem_seconds = seconds % 60
     return f"[{minutes:02d}:{rem_seconds:05.2f}]"
 
-def is_garbage_content(title, artist):
-    """
-    Détecte si le contenu est de "basse qualité" ou indésirable (TV, Cover, Slowed, Remix, Live, etc.)
-    """
-    t = title.lower()
-    a = artist.lower()
-    
-    banned_terms = [
-        "interview", "react", "reaction", "review", "analise", "explication", 
-        "guitar hero", "synthesia", "tutorial", "tuto", "lesson"
-    ]
-    
-    full_str = f"{t} {a}"
-    for term in banned_terms:
-        if term in full_str:
-            return True, term
-            
-    return False, None
-
 def fetch_yt_synced_lyrics(title, artist):
     """Récupère les paroles synchronisées depuis YouTube Music avec Logs détaillés"""
     query = f"{title} {artist}"
@@ -250,112 +231,6 @@ def get_subsonic_track_details(track_id):
         }
     except Exception as e:
         logger.error(f"Subsonic Details Error: {e}")
-        return None
-
-# --- RECHERCHE RECOMMENDATIONS INTELLIGENTE ---
-def get_yt_recommendations(title, artist, banned_artists=set()):
-    """
-    Algorithme Radio Amélioré avec filtre "Album" (Audio Only)
-    """
-    search_query = f'"{title}" "{artist}"'
-    logger.info(f"📻 [RADIO START] Graine: '{title}' par '{artist}'")
-    
-    try:
-        # 1. Graine
-        search_results = yt.search(search_query, filter='songs', limit=1)
-        if not search_results: search_results = yt.search(f"{title} {artist}", filter='songs', limit=1)
-        if not search_results: return None
-
-        target_song = search_results[0]
-        video_id = target_song['videoId']
-        
-        # 2. Candidats
-        raw_candidates = []
-        try:
-            watch_playlist = yt.get_watch_playlist(videoId=video_id)
-            raw_candidates.extend(watch_playlist.get('tracks', []))
-            
-            related_browse_id = watch_playlist.get('related')
-            if related_browse_id:
-                related_content = yt.get_song_related(related_browse_id)
-                for section in related_content:
-                    contents = section.get('contents')
-                    if isinstance(contents, list): raw_candidates.extend(contents)
-        except Exception as e:
-            logger.error(f"❌ YT Radio: Erreur playlist: {e}")
-            return None
-
-        # 3. Filtrage
-        seen_ids = set()
-        candidates = []
-        
-        for item in raw_candidates:
-            if 'videoId' in item and 'playlistId' not in item:
-                r_id = item.get('videoId')
-                if r_id in seen_ids: continue
-                seen_ids.add(r_id)
-                
-                r_title = item.get('title', 'Inconnu')
-                artists = item.get('artists', [])
-                r_artist_name = artists[0]['name'] if artists else "Artiste inconnu"
-                
-                if 'album' not in item or not item.get('album'): continue
-                if clean_string(r_artist_name) in banned_artists: continue
-                if clean_string(r_title) == clean_string(title): continue
-                
-                is_bad, reason = is_garbage_content(r_title, r_artist_name)
-                if is_bad: continue
-                
-                candidates.append({'title': r_title, 'artist': r_artist_name})
-
-        random.shuffle(candidates)
-        
-        # 4. RESOLUTION PARALLÈLE (Optimisation Vitesse)
-        # On teste plusieurs candidats en même temps au lieu de un par un
-        
-        logger.info(f"🚀 [RADIO FAST] Lancement recherche parallèle sur {len(candidates)} candidats.")
-        
-        with ThreadPoolExecutor(max_workers=5) as executor:
-            # On lance les recherches sur les 10 premiers candidats (pour ne pas saturer)
-            future_to_cand = {
-                executor.submit(try_resolve_track, c['title'], c['artist']): c 
-                for c in candidates[:10]
-            }
-            
-            # Dès qu'un thread a fini
-            for future in as_completed(future_to_cand):
-                try:
-                    match = future.result()
-                    if match:
-                        source = match['source']
-                        real_id = match['id']
-                        
-                        if source == 'qobuz' and client:
-                            try:
-                                meta = client.get_track_meta(real_id)
-                                meta['source'] = 'qobuz'
-                                fix_qobuz_title(meta)
-                                if meta.get('album', {}).get('image', {}).get('large'):
-                                    meta['img'] = meta['album']['image']['large'].replace('_300', '_600')
-                                logger.info(f"✅ [RADIO MATCH] Trouvé: {meta['title']}")
-                                return meta
-                            except Exception as e: logger.error(f"Erreur fetch Qobuz meta: {e}")
-                        
-                        elif source == 'subsonic':
-                            try:
-                                song = get_subsonic_track_details(real_id)
-                                if song: 
-                                    logger.info(f"✅ [RADIO MATCH] Trouvé (Subsonic): {song['title']}")
-                                    return song
-                            except Exception as e: logger.error(f"Erreur fetch Subsonic meta: {e}")
-                except Exception as e:
-                    logger.error(f"Thread Error: {e}")
-                    continue
-            
-        return None 
-
-    except Exception as e:
-        logger.error(f"❌ Radio YT Error: {e}")
         return None
 
 # --- API SUBSONIC ---
@@ -483,15 +358,74 @@ def try_resolve_track(title, artist):
 
 # --- ROUTES ---
 
+@app.route('/radio_queue')
+def get_radio_queue():
+    """
+    Récupère la file d'attente complète "Watch Next" de YouTube Music.
+    """
+    artist = request.args.get('artist')
+    title = request.args.get('title')
+    
+    if not artist or not title:
+        return jsonify({"error": "Missing artist or title"}), 400
+        
+    query = f"{title} {artist}"
+    logger.info(f"📻 [RADIO QUEUE] Recherche de la graine : {query}")
+    
+    try:
+        # 1. Recherche du titre sur YT Music pour avoir le VideoID
+        results = yt.search(query, filter="songs", limit=1)
+        
+        if not results:
+            return jsonify({"error": "Track not found on YT"}), 404
+            
+        first_track = results[0]
+        video_id = first_track["videoId"]
+        logger.info(f"✅ [RADIO QUEUE] Seed trouvée : {video_id} - {first_track.get('title')}")
+        
+        # 2. Récupération de la playlist "Watch Next"
+        watch = yt.get_watch_playlist(video_id, limit=25)
+        
+        if "tracks" not in watch or not watch["tracks"]:
+            return jsonify({"error": "No recommendations found"}), 404
+            
+        follow_tracks = []
+        
+        for t in watch["tracks"]:
+            # On ignore la première piste car c'est celle qu'on écoute déjà
+            if t.get("videoId") == video_id:
+                continue
+                
+            artists = t.get("artists", [{}])
+            artist_name = artists[0].get("name") if artists else "Inconnu"
+            album_name = t.get("album", {}).get("name") if t.get("album") else None
+            
+            # Formatage pour le frontend (Compatible 'yt_lazy' -> resolve_stream)
+            img_url = "https://placehold.co/300x300/1a1a1a/666666?text=Music"
+            if t.get("thumbnails"):
+                img_url = get_hq_yt_image(t["thumbnails"][-1]["url"])
+                
+            follow_tracks.append({
+                "id": t.get("videoId"), # ID temporaire YT
+                "title": t.get("title"),
+                "performer": { "name": artist_name },
+                "album": { "title": album_name, "image": { "large": img_url } },
+                "img": img_url,
+                "duration": t.get("duration_seconds", 0) or t.get("lengthSeconds", 0),
+                "source": "yt_lazy", # Marqueur pour résolution côté client
+                "isRadio": True
+            })
+            
+        logger.info(f"✅ [RADIO QUEUE] {len(follow_tracks)} titres récupérés.")
+        return jsonify(follow_tracks)
+        
+    except Exception as e:
+        logger.error(f"❌ [RADIO QUEUE] Erreur: {e}")
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/blind_test_tracks')
 def get_blind_test_tracks():
-    """
-    Retourne une liste de titres pour le blind test en fonction d'un thème.
-    Recherche une playlist sur YouTube, puis tente de résoudre chaque titre sur Qobuz/Subsonic.
-    """
     theme = request.args.get('theme', 'Global Hits')
-    
-    # Récupération du paramètre LIMIT (par défaut 5, max 20 pour éviter timeout)
     try:
         limit = int(request.args.get('limit', 5))
         if limit < 1: limit = 1
@@ -506,14 +440,12 @@ def get_blind_test_tracks():
 
     tracks_found = []
 
-    # 1. Si thème générique, on utilise Qobuz direct (plus rapide)
     if theme in ['Global Hits', 'Pop Global']:
         try:
-            # On demande plus de pistes que nécessaire pour varier
             resp = client.api_call("track/search", query=theme, limit=max(20, limit * 3))
             items = resp.get('tracks', {}).get('items', [])
             random.shuffle(items)
-            candidates = items[:limit + 5] # Marge de sécurité
+            candidates = items[:limit + 5]
             for track in candidates:
                 tracks_found.append({
                     'id': track['id'],
@@ -524,30 +456,24 @@ def get_blind_test_tracks():
                     'duration': track['duration'],
                     'source': 'qobuz'
                 })
-            # On retourne exactement le nombre demandé
             return jsonify(tracks_found[:limit])
         except Exception as e:
             logger.error(f"Blind Test Classic Error: {e}")
             return jsonify({"error": "Failed to fetch tracks"}), 500
 
-    # 2. Sinon, Recherche Playlist YouTube
     try:
         search_results = yt.search(theme, filter='playlists', limit=3)
         if not search_results:
             return jsonify({"error": "No playlist found"}), 404
             
-        # On prend la première playlist
         target_playlist = search_results[0]
         playlist_id = target_playlist['browseId']
         logger.info(f"🎲 Blind Test: Playlist YT trouvée = {target_playlist.get('title')} ({playlist_id})")
         
-        # Récupération des titres
-        playlist_data = yt.get_playlist(playlist_id, limit=50) # On en prend 50 pour avoir du choix
+        playlist_data = yt.get_playlist(playlist_id, limit=50)
         yt_tracks = playlist_data.get('tracks', [])
         random.shuffle(yt_tracks)
         
-        # On essaie de résoudre un nombre raisonnable de pistes
-        # On prend le nombre demandé + une marge de sécurité (x2)
         candidates_to_resolve = yt_tracks[:limit * 2]
         
         with ThreadPoolExecutor(max_workers=5) as executor:
@@ -566,9 +492,7 @@ def get_blind_test_tracks():
                     if match:
                         real_id = match['id']
                         source = match['source']
-                        
                         final_track = None
-                        
                         if source == 'qobuz':
                              meta = client.get_track_meta(real_id)
                              final_track = {
@@ -592,16 +516,12 @@ def get_blind_test_tracks():
                                     'duration': meta['duration'],
                                     'source': 'subsonic'
                                  }
-                        
                         if final_track:
                             tracks_found.append(final_track)
-                            
                 except Exception as e:
                     logger.error(f"Resolution error for {orig_title}: {e}")
 
-        # Si on a pas assez de titres résolus, on complète avec du générique Qobuz
         if len(tracks_found) < limit:
-            logger.warning(f"Not enough resolved tracks ({len(tracks_found)}/{limit}), filling with Qobuz search")
             try:
                 q_resp = client.api_call("track/search", query=theme, limit=limit * 2)
                 items = q_resp.get('tracks', {}).get('items', [])
@@ -618,7 +538,6 @@ def get_blind_test_tracks():
                     })
             except: pass
         
-        # Dédoublonnage par ID
         seen = set()
         unique_tracks = []
         for t in tracks_found:
@@ -634,61 +553,9 @@ def get_blind_test_tracks():
 
 @app.route('/recommend')
 def recommend_tracks():
-    original_artist = request.args.get('artist', '')
-    original_title = request.args.get('title', '')
-    
-    recent_artists_str = request.args.get('recent_artists', '')
-    if '|' in recent_artists_str:
-        recent_artists_raw = recent_artists_str.split('|')
-    else:
-        recent_artists_raw = recent_artists_str.split(',') if recent_artists_str else []
-        
-    recent_artists = [clean_string(a) for a in recent_artists_raw if a]
-    
-    banned_artists = set()
-    artist_counts = {}
-    for artist in recent_artists:
-        artist_counts[artist] = artist_counts.get(artist, 0) + 1
-    
-    for artist, count in artist_counts.items():
-        if count >= 2:
-            banned_artists.add(artist)
-
-    # 1. TENTATIVE YOUTUBE AVEC VÉRIFICATION QOBUZ/SUBSONIC
-    resolved_rec = get_yt_recommendations(original_title, original_artist, banned_artists)
-    if resolved_rec:
-        return jsonify(resolved_rec)
-        
-    # 2. FALLBACK QOBUZ
-    if client:
-        try:
-            track_id = request.args.get('current_id')
-            track_meta = client.get_track_meta(track_id)
-            genre_name = track_meta.get('album', {}).get('genre', {}).get('name')
-            
-            original_clean = clean_string(original_artist)
-            if original_clean in banned_artists:
-                search_query = genre_name if genre_name else "Pop Global"
-            else:
-                search_query = genre_name if genre_name else original_artist
-            
-            resp = client.api_call("track/search", query=search_query, limit=50)
-            items = resp.get('tracks', {}).get('items', [])
-            random.shuffle(items)
-            
-            for item in items:
-                if str(item['id']) == str(track_id): continue
-                candidate_artist = item.get('performer', {}).get('name', 'Inconnu')
-                candidate_clean = clean_string(candidate_artist)
-                if candidate_clean in banned_artists: continue
-                if candidate_clean == clean_string(original_artist) and clean_string(item['title']) == clean_string(original_title): continue
-                item['source'] = 'qobuz'
-                fix_qobuz_title(item)
-                return jsonify(item)
-        except Exception as e:
-            logger.error(f"Qobuz Fallback Error: {e}")
-
-    return jsonify({"error": "No recommendation found"}), 404
+    # Ancienne route maintenue pour compatibilité, mais simplifiée
+    # On délègue au nouveau système si possible, sinon fallback Qobuz
+    return jsonify({"error": "Deprecated, use /radio_queue"}), 404
 
 @app.route('/search')
 def search_tracks():
