@@ -26,6 +26,61 @@ body {
     position: relative;
 }
 
+/* --- ANDROID TV MODE --- */
+body.tv-mode {
+    cursor: none; /* Cache la souris */
+    font-size: 1.5rem; /* Textes plus gros */
+}
+
+body.tv-mode .app-layout {
+    width: 100%; height: 100%; border: none; border-radius: 0;
+    grid-template-columns: 100px 1fr 400px;
+}
+
+/* Focus très visible pour la navigation télécommande */
+body.tv-mode *:focus {
+    outline: 4px solid var(--primary) !important;
+    outline-offset: 4px;
+    transform: scale(1.05);
+    z-index: 50;
+    background: rgba(255, 255, 255, 0.15);
+}
+
+body.tv-mode .track-card:focus {
+    transform: scale(1.1);
+    background: rgba(255,255,255,0.2);
+    box-shadow: 0 10px 40px rgba(0,0,0,0.8);
+    border-color: var(--primary);
+}
+
+body.tv-mode .nav-item {
+    font-size: 32px; /* Icônes sidebar énormes */
+    margin: 10px 0;
+    padding: 10px;
+    border-radius: 50%;
+}
+
+body.tv-mode .player-capsule {
+    bottom: 40px; width: 90%; height: 120px;
+    transform: translateX(-50%) scale(1.1);
+}
+
+body.tv-mode .bento-grid {
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); /* Cartes plus grosses */
+    gap: 30px;
+}
+
+body.tv-mode .search-input { font-size: 24px; padding: 20px; }
+body.tv-mode .search-btn { font-size: 20px; padding: 15px 30px; }
+
+/* Masquer les éléments inutiles sur TV */
+body.tv-mode .vol-slider, 
+body.tv-mode .settings-slider { display: none; } /* Le volume est géré par la TV */
+
+body.tv-mode .login-screen { background: rgba(0,0,0,0.9); }
+body.tv-mode .login-card { transform: scale(1.2); }
+
+
 /* --- PAGE TOP 10 HERO --- */
 .top10-header {
     background: linear-gradient(135deg, rgba(255, 215, 0, 0.1), rgba(0, 0, 0, 0));

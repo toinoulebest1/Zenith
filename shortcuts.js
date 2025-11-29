@@ -1,8 +1,18 @@
 // shortcuts.js - Gestion des raccourcis clavier pour Zenith Player
 
 document.addEventListener('keydown', (e) => {
-    // On ignore si l'utilisateur écrit dans un champ de texte (recherche, login...)
+    // 1. On ignore si l'utilisateur écrit dans un champ de texte
     if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
+
+    // 2. SUPPORT TV : Si on est en mode TV et qu'un élément a le focus,
+    // on laisse tv.js gérer la navigation avec les flèches.
+    // On n'intercepte que si le focus est sur le body ou l'élément actif n'est pas "navigable"
+    const isTV = document.body.classList.contains('tv-mode');
+    if (isTV && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
+        if (document.activeElement !== document.body) {
+            return; // On laisse tv.js gérer le focus
+        }
+    }
 
     // Prévention du scroll par défaut
     if(['Space', 'ArrowUp', 'ArrowDown'].includes(e.code)) {
