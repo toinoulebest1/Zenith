@@ -134,7 +134,7 @@
             <div class="nav-item" onclick="showFavorites()" title="Favoris"><i class="fas fa-heart"></i></div>
             <div class="nav-item" onclick="showHistory()" title="Historique"><i class="fas fa-history"></i></div>
             <div class="nav-item" onclick="showPlaylists()" title="Mes Playlists"><i class="fas fa-list"></i></div>
-            <div class="nav-item" onclick="showQueue()" title="File d'attente"><i class="fas fa-list-ol"></i></div>
+            <div class="nav-item" onclick="toggleQueue()" title="File d'attente"><i class="fas fa-list-ol"></i></div>
             <div class="nav-item" onclick="showWeeklyTop()" title="Top 10 Semaine"><i class="fas fa-trophy"></i></div>
             <div class="nav-item lyrics-btn" onclick="toggleLyrics()" title="Paroles (V)"><i class="fas fa-microphone-alt"></i></div>
             <div class="nav-item" onclick="startBlindTest()" title="Blind Test"><i class="fas fa-gamepad"></i></div>
@@ -283,6 +283,14 @@
             <button class="limiter-btn" id="limiterBtn" onclick="toggleLimiter()"><i class="fas fa-compress-arrows-alt"></i> NORMALISATEUR</button>
             <button class="orbit-btn" id="orbitBtn" onclick="toggleOrbit()"><i class="fas fa-globe-americas"></i> 8D ORBIT (WORKLET)</button>
             <button class="eq-reset-btn" onclick="resetEQ()">Réinitialiser EQ</button>
+        </div>
+
+        <div id="queuePanel" class="queue-panel">
+            <div class="queue-header">
+                <h3>File d'attente</h3>
+                <button class="close-eq" onclick="toggleQueue()"><i class="fas fa-times"></i></button>
+            </div>
+            <div id="queueList" class="queue-list"></div>
         </div>
 
         <div class="player-capsule">
@@ -609,6 +617,57 @@
                 setTimeout(()=>v.classList.add('active'),10);
             }
         }
+
+        function toggleQueue() {
+            const p = document.getElementById('queuePanel');
+            if (p.classList.contains('active')) {
+                p.classList.remove('active');
+            } else {
+                renderQueueList();
+                p.classList.add('active');
+            }
+        }
+
+        function renderQueueList() {
+            const list = document.getElementById('queueList');
+            list.innerHTML = '';
+            if (!tracks || tracks.length === 0) {
+                list.innerHTML = '<div style="text-align:center; padding:20px; color:#666;">Vide</div>';
+                return;
+            }
+            tracks.forEach((t, i) => {
+                const el = document.createElement('div');
+                el.className = `queue-item ${i === currentIndex ? 'current' : ''}`;
+                
+                let img = t.img || (t.album ? t.album.image.large : null) || 'https://placehold.co/40x40/222/666?text=M';
+                if(t.source === 'subsonic' && !img.startsWith('http')) {
+                     img = `${API_BASE}/get_subsonic_cover/${t.album.image.large}`;
+                } else if (img && img.includes('_300')) {
+                     img = img.replace('_300', '_600');
+                }
+                
+                const artist = t.performer ? t.performer.name : (t.artist ? t.artist.name : 'Inconnu');
+                
+                el.innerHTML = `
+                    <img src="${img}">
+                    <div class="queue-info">
+                        <div class="queue-title">${t.title}</div>
+                        <div class="queue-artist">${artist}</div>
+                    </div>
+                    ${i === currentIndex ? '<i class="fas fa-volume-up playing-icon-small"></i>' : ''}
+                `;
+                el.onclick = () => {
+                    loadTrack(i);
+                    renderQueueList(); 
+                };
+                list.appendChild(el);
+            });
+            
+            setTimeout(() => {
+                const currentEl = list.querySelector('.current');
+                if (currentEl) currentEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }, 100);
+        }
         
         function resetLyricsState() { lyricsData = []; firstLineTime = null; const view = document.getElementById('lyricsView'); view.innerHTML = '<div style="margin-top: 100px; color: #888; animation: pulseText 1.5s infinite;">Recherche des paroles...</div>'; document.getElementById('introContainer').style.display = 'none'; }
 
@@ -616,6 +675,14 @@
         async function loadTrack(index, autoPlay = true, useCrossfade = true) {
             if(index < 0 || index >= tracks.length) return;
             
+            // Mise à jour de la liste d'attente si elle est ouverte
+            if(document.getElementById('queuePanel').classList.contains('active')) {
+                // On met à jour l'index avant de re-render pour avoir le bon état visuel
+                const oldIndex = currentIndex;
+                // Note: currentIndex sera mis à jour plus bas, mais renderQueueList utilise la variable globale.
+                // On attend la fin de la fonction ou on force un re-render à la fin.
+            }
+
             if (typeof ZenithCast !== 'undefined' && ZenithCast.isCasting) {
                 // Mode Cast (inchangé)
                 currentIndex = index; const t = tracks[index]; currentTrackId = t.id;
@@ -623,6 +690,7 @@
                 ZenithCast.loadMedia(t); pause(); isPlaying = true; document.getElementById('playIcon').className = 'fas fa-pause';
                 updateLikeButtonState();
                 if (index === tracks.length - 1) triggerRadio(true);
+                if(document.getElementById('queuePanel').classList.contains('active')) renderQueueList();
                 return; 
             }
 
@@ -675,6 +743,9 @@
             if (autoPlay) {
                 play(); 
             }
+            
+            // Refresh queue visual if open
+            if(document.getElementById('queuePanel').classList.contains('active')) renderQueueList();
         }
 
         function startCrossfade(prevAudio, nextAudio, enableFade) { // autoPlay n'est plus un paramètre
