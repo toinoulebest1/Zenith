@@ -117,10 +117,53 @@ def fix_qobuz_title(track):
     except: pass
     return track
 
+def extract_thumbnail_hd(track):
+    """
+    Récupère la miniature, la trie pour avoir la plus grande,
+    et force la Haute Définition via l'URL (1200x1200).
+    """
+    thumbs = []
+
+    # 1. Extraction robuste de la liste des miniatures
+    if "thumbnails" in track:
+        thumbs = track["thumbnails"]
+    elif "thumbnail" in track:
+        data = track["thumbnail"]
+        if isinstance(data, list):
+            thumbs = data
+        elif isinstance(data, dict) and "thumbnails" in data:
+            thumbs = data["thumbnails"]
+
+    # Si on n'a rien trouvé, on renvoie une image par défaut
+    if not thumbs or not isinstance(thumbs, list):
+        return 'https://placehold.co/300x300/1a1a1a/666666?text=Music'
+
+    # 2. TRI : On classe du plus petit au plus grand (basé sur la largeur "width")
+    try:
+        thumbs.sort(key=lambda x: x.get("width", 0))
+    except:
+        pass 
+
+    # 3. Récupération de l'URL la plus grande
+    best_url = thumbs[-1].get("url")
+
+    # 4. ASTUCE HD : Modification de l'URL
+    if best_url:
+        # Regex qui cherche =w<chiffres>-h<chiffres> et remplace par =w1200-h1200
+        # On essaie d'abord la méthode simple du script user
+        if '=w' in best_url and '-h' in best_url:
+             best_url = re.sub(r'=w\d+-h\d+', '=w1200-h1200', best_url)
+        else:
+             # Fallback pour d'autres formats YT
+             best_url = re.sub(r'w\d+-h\d+', 'w1200-h1200', best_url)
+
+    return best_url
+
+# On garde l'ancienne fonction pour compatibilité, mais elle utilise la nouvelle logique si possible
 def get_hq_yt_image(url):
-    """Transforme une URL de miniature YT standard en version HD Carrée."""
     if not url: return 'https://placehold.co/300x300/1a1a1a/666666?text=Music'
-    return re.sub(r'w\d+-h\d+(-l\d+)?', 'w600-h600-l100', url)
+    if '=w' in url: return re.sub(r'=w\d+-h\d+', '=w1200-h1200', url)
+    return re.sub(r'w\d+-h\d+(-l\d+)?', 'w1200-h1200-l100', url)
 
 def ms_to_lrc(ms):
     """Convertit des millisecondes en format timestamp LRC [mm:ss.xx]"""
@@ -361,7 +404,7 @@ def try_resolve_track(title, artist):
 @app.route('/radio_queue')
 def get_radio_queue():
     """
-    Récupère la file d'attente complète "Watch Next" de YouTube Music.
+    Récupère la file d'attente complète "Watch Next" de YouTube Music avec Images HD.
     """
     artist = request.args.get('artist')
     title = request.args.get('title')
@@ -400,19 +443,22 @@ def get_radio_queue():
             artist_name = artists[0].get("name") if artists else "Inconnu"
             album_name = t.get("album", {}).get("name") if t.get("album") else None
             
-            # Formatage pour le frontend (Compatible 'yt_lazy' -> resolve_stream)
-            img_url = "https://placehold.co/300x300/1a1a1a/666666?text=Music"
-            if t.get("thumbnails"):
-                img_url = get_hq_yt_image(t["thumbnails"][-1]["url"])
+            # UTILISATION DE LA FONCTION HD
+            img_url = extract_thumbnail_hd(t)
+            
+            # Gestion de la durée (YT renvoie parfois une string "3:45", parfois des secondes)
+            duration = t.get("duration") or t.get("length")
+            # Si c'est une string "mm:ss", on la garde telle quelle ou on la convertit si nécessaire
+            # Pour l'instant, on la passe, le frontend gérera ou ignorera
                 
             follow_tracks.append({
-                "id": t.get("videoId"), # ID temporaire YT
+                "id": t.get("videoId"),
                 "title": t.get("title"),
                 "performer": { "name": artist_name },
                 "album": { "title": album_name, "image": { "large": img_url } },
                 "img": img_url,
-                "duration": t.get("duration_seconds", 0) or t.get("lengthSeconds", 0),
-                "source": "yt_lazy", # Marqueur pour résolution côté client
+                "duration": duration,
+                "source": "yt_lazy",
                 "isRadio": True
             })
             
