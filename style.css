@@ -359,7 +359,7 @@ body.zen-active.zen-idle {
 .sidebar { 
     background: var(--glass-bg); border-radius: 24px; border: 1px solid var(--glass-border);
     display: flex; flex-direction: column; align-items: center; padding: 40px 0; 
-    gap: 25px; /* ESPACEMENT RÉDUIT (Avant: 40px) */
+    gap: 15px; /* ESPACEMENT RÉDUIT (Avant: 25px) */
     z-index: 200;
     transition: opacity 0.5s;
 }

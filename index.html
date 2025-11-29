@@ -134,6 +134,7 @@
             <div class="nav-item" onclick="showFavorites()" title="Favoris"><i class="fas fa-heart"></i></div>
             <div class="nav-item" onclick="showHistory()" title="Historique"><i class="fas fa-history"></i></div>
             <div class="nav-item" onclick="showPlaylists()" title="Mes Playlists"><i class="fas fa-list"></i></div>
+            <div class="nav-item" onclick="showQueue()" title="File d'attente"><i class="fas fa-list-ol"></i></div>
             <div class="nav-item" onclick="showWeeklyTop()" title="Top 10 Semaine"><i class="fas fa-trophy"></i></div>
             <div class="nav-item lyrics-btn" onclick="toggleLyrics()" title="Paroles (V)"><i class="fas fa-microphone-alt"></i></div>
             <div class="nav-item" onclick="startBlindTest()" title="Blind Test"><i class="fas fa-gamepad"></i></div>
@@ -1066,6 +1067,28 @@
                 showToast("Erreur récupération Top 10"); 
             } 
         }
+        
+        function showQueue() {
+            resetNavStack();
+            showTracks(); // Switch to track view
+            document.getElementById('searchBarContainer').style.display = 'none'; // Hide search bar for queue view
+            document.getElementById('viewTitle').innerText = "File d'attente 🎵";
+            
+            if (!tracks || tracks.length === 0) {
+                document.getElementById('trackGrid').innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:50px;color:#555;">La file d\'attente est vide.</div>';
+                return;
+            }
+            
+            // Render existing tracks variable
+            renderGrid(tracks, false, "File d'attente vide"); 
+            
+            // Highlight current track is already handled by renderGrid -> updateActiveCard(), but let's make sure it scrolls to it.
+            setTimeout(() => {
+                const activeEl = document.querySelector('.track-card.active-track');
+                if (activeEl) activeEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }, 100);
+        }
+
         window.onpopstate = async (e) => { const p=new URLSearchParams(window.location.search); if(p.get('artist_profile')) await openArtistProfile(p.get('artist_profile')); else if(p.get('artist')) await openArtist(p.get('artist')); else if(p.get('album')) await openAlbum(p.get('album'),p.get('source')); else if(p.get('q')) {document.getElementById('searchInput').value=p.get('q'); await performSearch();} else goHome(false); };
         window.onload = async () => { 
             loadLocalSettings(); 
