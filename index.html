@@ -631,13 +631,31 @@
         function renderQueueList() {
             const list = document.getElementById('queueList');
             list.innerHTML = '';
-            if (!tracks || tracks.length === 0) {
-                list.innerHTML = '<div style="text-align:center; padding:20px; color:#666;">Vide</div>';
+            
+            // Calcul des pistes restantes
+            const remainingTracks = tracks.slice(currentIndex + 1);
+
+            if (remainingTracks.length === 0) {
+                list.innerHTML = '<div style="text-align:center; padding:30px; color:#666; font-size:14px;">Fin de la lecture.<br><span style="font-size:12px; opacity:0.7;">La radio automatique se lancera ensuite.</span></div>';
                 return;
             }
-            tracks.forEach((t, i) => {
+            
+            // Header "À suivre"
+            const header = document.createElement('div');
+            header.style.padding = '0 10px 10px 10px';
+            header.style.fontSize = '12px';
+            header.style.color = 'var(--primary)';
+            header.style.fontWeight = 'bold';
+            header.style.textTransform = 'uppercase';
+            header.innerText = `À suivre (${remainingTracks.length})`;
+            list.appendChild(header);
+
+            remainingTracks.forEach((t, index) => {
+                // L'index réel dans le tableau 'tracks' est : currentIndex + 1 + index
+                const realIndex = currentIndex + 1 + index;
+                
                 const el = document.createElement('div');
-                el.className = `queue-item ${i === currentIndex ? 'current' : ''}`;
+                el.className = 'queue-item';
                 
                 let img = t.img || (t.album ? t.album.image.large : null) || 'https://placehold.co/40x40/222/666?text=M';
                 if(t.source === 'subsonic' && !img.startsWith('http')) {
@@ -654,19 +672,13 @@
                         <div class="queue-title">${t.title}</div>
                         <div class="queue-artist">${artist}</div>
                     </div>
-                    ${i === currentIndex ? '<i class="fas fa-volume-up playing-icon-small"></i>' : ''}
                 `;
                 el.onclick = () => {
-                    loadTrack(i);
-                    renderQueueList(); 
+                    loadTrack(realIndex);
+                    // Le rafraichissement se fait dans loadTrack
                 };
                 list.appendChild(el);
             });
-            
-            setTimeout(() => {
-                const currentEl = list.querySelector('.current');
-                if (currentEl) currentEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }, 100);
         }
         
         function resetLyricsState() { lyricsData = []; firstLineTime = null; const view = document.getElementById('lyricsView'); view.innerHTML = '<div style="margin-top: 100px; color: #888; animation: pulseText 1.5s infinite;">Recherche des paroles...</div>'; document.getElementById('introContainer').style.display = 'none'; }
@@ -899,7 +911,7 @@
             } catch(e) { 
                 console.error(e);
                 if(!isBackground && currentIndex < tracks.length-1) loadTrack(currentIndex+1); 
-            } finally { isFetchingRadio = false; }
+            } finally { isFetchingFetchingRadio = false; }
         }
 
         function updateInterfaceInfo(t) {
