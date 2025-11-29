@@ -705,6 +705,7 @@ body.zen-active.zen-idle {
 }
 .queue-item:hover { background: rgba(255,255,255,0.1); }
 .queue-item.current { background: rgba(0, 210, 255, 0.15); border: 1px solid var(--primary); }
+.queue-item.played { opacity: 0.5; filter: grayscale(0.5); } 
 .queue-item img { width: 40px; height: 40px; border-radius: 6px; object-fit: cover; }
 .queue-info { display: flex; flex-direction: column; overflow: hidden; flex: 1; }
 .queue-title { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

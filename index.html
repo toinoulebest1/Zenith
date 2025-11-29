@@ -631,31 +631,19 @@
         function renderQueueList() {
             const list = document.getElementById('queueList');
             list.innerHTML = '';
-            
-            // Calcul des pistes restantes
-            const remainingTracks = tracks.slice(currentIndex + 1);
-
-            if (remainingTracks.length === 0) {
-                list.innerHTML = '<div style="text-align:center; padding:30px; color:#666; font-size:14px;">Fin de la lecture.<br><span style="font-size:12px; opacity:0.7;">La radio automatique se lancera ensuite.</span></div>';
+            if (!tracks || tracks.length === 0) {
+                list.innerHTML = '<div style="text-align:center; padding:20px; color:#666;">Vide</div>';
                 return;
             }
             
-            // Header "À suivre"
-            const header = document.createElement('div');
-            header.style.padding = '0 10px 10px 10px';
-            header.style.fontSize = '12px';
-            header.style.color = 'var(--primary)';
-            header.style.fontWeight = 'bold';
-            header.style.textTransform = 'uppercase';
-            header.innerText = `À suivre (${remainingTracks.length})`;
-            list.appendChild(header);
-
-            remainingTracks.forEach((t, index) => {
-                // L'index réel dans le tableau 'tracks' est : currentIndex + 1 + index
-                const realIndex = currentIndex + 1 + index;
-                
+            tracks.forEach((t, i) => {
                 const el = document.createElement('div');
-                el.className = 'queue-item';
+                // Gestion des classes : joué, actuel
+                let itemClass = 'queue-item';
+                if (i === currentIndex) itemClass += ' current';
+                else if (i < currentIndex) itemClass += ' played';
+                
+                el.className = itemClass;
                 
                 let img = t.img || (t.album ? t.album.image.large : null) || 'https://placehold.co/40x40/222/666?text=M';
                 if(t.source === 'subsonic' && !img.startsWith('http')) {
@@ -672,13 +660,20 @@
                         <div class="queue-title">${t.title}</div>
                         <div class="queue-artist">${artist}</div>
                     </div>
+                    ${i === currentIndex ? '<i class="fas fa-volume-up playing-icon-small"></i>' : ''}
                 `;
                 el.onclick = () => {
-                    loadTrack(realIndex);
-                    // Le rafraichissement se fait dans loadTrack
+                    loadTrack(i);
+                    renderQueueList(); 
                 };
                 list.appendChild(el);
             });
+            
+            // Scroll automatique vers le titre en cours
+            setTimeout(() => {
+                const currentEl = list.querySelector('.current');
+                if (currentEl) currentEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }, 100);
         }
         
         function resetLyricsState() { lyricsData = []; firstLineTime = null; const view = document.getElementById('lyricsView'); view.innerHTML = '<div style="margin-top: 100px; color: #888; animation: pulseText 1.5s infinite;">Recherche des paroles...</div>'; document.getElementById('introContainer').style.display = 'none'; }
@@ -746,9 +741,9 @@
             updateLikeButtonState();
             setTimeout(() => { if(isPlaying && currentTrackId === nextTrack.id) saveTrackToHistory(nextTrack); }, 10000);
             
-            if (isRadioActive && index === tracks.length - 1 && !isFetchingRadio) { 
-                // Lancement immédiat de la recherche pour la suite
-                setTimeout(() => { if(currentIndex === tracks.length -1) triggerRadio(true); }, 100);
+            // LOGIQUE DE RADIO : Si on est sur le dernier titre, on charge la suite immédiatement
+            if (index === tracks.length - 1 && !isFetchingRadio) { 
+                triggerRadio(true);
             }
 
             // Déclenche la lecture après le setup du crossfade
@@ -906,12 +901,15 @@
                     if (!isBackground) { 
                         loadTrack(tracks.length - 1); 
                         setTimeout(() => div.scrollIntoView({behavior: "smooth", block: "center"}), 100); 
+                    } else {
+                        // Rafraîchir la file d'attente pour voir le nouveau titre ajouté
+                        if(document.getElementById('queuePanel').classList.contains('active')) renderQueueList();
                     }
                 }
             } catch(e) { 
                 console.error(e);
                 if(!isBackground && currentIndex < tracks.length-1) loadTrack(currentIndex+1); 
-            } finally { isFetchingFetchingRadio = false; }
+            } finally { isFetchingRadio = false; }
         }
 
         function updateInterfaceInfo(t) {
