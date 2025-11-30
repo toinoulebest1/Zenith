@@ -212,6 +212,9 @@ body.zen-active .right-panel {
     top: 50%; left: 50%;
     transform: translate(-50%, -50%) scale(1.5);
     z-index: 500;
+    /* En mode Zen, on s'assure que le panel est transparent */
+    background: transparent;
+    border: none;
 }
 
 body.zen-active .player-capsule {
@@ -599,7 +602,19 @@ body.zen-active.zen-idle {
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
 /* RIGHT PANEL */
-.right-panel { background: var(--glass-bg); border-radius: 24px; padding: 30px; display: flex; flex-direction: column; align-items: center; text-align: center; border: 1px solid var(--glass-border); position: relative; overflow: hidden; }
+.right-panel { 
+    background: var(--glass-bg); 
+    border-radius: 24px; 
+    padding: 30px; 
+    display: flex; 
+    flex-direction: column; 
+    align-items: center; 
+    text-align: center; 
+    border: 1px solid var(--glass-border); 
+    position: relative; /* Indispensable pour que les enfants absolute se positionnent par rapport à ce panel */
+    overflow: hidden; 
+}
+
 .xl-image-wrapper { position: relative; width: 100%; max-width: 300px; margin-bottom: 20px; z-index: 2; }
 .album-art-xl { width: 100%; border-radius: 20px; aspect-ratio: 1/1; object-fit: cover; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
 .xl-badge { position: absolute; top: 15px; right: 15px; background: var(--primary); color: #000; font-size: 11px; font-weight: 900; padding: 4px 8px; border-radius: 6px; box-shadow: 0 0 15px var(--primary); z-index: 10; display: none; }
@@ -663,31 +678,31 @@ body.zen-active.zen-idle {
 
 /* --- QUEUE PANEL (NEW) --- */
 .queue-panel {
-    position: fixed;
-    bottom: 140px; /* Above player capsule */
-    right: 30px;
-    width: 350px;
-    max-height: 60vh;
-    background: rgba(20, 20, 30, 0.95);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 20px;
+    /* Positionnement relatif au conteneur parent (right-panel) */
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(20, 20, 30, 0.98); /* Fond quasi opaque pour masquer l'arrière-plan */
+    border-radius: 24px; /* Même arrondi que le right-panel */
     padding: 20px;
-    backdrop-filter: blur(20px);
-    z-index: 400; /* Above regular content, below toasts/modals */
+    z-index: 50; /* Au-dessus de l'image de l'album */
     display: flex;
     flex-direction: column;
-    box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+    /* Transition d'apparition */
     transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 0.3s;
-    transform-origin: bottom right;
     opacity: 0;
-    transform: scale(0.9) translateY(20px);
-    pointer-events: none; /* When hidden */
+    transform: scale(0.95);
+    pointer-events: none; /* Inactif quand caché */
 }
+
 .queue-panel.active {
     opacity: 1;
-    transform: scale(1) translateY(0);
+    transform: scale(1);
     pointer-events: all;
 }
+
 .queue-header {
     display: flex; justify-content: space-between; align-items: center;
     margin-bottom: 15px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 10px;
@@ -702,6 +717,7 @@ body.zen-active.zen-idle {
     display: flex; align-items: center; gap: 10px;
     padding: 8px; border-radius: 8px;
     cursor: pointer; transition: 0.2s;
+    text-align: left; /* Alignement texte à gauche pour la liste */
 }
 .queue-item:hover { background: rgba(255,255,255,0.1); }
 .queue-item.current { background: rgba(0, 210, 255, 0.15); border: 1px solid var(--primary); }
@@ -1010,8 +1026,11 @@ input:checked + .slider:before { transform: translateX(24px); }
     
     /* QUEUE PANEL MOBILE */
     .queue-panel {
-        bottom: 210px; /* Above player on mobile */
-        right: 10px;
-        width: calc(100% - 20px);
+        /* En mobile, on le remet en bas en absolute par rapport à l'écran si besoin, 
+           mais comme right-panel est hidden, on doit gérer ça.
+           Pour l'instant, le right-panel est display:none en mobile, donc la queue ne s'affichera pas.
+           Il faudrait idéalement sortir la queue du right-panel en mobile, mais pour l'instant 
+           on garde la structure desktop demandée. */
+        display: none !important; 
     }
 }

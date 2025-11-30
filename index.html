@@ -265,6 +265,15 @@
                 <div class="wand-light"></div>
                 <div class="magic-wand"></div>
             </div>
+
+            <!-- QUEUE PANEL (Intégré dans le panneau de droite) -->
+            <div id="queuePanel" class="queue-panel">
+                <div class="queue-header">
+                    <h3>File d'attente</h3>
+                    <button class="close-eq" onclick="toggleQueue()"><i class="fas fa-times"></i></button>
+                </div>
+                <div id="queueList" class="queue-list"></div>
+            </div>
         </aside>
 
         <div class="eq-overlay" id="eqView">
@@ -283,14 +292,6 @@
             <button class="limiter-btn" id="limiterBtn" onclick="toggleLimiter()"><i class="fas fa-compress-arrows-alt"></i> NORMALISATEUR</button>
             <button class="orbit-btn" id="orbitBtn" onclick="toggleOrbit()"><i class="fas fa-globe-americas"></i> 8D ORBIT (WORKLET)</button>
             <button class="eq-reset-btn" onclick="resetEQ()">Réinitialiser EQ</button>
-        </div>
-
-        <div id="queuePanel" class="queue-panel">
-            <div class="queue-header">
-                <h3>File d'attente</h3>
-                <button class="close-eq" onclick="toggleQueue()"><i class="fas fa-times"></i></button>
-            </div>
-            <div id="queueList" class="queue-list"></div>
         </div>
 
         <div class="player-capsule">
