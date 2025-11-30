@@ -727,6 +727,7 @@ body.zen-active.zen-idle {
 }
 .queue-list {
     overflow-y: auto; flex: 1;
+    position: relative; /* CRITICAL: Enables correct offsetTop calculation for children */
 }
 .queue-list::-webkit-scrollbar { width: 5px; }
 .queue-list::-webkit-scrollbar-thumb { background: #555; border-radius: 3px; }

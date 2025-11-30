@@ -158,7 +158,7 @@
                     <option value="playlist">Playlists</option> 
                 </select>
                 <input type="text" id="searchInput" class="search-input" placeholder="Rechercher...">
-                <button class="search-btn" id="btnSearch">GO</button>
+                <button class="search-btn" id="btnSearch" onclick="performSearch()">GO</button>
             </div>
 
             <div class="track-view" id="trackView">
@@ -658,7 +658,11 @@
             
             setTimeout(() => {
                 const currentEl = list.querySelector('.current');
-                if (currentEl) currentEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                if (currentEl) {
+                    // Calcul du scroll pour centrer l'élément sans affecter le parent
+                    const targetScroll = currentEl.offsetTop - (list.clientHeight / 2) + (currentEl.clientHeight / 2);
+                    list.scrollTo({ top: targetScroll, behavior: 'smooth' });
+                }
             }, 100);
         }
         
