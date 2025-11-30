@@ -119,51 +119,72 @@ def fix_qobuz_title(track):
 
 def extract_thumbnail_hd(track):
     """
-    Récupère la miniature, la trie pour avoir la plus grande,
-    et force la Haute Définition via l'URL (1200x1200).
+    Récupère la miniature de manière robuste (supporte thumbnail, thumbnails, liste ou dict)
+    et force la HD.
     """
     thumbs = []
+    
+    # Recherche dans les clés possibles
+    for key in ["thumbnails", "thumbnail"]:
+        if key in track and track[key]:
+            data = track[key]
+            if isinstance(data, list):
+                thumbs = data
+                break
+            elif isinstance(data, dict):
+                # Parfois c'est imbriqué
+                if "thumbnails" in data:
+                    thumbs = data["thumbnails"]
+                    break
+                else:
+                    # Ou c'est un dict unique
+                    thumbs = [data]
+                    break
+            elif isinstance(data, str):
+                # C'est une URL directe
+                return get_hq_yt_image(data)
 
-    # 1. Extraction robuste de la liste des miniatures
-    if "thumbnails" in track:
-        thumbs = track["thumbnails"]
-    elif "thumbnail" in track:
-        data = track["thumbnail"]
-        if isinstance(data, list):
-            thumbs = data
-        elif isinstance(data, dict) and "thumbnails" in data:
-            thumbs = data["thumbnails"]
-
-    # Si on n'a rien trouvé, on renvoie une image par défaut
-    if not thumbs or not isinstance(thumbs, list):
+    if not thumbs:
         return 'https://placehold.co/300x300/1a1a1a/666666?text=Music'
 
-    # 2. TRI : On classe du plus petit au plus grand (basé sur la largeur "width")
+    # Tri pour avoir la plus grande image
     try:
         thumbs.sort(key=lambda x: x.get("width", 0))
-    except:
-        pass 
+    except: pass 
 
-    # 3. Récupération de l'URL la plus grande
+    # Récupération de l'URL la plus grande
     best_url = thumbs[-1].get("url")
+    if not best_url:
+        return 'https://placehold.co/300x300/1a1a1a/666666?text=Music'
 
-    # 4. ASTUCE HD : Modification de l'URL
-    if best_url:
-        # Regex qui cherche =w<chiffres>-h<chiffres> et remplace par =w1200-h1200
-        # On essaie d'abord la méthode simple du script user
-        if '=w' in best_url and '-h' in best_url:
-             best_url = re.sub(r'=w\d+-h\d+', '=w1200-h1200', best_url)
-        else:
-             # Fallback pour d'autres formats YT
-             best_url = re.sub(r'w\d+-h\d+', 'w1200-h1200', best_url)
+    return get_hq_yt_image(best_url)
 
-    return best_url
-
-# On garde l'ancienne fonction pour compatibilité, mais elle utilise la nouvelle logique si possible
 def get_hq_yt_image(url):
+    """Force la haute résolution sur une URL YouTube/Google"""
     if not url: return 'https://placehold.co/300x300/1a1a1a/666666?text=Music'
-    if '=w' in url: return re.sub(r'=w\d+-h\d+', '=w1200-h1200', url)
+    
+    # Remplacement standard pour les URL googleusercontent
+    # Remplace w<N>-h<N> par w1200-h1200
+    if '=w' in url:
+        return re.sub(r'=w\d+-h\d+', '=w1200-h1200', url)
+    
+    # Format alternatif
     return re.sub(r'w\d+-h\d+(-l\d+)?', 'w1200-h1200-l100', url)
+
+def parse_duration(d):
+    """Convertit une durée 'MM:SS' ou int en secondes"""
+    if not d: return 0
+    if isinstance(d, int) or isinstance(d, float): return int(d)
+    if isinstance(d, str):
+        if ':' in d:
+            try:
+                parts = d.split(':')
+                if len(parts) == 2:
+                    return int(parts[0]) * 60 + int(parts[1])
+                elif len(parts) == 3:
+                    return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+            except: pass
+    return 0
 
 def ms_to_lrc(ms):
     """Convertit des millisecondes en format timestamp LRC [mm:ss.xx]"""
@@ -447,9 +468,8 @@ def get_radio_queue():
             img_url = extract_thumbnail_hd(t)
             
             # Gestion de la durée (YT renvoie parfois une string "3:45", parfois des secondes)
-            duration = t.get("duration") or t.get("length")
-            # Si c'est une string "mm:ss", on la garde telle quelle ou on la convertit si nécessaire
-            # Pour l'instant, on la passe, le frontend gérera ou ignorera
+            duration_raw = t.get("duration") or t.get("length")
+            duration_sec = parse_duration(duration_raw)
                 
             follow_tracks.append({
                 "id": t.get("videoId"),
@@ -457,7 +477,8 @@ def get_radio_queue():
                 "performer": { "name": artist_name },
                 "album": { "title": album_name, "image": { "large": img_url } },
                 "img": img_url,
-                "duration": duration,
+                "thumbnail": img_url,
+                "duration": duration_sec,
                 "source": "yt_lazy",
                 "isRadio": True
             })
