@@ -611,14 +611,34 @@ body.zen-active.zen-idle {
     align-items: center; 
     text-align: center; 
     border: 1px solid var(--glass-border); 
-    position: relative; /* Indispensable pour que les enfants absolute se positionnent par rapport à ce panel */
-    overflow: hidden; 
+    position: relative; 
+    overflow: hidden;
+    justify-content: flex-start; /* Important */
+}
+
+/* CONTAINER POUR L'IMAGE ET LES INFOS */
+.rp-header {
+    width: 100%;
+    flex: 0 0 auto; /* Ne rétrécit pas, ne grandit pas tout seul */
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    transition: 0.3s;
 }
 
 .xl-image-wrapper { position: relative; width: 100%; max-width: 300px; margin-bottom: 20px; z-index: 2; transition: 0.3s; }
 .album-art-xl { width: 100%; border-radius: 20px; aspect-ratio: 1/1; object-fit: cover; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
 .xl-badge { position: absolute; top: 15px; right: 15px; background: var(--primary); color: #000; font-size: 11px; font-weight: 900; padding: 4px 8px; border-radius: 6px; box-shadow: 0 0 15px var(--primary); z-index: 10; display: none; }
 .xl-title, .xl-artist { z-index: 2; position: relative; }
+
+/* ETAT OUVERT : On réduit l'image */
+.right-panel.queue-open .xl-image-wrapper {
+    max-width: 120px;
+    margin-bottom: 10px;
+}
+.right-panel.queue-open {
+    padding: 20px; /* Moins de padding pour gagner de la place */
+}
 
 /* PLAYER CAPSULE */
 .player-capsule { position: absolute; bottom: 25px; left: 50%; transform: translateX(-50%); width: 750px; height: 100px; background: #141416; border-radius: 25px; display: flex; align-items: center; justify-content: space-between; padding: 0 30px; box-shadow: 0 20px 50px rgba(0,0,0,0.9); border: 1px solid rgba(255,255,255,0.15); z-index: 100; }
@@ -678,11 +698,10 @@ body.zen-active.zen-idle {
 
 /* --- QUEUE PANEL (NEW) --- */
 .queue-panel {
-    /* Positionnement relative pour être dans le flux */
-    position: relative;
+    /* Flux normal (Static) pour qu'il pousse ou soit poussé, mais avec flex grow */
     width: 100%;
-    flex: 1; /* Prend l'espace restant */
-    min-height: 0; /* Permet le rétrécissement */
+    flex: 1 1 auto; /* Prend tout l'espace disponible restant */
+    min-height: 0; /* CRUCIAL pour que le scroll fonctionne dans un flex container */
     
     background: rgba(255, 255, 255, 0.03); 
     border-top: 1px solid rgba(255, 255, 255, 0.1);
@@ -694,20 +713,12 @@ body.zen-active.zen-idle {
     flex-direction: column;
     
     opacity: 0;
-    transform: translateY(20px);
-    transition: all 0.3s ease;
+    transition: opacity 0.3s;
 }
 
 .queue-panel.active {
     display: flex;
     opacity: 1;
-    transform: translateY(0);
-}
-
-/* Réduction de la taille de l'image quand la file est ouverte pour faire de la place */
-.right-panel.queue-open .xl-image-wrapper {
-    max-width: 150px;
-    transition: 0.3s;
 }
 
 .queue-header {
