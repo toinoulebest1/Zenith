@@ -254,7 +254,7 @@
             </div>
         </main>
 
-        <aside class="right-panel">
+        <aside class="right-panel" id="rightPanel">
             <div class="xl-image-wrapper">
                 <div id="xlBadge" class="xl-badge smooth-fade">HI-RES</div>
                 <img src="https://placehold.co/600x600/1a1a1a/444444?text=Zenith" id="xlArt" class="album-art-xl smooth-fade">
@@ -621,11 +621,15 @@
 
         function toggleQueue() {
             const p = document.getElementById('queuePanel');
+            const rp = document.getElementById('rightPanel');
+            
             if (p.classList.contains('active')) {
                 p.classList.remove('active');
+                if(rp) rp.classList.remove('queue-open');
             } else {
                 renderQueueList();
                 p.classList.add('active');
+                if(rp) rp.classList.add('queue-open');
             }
         }
 
@@ -1409,6 +1413,19 @@
                 syncLyricsUI();
             }
         });
+        
+        function toggleQueue() {
+            const p = document.getElementById('queuePanel');
+            const rp = document.getElementById('rightPanel'); // Make sure rightPanel has this ID in HTML
+            if (p.classList.contains('active')) {
+                p.classList.remove('active');
+                if(rp) rp.classList.remove('queue-open');
+            } else {
+                renderQueueList();
+                p.classList.add('active');
+                if(rp) rp.classList.add('queue-open');
+            }
+        }
     </script>
     <script src="shortcuts.js"></script>
 </body>

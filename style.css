@@ -615,7 +615,7 @@ body.zen-active.zen-idle {
     overflow: hidden; 
 }
 
-.xl-image-wrapper { position: relative; width: 100%; max-width: 300px; margin-bottom: 20px; z-index: 2; }
+.xl-image-wrapper { position: relative; width: 100%; max-width: 300px; margin-bottom: 20px; z-index: 2; transition: 0.3s; }
 .album-art-xl { width: 100%; border-radius: 20px; aspect-ratio: 1/1; object-fit: cover; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
 .xl-badge { position: absolute; top: 15px; right: 15px; background: var(--primary); color: #000; font-size: 11px; font-weight: 900; padding: 4px 8px; border-radius: 6px; box-shadow: 0 0 15px var(--primary); z-index: 10; display: none; }
 .xl-title, .xl-artist { z-index: 2; position: relative; }
@@ -678,29 +678,36 @@ body.zen-active.zen-idle {
 
 /* --- QUEUE PANEL (NEW) --- */
 .queue-panel {
-    /* Positionnement relatif au conteneur parent (right-panel) */
-    position: absolute;
-    top: 0;
-    left: 0;
+    /* Positionnement relative pour être dans le flux */
+    position: relative;
     width: 100%;
-    height: 100%;
-    background: rgba(20, 20, 30, 0.98); /* Fond quasi opaque pour masquer l'arrière-plan */
-    border-radius: 24px; /* Même arrondi que le right-panel */
-    padding: 20px;
-    z-index: 50; /* Au-dessus de l'image de l'album */
-    display: flex;
+    flex: 1; /* Prend l'espace restant */
+    min-height: 0; /* Permet le rétrécissement */
+    
+    background: rgba(255, 255, 255, 0.03); 
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    
+    margin-top: 20px;
+    padding-top: 15px;
+    
+    display: none; /* Caché par défaut */
     flex-direction: column;
-    /* Transition d'apparition */
-    transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 0.3s;
+    
     opacity: 0;
-    transform: scale(0.95);
-    pointer-events: none; /* Inactif quand caché */
+    transform: translateY(20px);
+    transition: all 0.3s ease;
 }
 
 .queue-panel.active {
+    display: flex;
     opacity: 1;
-    transform: scale(1);
-    pointer-events: all;
+    transform: translateY(0);
+}
+
+/* Réduction de la taille de l'image quand la file est ouverte pour faire de la place */
+.right-panel.queue-open .xl-image-wrapper {
+    max-width: 150px;
+    transition: 0.3s;
 }
 
 .queue-header {
