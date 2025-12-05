@@ -927,6 +927,15 @@
             document.getElementById('artistTopTracks').innerHTML = '<p style="text-align:center; padding:20px;">Chargement des titres...</p>'; 
             document.getElementById('artistAlbums').innerHTML = '<p style="text-align:center; padding:20px;">Chargement des albums...</p>';
             
+            // Réinitialisation de la bio avant chargement
+            const bioEl = document.getElementById('artistProfileBio');
+            bioEl.style.display = 'none';
+            bioEl.innerText = '';
+            
+            // Suppression du bouton lire la suite s'il existe
+            const prevBtn = document.getElementById('bioReadMoreBtn');
+            if(prevBtn) prevBtn.remove();
+            
             try { 
                 const res = await fetch(`${API_BASE}/artist_bio?name=${encodeURIComponent(name)}`); 
                 const data = await res.json(); 
@@ -939,10 +948,38 @@
                 }
                 
                 // AFFICHAGE BIO
-                const bioEl = document.getElementById('artistProfileBio');
+                // Nettoyage bouton précédent
+                if(document.getElementById('bioReadMoreBtn')) document.getElementById('bioReadMoreBtn').remove();
+
                 if (data.bio) {
                     bioEl.innerHTML = data.bio;
                     bioEl.style.display = 'block';
+                    
+                    // Logique de troncature
+                    if (data.bio.length > 250) { // Seuil de caractères
+                        bioEl.classList.add('bio-collapsed');
+                        
+                        const btn = document.createElement('button');
+                        btn.id = 'bioReadMoreBtn';
+                        btn.className = 'bio-readmore-btn';
+                        btn.innerHTML = 'Lire la suite <i class="fas fa-chevron-down"></i>';
+                        
+                        btn.onclick = () => {
+                            const isCollapsed = bioEl.classList.contains('bio-collapsed');
+                            if(isCollapsed) {
+                                bioEl.classList.remove('bio-collapsed');
+                                btn.innerHTML = 'Réduire <i class="fas fa-chevron-up"></i>';
+                            } else {
+                                bioEl.classList.add('bio-collapsed');
+                                btn.innerHTML = 'Lire la suite <i class="fas fa-chevron-down"></i>';
+                            }
+                        };
+                        
+                        // Ajout du bouton après la bio
+                        bioEl.parentNode.appendChild(btn);
+                    } else {
+                        bioEl.classList.remove('bio-collapsed');
+                    }
                 } else {
                     bioEl.style.display = 'none';
                 }

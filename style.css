@@ -659,7 +659,35 @@ body.zen-active.zen-idle {
     font-size: 15px; line-height: 1.6; color: #ddd; 
     max-width: 600px; margin: 0 auto;
     text-shadow: 0 2px 4px rgba(0,0,0,0.8);
+    transition: max-height 0.3s ease;
 }
+
+/* BIO COLLAPSED STATE (New) */
+.artist-bio.bio-collapsed {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    mask-image: linear-gradient(to bottom, black 50%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to bottom, black 50%, transparent 100%);
+}
+
+.bio-readmore-btn {
+    background: transparent;
+    border: 1px solid rgba(255,255,255,0.2);
+    color: white;
+    padding: 5px 15px;
+    border-radius: 15px;
+    margin-top: 10px;
+    cursor: pointer;
+    font-size: 12px;
+    transition: 0.2s;
+}
+.bio-readmore-btn:hover {
+    background: rgba(255,255,255,0.1);
+    border-color: var(--primary);
+}
+
 
 .artist-content-container {
     padding: 20px 40px;
