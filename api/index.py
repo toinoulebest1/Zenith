@@ -1,3 +1,4 @@
+LRCLib Sync > YouTube Plain > LRCLib Plain).">
 import sys
 import os
 import asyncio
@@ -15,7 +16,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.concurrency import run_in_threadpool
 
 # Imports locaux (Logique métier existante)
-# On utilise try/except pour gérer les différences d'import selon l'environnement (Vercel vs Local)
 try:
     from qobuz_api import QobuzClient, get_app_credentials
     from lyrics_search import LyricsSearcher 
@@ -173,6 +173,10 @@ def fetch_subsonic_raw(endpoint, params):
 # On les définit normalement, et on les appellera via run_in_threadpool dans les routes.
 
 def sync_search_yt_lyrics(title, artist):
+    """
+    Cherche les paroles sur YouTube Music.
+    Retourne un dictionnaire {'type': 'synced'|'plain', 'lyrics': str} ou None.
+    """
     query = f"{title} {artist}"
     try:
         results = yt.search(query, filter="songs", limit=1)
@@ -181,28 +185,33 @@ def sync_search_yt_lyrics(title, artist):
         watch = yt.get_watch_playlist(video_id)
         if not watch or 'lyrics' not in watch or not watch['lyrics']: return None
         
-        lyrics_data = None
-        try: lyrics_data = yt.get_lyrics(watch['lyrics'], timestamps=True)
-        except: pass
-        if not lyrics_data: 
-            try: lyrics_data = yt.get_lyrics(watch['lyrics'])
-            except: pass
-        
-        if not lyrics_data or not lyrics_data.get('lyrics'): return None
-        
-        content = lyrics_data['lyrics']
-        if isinstance(content, list):
-            lines = []
-            for line in content:
-                try:
+        # 1. Tentative Sync (Priorité)
+        try:
+            lyrics_data = yt.get_lyrics(watch['lyrics'], timestamps=True)
+            if lyrics_data and isinstance(lyrics_data.get('lyrics'), list):
+                lines = []
+                for line in lyrics_data['lyrics']:
                     txt = line.get('text', line.get('line', ''))
                     # Gestion timestamp flexible
                     t = line.get('start_time', line.get('seconds', line.get('startTime')))
                     if t is not None: lines.append(f"{ms_to_lrc(float(t)*1000)} {txt}")
-                except: continue
-            return "\n".join(lines) if lines else None
+                
+                if lines:
+                    return {"type": "synced", "lyrics": "\n".join(lines)}
+        except Exception:
+            pass
+
+        # 2. Tentative Plain (Fallback si pas de timestamps)
+        try:
+            lyrics_data = yt.get_lyrics(watch['lyrics']) # timestamps=False par défaut
+            if lyrics_data and lyrics_data.get('lyrics'):
+                return {"type": "plain", "lyrics": lyrics_data['lyrics']}
+        except Exception:
+            pass
+            
         return None
-    except: return None
+    except Exception:
+        return None
 
 def sync_search_subsonic(query, limit=20):
     data = fetch_subsonic_raw("search3.view", {'query': query, 'songCount': limit, 'albumCount': 0, 'artistCount': 0})
@@ -529,17 +538,34 @@ async def get_subsonic_cover(cover_id: str):
 
 @app.get('/lyrics')
 async def get_lyrics(artist: str, title: str, album: str = None, duration: str = None):
-    # 1. YouTube (Synced)
-    yt_l = await run_in_threadpool(sync_search_yt_lyrics, title, artist)
-    if yt_l: return JSONResponse({"type": "synced", "lyrics": yt_l, "source": "YouTube"})
+    # 1. YouTube (Synced ou Plain)
+    # On récupère d'abord YouTube, car l'utilisateur les préfère
+    yt_res = await run_in_threadpool(sync_search_yt_lyrics, title, artist)
     
-    # 2. LRCLib
+    # Si YouTube a du synchronisé, c'est le jackpot, on renvoie direct
+    if yt_res and yt_res['type'] == 'synced':
+        return JSONResponse({"type": "synced", "lyrics": yt_res['lyrics'], "source": "YouTube"})
+    
+    # 2. LRCLib (Synced)
+    # Si YouTube n'a pas de sync, on regarde si LRCLib en a (car sync > plain)
     dur = parse_duration(duration)
+    lrc_plain, lrc_synced = None, None
     try:
-        plain, synced = await run_in_threadpool(lyrics_engine.search_lyrics, artist, title, album, dur)
-        if synced: return JSONResponse({"type": "synced", "lyrics": synced, "source": "LRCLib"})
-        if plain: return JSONResponse({"type": "plain", "lyrics": plain, "source": "LRCLib"})
-    except: pass
+        lrc_plain, lrc_synced = await run_in_threadpool(lyrics_engine.search_lyrics, artist, title, album, dur)
+    except Exception:
+        pass
+    
+    if lrc_synced:
+        return JSONResponse({"type": "synced", "lyrics": lrc_synced, "source": "LRCLib"})
+        
+    # 3. Fallback Plain (YouTube vs LRCLib)
+    # Si aucun n'a de sync, on préfère le texte simple de YouTube
+    if yt_res and yt_res['type'] == 'plain':
+         return JSONResponse({"type": "plain", "lyrics": yt_res['lyrics'], "source": "YouTube"})
+         
+    # Sinon texte simple de LRCLib
+    if lrc_plain:
+        return JSONResponse({"type": "plain", "lyrics": lrc_plain, "source": "LRCLib"})
     
     raise HTTPException(404, "No lyrics")
 
