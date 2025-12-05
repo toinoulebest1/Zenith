@@ -1,27 +1,24 @@
-# Utiliser une image Python légère
-FROM python:3.10-slim
+# Utilisation d'une image Python légère
+FROM python:3.9-slim
 
-# Définir le dossier de travail
+# Installation des dépendances système nécessaires pour certaines libs (comme lxml ou audio)
+RUN apt-get update && apt-get install -y \
+    gcc \
+    libasound2-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Dossier de travail
 WORKDIR /app
 
-# Installation des dépendances système
-RUN apt-get update && apt-get install -y gcc && rm -rf /var/lib/apt/lists/*
-
-# Copie des dépendances
+# Copie des requirements et installation
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copie du code source
+# Copie du reste du projet
 COPY . .
 
-# Configuration de l'environnement
-# PORT 80 est le standard pour le web
-ENV PORT=80
-ENV FLASK_APP=api/index.py
-ENV PYTHONPATH=/app/api
+# Exposition du port
+EXPOSE 5000
 
-# Exposition du port 80
-EXPOSE 80
-
-# Commande de démarrage sur le port 80
-CMD ["gunicorn", "-w", "4", "-b", "0.0.0.0:80", "api.index:app"]
+# Lancement du serveur via le script server.py (qui lance Uvicorn)
+CMD ["python", "server.py"]
