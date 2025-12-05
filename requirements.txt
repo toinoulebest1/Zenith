@@ -1,6 +1,10 @@
-flask
-flask-cors
+fastapi
+uvicorn
+httpx
+python-multipart
+aiofiles
 requests
 ytmusicapi
-gunicorn
 rapidfuzz
+beautifulsoup4
+lxml

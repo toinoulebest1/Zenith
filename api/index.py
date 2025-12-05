@@ -1,35 +1,34 @@
 import sys
 import os
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 
-# 1. Configuration des chemins pour Docker/Coolify
-# On ajoute le dossier courant au path pour que les imports (qobuz_api, etc.) fonctionnent
+# Configuration des chemins
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(current_dir)
-
-# On définit la racine du projet (un niveau au-dessus de api/) pour trouver index.html
 PROJECT_ROOT = os.path.abspath(os.path.join(current_dir, '..'))
 
-from flask import Flask, jsonify, redirect, request, send_file, Response, stream_with_context, send_from_directory
-from flask_cors import CORS
+from fastapi import FastAPI, Request, Response, HTTPException
+from fastapi.responses import JSONResponse, RedirectResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.concurrency import run_in_threadpool
 
-# Imports locaux (maintenant que le sys.path est configuré)
+# Imports locaux (Logique métier existante)
 from qobuz_api import QobuzClient, get_app_credentials
 from lyrics_search import LyricsSearcher 
 
 import logging
 import random
 import requests
-import json 
-from pathlib import Path 
 import re
 import urllib.parse
 import hashlib
 import string
 import unicodedata 
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from ytmusicapi import YTMusic
 
-# Tentative d'import pour la comparaison floue (Fuzzy Matching)
+# Tentative d'import pour rapidfuzz
 try:
     from rapidfuzz import fuzz
     FUZZ_AVAILABLE = True
@@ -41,24 +40,29 @@ USER_ID = '7610812'
 TOKEN = 'wTJvd-7fc8haH3zdRrZYqcULUQ1wA6wJBLNmDkn38JaMrfRtHlaGpSVLHN0205rSQ23psXhJrnQNrRmEiGS-zw' 
 APP_ID = '798273057'
 
-# --- CONFIGURATION SUBSONIC ---
 SUBSONIC_BASE = "https://api.401658.xyz/rest/"
 SUBSONIC_USER = "toinoulebest"
 SUBSONIC_PASSWORD = "EbPNO8NRaEko" 
 SUBSONIC_CLIENT = "Feishin"
 SUBSONIC_VERSION = "1.13.0"
 
-# --- CONFIGURATION SUPABASE PROXY ---
 SUPABASE_PROXY_URL = "https://mzxfcvzqxgslyopkkaej.supabase.co/functions/v1/stream-proxy"
 
-app = Flask(__name__, static_folder=PROJECT_ROOT, static_url_path='')
-CORS(app)
+# --- INIT FASTAPI ---
+app = FastAPI(title="Zenith API", docs_url=None, redoc_url=None)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("ZenithServer")
+logger = logging.getLogger("ZenithAsync")
 
 lyrics_engine = LyricsSearcher()
-
-# --- INITIALISATION YTMUSIC ---
 yt = YTMusic()
 
 # --- CLIENT QOBUZ ---
@@ -76,7 +80,7 @@ class TokenQobuzClient(QobuzClient):
     def _make_session(self):
         s = requests.Session()
         s.headers.update({
-            "User-Agent": "Zenith Player",
+            "User-Agent": "Zenith Player (FastAPI)",
             "X-App-Id": self.id,
             "Content-Type": "application/json;charset=UTF-8"
         })
@@ -101,12 +105,6 @@ def clean_string(s):
     s = re.sub(r'[^a-z0-9]', '', s)
     return s
 
-def clean_title_for_search(title):
-    if not title: return ""
-    title = re.sub(r" ?[\(\[].*?[\)\]]", "", title)
-    title = re.split(r" feat\.| ft\.| with ", title, flags=re.IGNORECASE)[0]
-    return title.strip()
-
 def fix_qobuz_title(track):
     try:
         if 'version' in track and track['version']:
@@ -117,238 +115,112 @@ def fix_qobuz_title(track):
     except: pass
     return track
 
+def get_hq_yt_image(url):
+    if not url: return 'https://placehold.co/300x300/1a1a1a/666666?text=Music'
+    if '=w' in url: return re.sub(r'=w\d+-h\d+', '=w1200-h1200', url)
+    return re.sub(r'w\d+-h\d+(-l\d+)?', 'w1200-h1200-l100', url)
+
 def extract_thumbnail_hd(track):
-    """
-    Récupère la miniature de manière robuste (supporte thumbnail, thumbnails, liste ou dict)
-    et force la HD.
-    """
     thumbs = []
-    
-    # Recherche dans les clés possibles
     for key in ["thumbnails", "thumbnail"]:
         if key in track and track[key]:
             data = track[key]
-            if isinstance(data, list):
-                thumbs = data
-                break
+            if isinstance(data, list): thumbs = data; break
             elif isinstance(data, dict):
-                # Parfois c'est imbriqué
-                if "thumbnails" in data:
-                    thumbs = data["thumbnails"]
-                    break
-                else:
-                    # Ou c'est un dict unique
-                    thumbs = [data]
-                    break
-            elif isinstance(data, str):
-                # C'est une URL directe
-                return get_hq_yt_image(data)
-
-    if not thumbs:
-        return 'https://placehold.co/300x300/1a1a1a/666666?text=Music'
-
-    # Tri pour avoir la plus grande image
-    try:
-        thumbs.sort(key=lambda x: x.get("width", 0))
+                if "thumbnails" in data: thumbs = data["thumbnails"]; break
+                else: thumbs = [data]; break
+            elif isinstance(data, str): return get_hq_yt_image(data)
+    if not thumbs: return 'https://placehold.co/300x300/1a1a1a/666666?text=Music'
+    try: thumbs.sort(key=lambda x: x.get("width", 0))
     except: pass 
-
-    # Récupération de l'URL la plus grande
-    best_url = thumbs[-1].get("url")
-    if not best_url:
-        return 'https://placehold.co/300x300/1a1a1a/666666?text=Music'
-
-    return get_hq_yt_image(best_url)
-
-def get_hq_yt_image(url):
-    """Force la haute résolution sur une URL YouTube/Google"""
-    if not url: return 'https://placehold.co/300x300/1a1a1a/666666?text=Music'
-    
-    # Remplacement standard pour les URL googleusercontent
-    # Remplace w<N>-h<N> par w1200-h1200
-    if '=w' in url:
-        return re.sub(r'=w\d+-h\d+', '=w1200-h1200', url)
-    
-    # Format alternatif
-    return re.sub(r'w\d+-h\d+(-l\d+)?', 'w1200-h1200-l100', url)
+    return get_hq_yt_image(thumbs[-1].get("url"))
 
 def parse_duration(d):
-    """Convertit une durée 'MM:SS' ou int en secondes"""
     if not d: return 0
-    if isinstance(d, int) or isinstance(d, float): return int(d)
-    if isinstance(d, str):
-        if ':' in d:
-            try:
-                parts = d.split(':')
-                if len(parts) == 2:
-                    return int(parts[0]) * 60 + int(parts[1])
-                elif len(parts) == 3:
-                    return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
-            except: pass
+    if isinstance(d, (int, float)): return int(d)
+    if isinstance(d, str) and ':' in d:
+        parts = d.split(':')
+        if len(parts) == 2: return int(parts[0]) * 60 + int(parts[1])
+        elif len(parts) == 3: return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
     return 0
 
 def ms_to_lrc(ms):
-    """Convertit des millisecondes en format timestamp LRC [mm:ss.xx]"""
-    seconds = (ms / 1000)
-    minutes = int(seconds // 60)
-    rem_seconds = seconds % 60
-    return f"[{minutes:02d}:{rem_seconds:05.2f}]"
+    s = (ms / 1000); m = int(s // 60); rs = s % 60
+    return f"[{m:02d}:{rs:05.2f}]"
 
-def fetch_yt_synced_lyrics(title, artist):
-    """Récupère les paroles synchronisées depuis YouTube Music avec Logs détaillés"""
-    query = f"{title} {artist}"
-    logger.info(f"🔍 YT Lyrics: Recherche pour '{query}'")
-    
-    try:
-        results = yt.search(query, filter="songs", limit=1)
-        if not results:
-            logger.warning(f"❌ YT Lyrics: Aucun résultat de recherche pour '{query}'")
-            return None
-        
-        video_id = results[0]['videoId']
-        track_title = results[0].get('title', 'Inconnu')
-        logger.info(f"✅ YT Lyrics: Vidéo trouvée [{video_id}] - {track_title}")
-        
-        try:
-            watch = yt.get_watch_playlist(video_id)
-        except Exception as e:
-            logger.error(f"❌ YT Lyrics: Erreur lors de get_watch_playlist: {e}")
-            return None
-
-        if not watch or 'lyrics' not in watch or not watch['lyrics']:
-            logger.warning(f"❌ YT Lyrics: Pas d'ID de paroles disponible pour cette vidéo.")
-            return None
-            
-        lyrics_id = watch['lyrics']
-        logger.info(f"✅ YT Lyrics: ID Paroles trouvé [{lyrics_id}]")
-        
-        lyrics_data = None
-        try:
-            lyrics_data = yt.get_lyrics(lyrics_id, timestamps=True)
-        except TypeError:
-            logger.warning("⚠️ YT Lyrics: L'option timestamps=True n'est pas supportée.")
-        except Exception as e:
-            logger.error(f"⚠️ YT Lyrics: Erreur avec timestamps=True: {e}")
-
-        if not lyrics_data:
-            try:
-                lyrics_data = yt.get_lyrics(lyrics_id)
-            except Exception as e:
-                logger.error(f"❌ YT Lyrics: Erreur fallback: {e}")
-                return None
-        
-        if not lyrics_data: return None
-
-        lyrics_content = lyrics_data.get('lyrics')
-
-        if isinstance(lyrics_content, list):
-            lrc_lines = []
-            for i, line in enumerate(lyrics_content):
-                try:
-                    t = None
-                    txt = ""
-                    is_ms = False
-                    if hasattr(line, 'start_time') and hasattr(line, 'text'):
-                        t = line.start_time; txt = line.text; is_ms = True 
-                    elif isinstance(line, dict):
-                        t = line.get('start_time', line.get('seconds', line.get('startTime')))
-                        txt = line.get('text', line.get('line', ''))
-                        is_ms = False 
-                    
-                    if t is not None:
-                         val = float(t)
-                         final_ms = val if is_ms else (val * 1000)
-                         lrc_lines.append(f"{ms_to_lrc(final_ms)} {txt}")
-                except Exception as ex: continue
-            
-            if lrc_lines: return "\n".join(lrc_lines)
-
-        elif isinstance(lyrics_content, str): return None 
-        return None
-        
-    except Exception as e:
-        logger.error(f"💥 YT Lyrics: Exception non gérée: {e}")
-        return None
-
-# --- HELPERS SUBSONIC ---
+# --- SUBSONIC ---
 def get_subsonic_query_params():
     salt = ''.join(random.choices(string.ascii_letters + string.digits, k=6))
-    token_str = SUBSONIC_PASSWORD + salt
-    token = hashlib.md5(token_str.encode('utf-8')).hexdigest()
+    token = hashlib.md5((SUBSONIC_PASSWORD + salt).encode('utf-8')).hexdigest()
     return { 'u': SUBSONIC_USER, 's': salt, 't': token, 'v': SUBSONIC_VERSION, 'c': SUBSONIC_CLIENT, 'f': 'json' }
 
-def get_subsonic_track_details(track_id):
-    """Récupère les détails complets d'une musique Subsonic par ID"""
-    url = SUBSONIC_BASE + "getSong.view"
-    params = get_subsonic_query_params()
-    params['id'] = track_id
+def fetch_subsonic_raw(endpoint, params):
     try:
-        res = requests.get(url, params=params).json()
-        song = res['subsonic-response']['song']
-        return {
-            'id': song['id'],
-            'title': song['title'],
-            'performer': {'name': song['artist']},
-            'album': {'title': song.get('album', 'Album'), 'image': {'large': song.get('coverArt')}},
-            'duration': song.get('duration', 0),
-            'source': 'subsonic',
-            'maximum_bit_depth': 16
-        }
-    except Exception as e:
-        logger.error(f"Subsonic Details Error: {e}")
+        url = SUBSONIC_BASE + endpoint
+        p = get_subsonic_query_params()
+        p.update(params)
+        res = requests.get(url, params=p, timeout=5)
+        return res.json()
+    except: return {}
+
+# --- FONCTIONS SYNCHRONES (WRAPPED) ---
+# Ces fonctions utilisent des lib synchrones (requests, ytmusicapi).
+# On les définit normalement, et on les appellera via run_in_threadpool dans les routes.
+
+def sync_search_yt_lyrics(title, artist):
+    query = f"{title} {artist}"
+    try:
+        results = yt.search(query, filter="songs", limit=1)
+        if not results: return None
+        video_id = results[0]['videoId']
+        watch = yt.get_watch_playlist(video_id)
+        if not watch or 'lyrics' not in watch or not watch['lyrics']: return None
+        
+        lyrics_data = None
+        try: lyrics_data = yt.get_lyrics(watch['lyrics'], timestamps=True)
+        except: pass
+        if not lyrics_data: 
+            try: lyrics_data = yt.get_lyrics(watch['lyrics'])
+            except: pass
+        
+        if not lyrics_data or not lyrics_data.get('lyrics'): return None
+        
+        content = lyrics_data['lyrics']
+        if isinstance(content, list):
+            lines = []
+            for line in content:
+                try:
+                    txt = line.get('text', line.get('line', ''))
+                    # Gestion timestamp flexible
+                    t = line.get('start_time', line.get('seconds', line.get('startTime')))
+                    if t is not None: lines.append(f"{ms_to_lrc(float(t)*1000)} {txt}")
+                except: continue
+            return "\n".join(lines) if lines else None
         return None
+    except: return None
 
-# --- API SUBSONIC ---
-def fetch_subsonic_tracks(query: str, limit=20) -> list:
-    url = SUBSONIC_BASE + "search3.view"
-    params = get_subsonic_query_params()
-    params.update({ 'query': query, 'songCount': limit, 'albumCount': 0, 'artistCount': 0 })
-    try:
-        response = requests.get(url, params=params, timeout=5)
-        data = response.json()
-        if data.get('subsonic-response', {}).get('status') == 'ok':
-            raw_songs = data['subsonic-response'].get('searchResult3', {}).get('song', [])
-            found = []
-            for song in raw_songs:
-                try:
-                    found.append({
-                        'id': song.get('id'),
-                        'title': song.get('title'),
-                        'performer': {'name': song.get('artist', 'Inconnu')},
-                        'album': { 'title': song.get('album', 'Album'), 'image': {'large': song.get('coverArt')}},
-                        'duration': song.get('duration', 0),
-                        'maximum_bit_depth': 16, 
-                        'source': 'subsonic'
-                    })
-                except: continue
-            return found
-        return []
-    except: return []
+def sync_search_subsonic(query, limit=20):
+    data = fetch_subsonic_raw("search3.view", {'query': query, 'songCount': limit, 'albumCount': 0, 'artistCount': 0})
+    if data.get('subsonic-response', {}).get('status') == 'ok':
+        songs = data['subsonic-response'].get('searchResult3', {}).get('song', [])
+        return [{
+            'id': s.get('id'), 'title': s.get('title'), 'performer': {'name': s.get('artist', 'Inconnu')},
+            'album': {'title': s.get('album'), 'image': {'large': s.get('coverArt')}},
+            'duration': s.get('duration', 0), 'maximum_bit_depth': 16, 'source': 'subsonic'
+        } for s in songs]
+    return []
 
-def fetch_subsonic_albums(query: str, limit=15) -> list:
-    url = SUBSONIC_BASE + "search3.view"
-    params = get_subsonic_query_params()
-    params.update({ 'query': query, 'songCount': 0, 'albumCount': limit, 'artistCount': 0 })
-    try:
-        response = requests.get(url, params=params, timeout=5)
-        data = response.json()
-        if data.get('subsonic-response', {}).get('status') == 'ok':
-            raw_albums = data['subsonic-response'].get('searchResult3', {}).get('album', [])
-            found = []
-            for album in raw_albums:
-                try:
-                    found.append({
-                        'id': album.get('id'),
-                        'title': album.get('name', album.get('title', 'Album')),
-                        'artist': {'name': album.get('artist', 'Inconnu')},
-                        'image': {'large': album.get('coverArt')},
-                        'source': 'subsonic'
-                    })
-                except: continue
-            return found
-        return []
-    except: return []
+def sync_search_subsonic_albums(query, limit=15):
+    data = fetch_subsonic_raw("search3.view", {'query': query, 'songCount': 0, 'albumCount': limit, 'artistCount': 0})
+    if data.get('subsonic-response', {}).get('status') == 'ok':
+        albums = data['subsonic-response'].get('searchResult3', {}).get('album', [])
+        return [{
+            'id': a.get('id'), 'title': a.get('name', a.get('title')), 
+            'artist': {'name': a.get('artist')}, 'image': {'large': a.get('coverArt')}, 'source': 'subsonic'
+        } for a in albums]
+    return []
 
-def threaded_qobuz_search(query, limit=25, type='track'):
+def sync_qobuz_search(query, limit=25, type='track'):
     if not client: return []
     try:
         if type == 'track':
@@ -363,518 +235,311 @@ def threaded_qobuz_search(query, limit=25, type='track'):
             return items
     except: return []
 
-def try_resolve_track(title, artist):
-    """Tente de trouver un ID Qobuz ou Subsonic avec vérification stricte de l'artiste"""
-    search_query = f"{title} {artist}"
-    target_artist_clean = clean_string(artist)
-    target_title_clean = clean_string(title)
+def sync_resolve_track(title, artist):
+    target_artist = clean_string(artist)
+    target_title = clean_string(title)
     
     # 1. Qobuz
     if client:
         try:
-            # On demande plus de résultats (5) pour avoir le choix
-            q_resp = client.api_call("track/search", query=search_query, limit=5)
-            items = q_resp.get('tracks', {}).get('items', [])
-            
+            items = sync_qobuz_search(f"{title} {artist}", limit=5)
             for rec in items:
-                rec_title_clean = clean_string(rec['title'])
-                performer_dict = rec.get('performer') or rec.get('artist') or {}
-                rec_artist_clean = clean_string(performer_dict.get('name', ''))
+                rec_title = clean_string(rec['title'])
+                rec_artist = clean_string(rec.get('performer', {}).get('name', ''))
                 
-                # A. Vérification Artiste (Strict ou Fuzzy)
-                artist_match = False
+                match_artist = False
                 if FUZZ_AVAILABLE:
-                    if fuzz.ratio(target_artist_clean, rec_artist_clean) > 65: artist_match = True
-                    elif target_artist_clean in rec_artist_clean or rec_artist_clean in target_artist_clean: artist_match = True
-                else:
-                    if target_artist_clean in rec_artist_clean or rec_artist_clean in target_artist_clean: artist_match = True
+                    if fuzz.ratio(target_artist, rec_artist) > 65: match_artist = True
+                elif target_artist in rec_artist or rec_artist in target_artist: match_artist = True
                 
-                if not artist_match: continue
-
-                # B. Vérification Titre
-                title_match = False
-                if FUZZ_AVAILABLE:
-                    if fuzz.ratio(target_title_clean, rec_title_clean) > 60: title_match = True
-                else:
-                    if target_title_clean in rec_title_clean or rec_title_clean in target_title_clean: title_match = True
-                
-                if not title_match: continue
-
-                # C. Filtre Anti-Cover (Si le mot cover n'est pas dans la requête)
-                if "cover" not in target_title_clean and "cover" in rec_title_clean: continue
-                if "tribute" not in target_title_clean and "tribute" in rec_title_clean: continue
-                if "karaoke" not in target_title_clean and "karaoke" in rec_title_clean: continue
-
-                # Si tout est bon, on prend celui-là
-                return {'id': rec['id'], 'source': 'qobuz'}
-
-        except Exception as e:
-            logger.error(f"Resolve Qobuz error: {e}")
-    
+                if match_artist:
+                    match_title = False
+                    if FUZZ_AVAILABLE:
+                        if fuzz.ratio(target_title, rec_title) > 60: match_title = True
+                    elif target_title in rec_title or rec_title in target_title: match_title = True
+                    
+                    if match_title: return {'id': rec['id'], 'source': 'qobuz'}
+        except: pass
+        
     # 2. Subsonic
-    subs = fetch_subsonic_tracks(search_query, limit=5)
-    for song in subs:
-        s_artist = clean_string(song['performer']['name'])
-        if target_artist_clean in s_artist or s_artist in target_artist_clean:
-             return {'id': song['id'], 'source': 'subsonic'}
-    
+    subs = sync_search_subsonic(f"{title} {artist}", limit=5)
+    for s in subs:
+        s_artist = clean_string(s['performer']['name'])
+        if target_artist in s_artist or s_artist in target_artist:
+            return {'id': s['id'], 'source': 'subsonic'}
     return None
 
-# --- ROUTES ---
-
-@app.route('/radio_queue')
-def get_radio_queue():
-    """
-    Récupère la file d'attente complète "Watch Next" de YouTube Music avec Images HD.
-    """
-    artist = request.args.get('artist')
-    title = request.args.get('title')
-    
-    if not artist or not title:
-        return jsonify({"error": "Missing artist or title"}), 400
-        
+def sync_get_radio_queue(title, artist):
     query = f"{title} {artist}"
-    logger.info(f"📻 [RADIO QUEUE] Recherche de la graine : {query}")
-    
     try:
-        # 1. Recherche du titre sur YT Music pour avoir le VideoID
         results = yt.search(query, filter="songs", limit=1)
+        if not results: return []
+        vid = results[0]["videoId"]
+        watch = yt.get_watch_playlist(vid, limit=25)
+        if "tracks" not in watch: return []
         
-        if not results:
-            return jsonify({"error": "Track not found on YT"}), 404
-            
-        first_track = results[0]
-        video_id = first_track["videoId"]
-        logger.info(f"✅ [RADIO QUEUE] Seed trouvée : {video_id} - {first_track.get('title')}")
-        
-        # 2. Récupération de la playlist "Watch Next"
-        watch = yt.get_watch_playlist(video_id, limit=25)
-        
-        if "tracks" not in watch or not watch["tracks"]:
-            return jsonify({"error": "No recommendations found"}), 404
-            
-        follow_tracks = []
-        
+        final = []
         for t in watch["tracks"]:
-            # On ignore la première piste car c'est celle qu'on écoute déjà
-            if t.get("videoId") == video_id:
-                continue
-                
-            artists = t.get("artists", [{}])
-            artist_name = artists[0].get("name") if artists else "Inconnu"
-            album_name = t.get("album", {}).get("name") if t.get("album") else None
-            
-            # UTILISATION DE LA FONCTION HD
-            img_url = extract_thumbnail_hd(t)
-            
-            # Gestion de la durée (YT renvoie parfois une string "3:45", parfois des secondes)
-            duration_raw = t.get("duration") or t.get("length")
-            duration_sec = parse_duration(duration_raw)
-                
-            follow_tracks.append({
-                "id": t.get("videoId"),
-                "title": t.get("title"),
-                "performer": { "name": artist_name },
-                "album": { "title": album_name, "image": { "large": img_url } },
-                "img": img_url,
-                "thumbnail": img_url,
-                "duration": duration_sec,
-                "source": "yt_lazy",
-                "isRadio": True
+            if t.get("videoId") == vid: continue
+            img = extract_thumbnail_hd(t)
+            final.append({
+                "id": t.get("videoId"), "title": t.get("title"),
+                "performer": { "name": t.get("artists", [{}])[0].get("name", "Inconnu") },
+                "album": { "title": t.get("album", {}).get("name"), "image": { "large": img } },
+                "img": img, "duration": parse_duration(t.get("duration") or t.get("length")),
+                "source": "yt_lazy", "isRadio": True
             })
-            
-        logger.info(f"✅ [RADIO QUEUE] {len(follow_tracks)} titres récupérés.")
-        return jsonify(follow_tracks)
-        
+        return final
     except Exception as e:
-        logger.error(f"❌ [RADIO QUEUE] Erreur: {e}")
-        return jsonify({"error": str(e)}), 500
+        logger.error(f"Radio Error: {e}")
+        return []
 
-@app.route('/blind_test_tracks')
-def get_blind_test_tracks():
-    theme = request.args.get('theme', 'Global Hits')
-    try:
-        limit = int(request.args.get('limit', 5))
-        if limit < 1: limit = 1
-        if limit > 20: limit = 20
-    except ValueError:
-        limit = 5
+# --- ROUTES ASYNCHRONES ---
+
+@app.get('/radio_queue')
+async def get_radio_queue(artist: str, title: str):
+    if not artist or not title: raise HTTPException(400, "Missing params")
+    # Exécution dans un threadpool pour ne pas bloquer
+    tracks = await run_in_threadpool(sync_get_radio_queue, title, artist)
+    if not tracks: raise HTTPException(404, "No results")
+    return JSONResponse(tracks)
+
+@app.get('/search')
+async def search_tracks(q: str, type: str = 'all'):
+    results = { "tracks": [], "albums": [], "external_playlists": [] }
+    
+    # Lancement parallèle des recherches
+    tasks = []
+    
+    if type in ['track', 'all']:
+        tasks.append(run_in_threadpool(sync_qobuz_search, q, 25, 'track'))
+        tasks.append(run_in_threadpool(sync_search_subsonic, q, 25))
+    
+    if type in ['album', 'all']:
+        tasks.append(run_in_threadpool(sync_qobuz_search, q, 15, 'album'))
+        tasks.append(run_in_threadpool(sync_search_subsonic_albums, q, 15))
         
-    logger.info(f"🎲 Blind Test: Thème '{theme}' pour {limit} titres.")
+    # On attend tout
+    finished = await asyncio.gather(*tasks, return_exceptions=True)
+    
+    # Traitement des résultats (Mapping un peu brut selon l'ordre)
+    idx = 0
+    qobuz_tracks = []
+    subsonic_tracks = []
+    qobuz_albums = []
+    subsonic_albums = []
 
-    if not client: 
-        return jsonify({"error": "Client not initialized"}), 500
+    if type in ['track', 'all']:
+        r1 = finished[idx]; idx += 1
+        if isinstance(r1, list): qobuz_tracks = r1
+        r2 = finished[idx]; idx += 1
+        if isinstance(r2, list): subsonic_tracks = r2
+        
+    if type in ['album', 'all']:
+        r3 = finished[idx]; idx += 1
+        if isinstance(r3, list): qobuz_albums = r3
+        r4 = finished[idx]; idx += 1
+        if isinstance(r4, list): subsonic_albums = r4
 
-    tracks_found = []
-
-    if theme in ['Global Hits', 'Pop Global']:
+    # Recherche YouTube Playlists (Séparée car moins critique)
+    yt_playlists = []
+    if type in ['playlist', 'all']:
         try:
-            resp = client.api_call("track/search", query=theme, limit=max(20, limit * 3))
-            items = resp.get('tracks', {}).get('items', [])
-            random.shuffle(items)
-            candidates = items[:limit + 5]
-            for track in candidates:
-                tracks_found.append({
-                    'id': track['id'],
-                    'title': track['title'],
-                    'artist': track.get('performer', {}).get('name', track.get('artist', {}).get('name', 'Unknown')),
-                    'album': track['album']['title'],
-                    'img': track.get('album', {}).get('image', {}).get('large', '').replace('_300', '_600'),
-                    'duration': track['duration'],
-                    'source': 'qobuz'
-                })
-            return jsonify(tracks_found[:limit])
-        except Exception as e:
-            logger.error(f"Blind Test Classic Error: {e}")
-            return jsonify({"error": "Failed to fetch tracks"}), 500
-
-    try:
-        search_results = yt.search(theme, filter='playlists', limit=3)
-        if not search_results:
-            return jsonify({"error": "No playlist found"}), 404
-            
-        target_playlist = search_results[0]
-        playlist_id = target_playlist['browseId']
-        logger.info(f"🎲 Blind Test: Playlist YT trouvée = {target_playlist.get('title')} ({playlist_id})")
-        
-        playlist_data = yt.get_playlist(playlist_id, limit=50)
-        yt_tracks = playlist_data.get('tracks', [])
-        random.shuffle(yt_tracks)
-        
-        candidates_to_resolve = yt_tracks[:limit * 2]
-        
-        with ThreadPoolExecutor(max_workers=5) as executor:
-            future_to_track = {}
-            for t in candidates_to_resolve:
-                title = t.get('title')
-                artists = t.get('artists', [])
-                artist = artists[0]['name'] if artists else "Unknown"
-                if title and artist:
-                    future_to_track[executor.submit(try_resolve_track, title, artist)] = (title, artist)
-
-            for future in as_completed(future_to_track):
-                orig_title, orig_artist = future_to_track[future]
+            yt_res = await run_in_threadpool(yt.search, q, filter='playlists', limit=10)
+            for item in yt_res:
                 try:
-                    match = future.result()
-                    if match:
-                        real_id = match['id']
-                        source = match['source']
-                        final_track = None
-                        if source == 'qobuz':
-                             meta = client.get_track_meta(real_id)
-                             final_track = {
-                                'id': meta['id'],
-                                'title': meta['title'],
-                                'artist': meta.get('performer', {}).get('name', 'Unknown'),
-                                'album': meta.get('album', {}).get('title'),
-                                'img': meta.get('album', {}).get('image', {}).get('large', '').replace('_300', '_600'),
-                                'duration': meta['duration'],
-                                'source': 'qobuz'
-                             }
-                        elif source == 'subsonic':
-                             meta = get_subsonic_track_details(real_id)
-                             if meta:
-                                 final_track = {
-                                    'id': meta['id'],
-                                    'title': meta['title'],
-                                    'artist': meta['performer']['name'],
-                                    'album': meta['album']['title'],
-                                    'img': f"{API_BASE}/get_subsonic_cover/{meta['album']['image']['large']}" if meta['album']['image']['large'] else "",
-                                    'duration': meta['duration'],
-                                    'source': 'subsonic'
-                                 }
-                        if final_track:
-                            tracks_found.append(final_track)
-                except Exception as e:
-                    logger.error(f"Resolution error for {orig_title}: {e}")
-
-        if len(tracks_found) < limit:
-            try:
-                q_resp = client.api_call("track/search", query=theme, limit=limit * 2)
-                items = q_resp.get('tracks', {}).get('items', [])
-                for track in items:
-                     if len(tracks_found) >= limit: break
-                     tracks_found.append({
-                        'id': track['id'],
-                        'title': track['title'],
-                        'artist': track.get('performer', {}).get('name', 'Unknown'),
-                        'album': track['album']['title'],
-                        'img': track.get('album', {}).get('image', {}).get('large', '').replace('_300', '_600'),
-                        'duration': track['duration'],
-                        'source': 'qobuz'
+                    img = extract_thumbnail_hd(item)
+                    yt_playlists.append({
+                        "id": item.get('browseId'), "name": item.get('title'),
+                        "title": item.get('title'), "performer": { "name": item.get('author', 'YouTube') },
+                        "type": "playlist", "source": "ytmusic", "image": img, "is_lazy": True
                     })
-            except: pass
-        
-        seen = set()
-        unique_tracks = []
-        for t in tracks_found:
-            if t['id'] not in seen:
-                unique_tracks.append(t)
-                seen.add(t['id'])
+                except: continue
+        except: pass
 
-        return jsonify(unique_tracks[:limit])
-
-    except Exception as e:
-        logger.error(f"Blind Test YT Error: {e}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/recommend')
-def recommend_tracks():
-    # Ancienne route maintenue pour compatibilité, mais simplifiée
-    # On délègue au nouveau système si possible, sinon fallback Qobuz
-    return jsonify({"error": "Deprecated, use /radio_queue"}), 404
-
-@app.route('/search')
-def search_tracks():
-    query = request.args.get('q')
-    search_type = request.args.get('type', 'all')
+    # Fusion intelligente
+    combined_tracks = qobuz_tracks
+    sigs = set(f"{clean_string(t['title'])}{clean_string(t.get('performer',{}).get('name'))}" for t in qobuz_tracks)
     
-    combined_tracks = []
-    albums_results = []
-    playlists_results = []
-    
-    qobuz_tracks, subsonic_tracks, qobuz_albums, subsonic_albums = [], [], [], []
-
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        futures = {}
+    for t in subsonic_tracks:
+        s = f"{clean_string(t['title'])}{clean_string(t['performer']['name'])}"
+        if s not in sigs: combined_tracks.append(t)
         
-        if search_type in ['track', 'all']:
-            futures['q_tracks'] = executor.submit(threaded_qobuz_search, query, 25, 'track')
-            futures['s_tracks'] = executor.submit(fetch_subsonic_tracks, query, 25)
-            
-        if search_type in ['album', 'all']:
-            futures['q_albums'] = executor.submit(threaded_qobuz_search, query, 15, 'album')
-            futures['s_albums'] = executor.submit(fetch_subsonic_albums, query, 15)
-            
-        if search_type in ['playlist', 'all']:
-            try:
-                yt_raw = yt.search(query, filter='playlists', limit=15)
-                yt_albums = yt.search(query, filter='albums', limit=10)
-                all_yt = yt_raw + yt_albums
-                
-                for item in all_yt:
-                    try:
-                        thumbnails = item.get('thumbnails', [])
-                        if not thumbnails: continue
-                        best_thumb = thumbnails[-1]
-                        w = best_thumb.get('width', 0); h = best_thumb.get('height', 0)
-                        if w > 0 and h > 0:
-                            ratio = w / h
-                            if ratio < 0.9 or ratio > 1.1: continue
-                        
-                        img_url = get_hq_yt_image(best_thumb['url'])
-                        subtitle = "YouTube"
-                        if 'author' in item: subtitle = item['author']
-                        elif 'artists' in item: subtitle = ", ".join([a.get('name', '') for a in item['artists']])
-                        elif 'year' in item: subtitle = str(item['year'])
+    combined_albums = qobuz_albums + subsonic_albums
+    
+    return JSONResponse({
+        "tracks": combined_tracks,
+        "albums": combined_albums,
+        "external_playlists": yt_playlists
+    })
 
-                        playlists_results.append({
-                            "id": item.get('browseId'),
-                            "name": item.get('title'),
-                            "title": item.get('title'),
-                            "performer": { "name": subtitle },
-                            "type": "playlist",
-                            "source": "ytmusic",
-                            "image": img_url,
-                            "is_lazy": True 
-                        })
-                    except: continue
-            except Exception as e: logger.error(f"YT Search Error: {e}")
-
-        if 'q_tracks' in futures: qobuz_tracks = futures['q_tracks'].result()
-        if 's_tracks' in futures: subsonic_tracks = futures['s_tracks'].result()
-        if 'q_albums' in futures: qobuz_albums = futures['q_albums'].result()
-        if 's_albums' in futures: subsonic_albums = futures['s_albums'].result()
-
-    if search_type in ['track', 'all']:
-        sigs = set()
-        for t in qobuz_tracks:
-            # SECURISATION DU PERFORER (CORRECTIF CRASH)
-            artist_dict = t.get('performer') or t.get('artist') or {}
-            artist_name = artist_dict.get('name', 'Inconnu')
-            
-            # Normalisation pour le frontend
-            if 'performer' not in t or not t['performer']:
-                t['performer'] = {'name': artist_name}
-                
-            sig = f"{clean_string(t.get('title', ''))}_{clean_string(artist_name)}"
-            sigs.add(sig); combined_tracks.append(t)
-            
-        for t in subsonic_tracks:
-            artist_name = t.get('performer', {}).get('name', 'Inconnu')
-            sig = f"{clean_string(t.get('title', ''))}_{clean_string(artist_name)}"
-            if sig not in sigs: combined_tracks.append(t)
-
-    if search_type in ['album', 'all']:
-        album_sigs = set()
-        for a in qobuz_albums:
-            artist_name = a.get('artist', {}).get('name', '')
-            sig = f"{clean_string(a['title'])}_{clean_string(artist_name)}"
-            album_sigs.add(sig); albums_results.append(a)
-        for a in subsonic_albums:
-            artist_name = a.get('artist', {}).get('name', '')
-            sig = f"{clean_string(a['title'])}_{clean_string(artist_name)}"
-            if sig not in album_sigs: albums_results.append(a)
-
-    return jsonify({ "tracks": combined_tracks, "albums": albums_results, "external_playlists": playlists_results })
-
-@app.route('/yt_playlist')
-def get_yt_playlist_details():
-    playlist_id = request.args.get('id')
-    if not playlist_id: return jsonify({"error": "Missing ID"}), 400
+@app.get('/blind_test_tracks')
+async def get_blind_test_tracks(theme: str = 'Global Hits', limit: int = 5):
+    # Logique simplifiée pour la performance : Qobuz direct
     try:
-        if playlist_id.startswith('MPRE') or playlist_id.startswith('OLAK'): details = yt.get_album(playlist_id)
-        else: details = yt.get_playlist(playlist_id, limit=100) 
+        limit = min(max(limit, 1), 20)
+        tracks = await run_in_threadpool(sync_qobuz_search, theme, limit * 3)
+        if not tracks: raise HTTPException(404)
         
-        formatted_tracks = []
-        album_art = 'https://placehold.co/300x300/1a1a1a/666666?text=Music'
-        if details.get('thumbnails'): album_art = get_hq_yt_image(details['thumbnails'][-1]['url'])
+        random.shuffle(tracks)
+        selection = tracks[:limit]
         
-        tracks_source = details.get('tracks', [])
-        for track in tracks_source:
-            try:
-                thumbnails = track.get('thumbnails', [])
-                if thumbnails:
-                    best_thumb = thumbnails[-1]
-                    w = best_thumb.get('width', 0); h = best_thumb.get('height', 0)
-                    if w > 0 and h > 0:
-                        ratio = w / h
-                        if ratio < 0.9 or ratio > 1.1: continue
-                
-                t_title = track.get('title'); t_id = track.get('videoId')
-                artists_list = track.get('artists', []); t_artist = artists_list[0]['name'] if artists_list else (details.get('artists', [{'name':'Inconnu'}])[0]['name'])
-                t_img = album_art
-                if track.get('thumbnails'): t_img = get_hq_yt_image(track['thumbnails'][-1]['url'])
-                
-                if t_id and t_title:
-                    formatted_tracks.append({
-                        "id": t_id, "title": t_title, "performer": { "name": t_artist },
-                        "album": { "title": details.get('title'), "image": { "large": t_img } },
-                        "duration": track.get('duration_seconds', 0) or track.get('lengthSeconds', 0),
-                        "source": "yt_lazy", "type": "track", "img": t_img
+        final = []
+        for t in selection:
+            final.append({
+                'id': t['id'], 'title': t['title'],
+                'artist': t.get('performer', {}).get('name', 'Unknown'),
+                'album': t.get('album', {}).get('title'),
+                'img': t.get('album', {}).get('image', {}).get('large', '').replace('_300', '_600'),
+                'duration': t['duration'], 'source': 'qobuz'
+            })
+        return JSONResponse(final)
+    except:
+        raise HTTPException(500, "Error")
+
+@app.get('/yt_playlist')
+async def get_yt_playlist_details_route(id: str):
+    def _fetch():
+        try:
+            if id.startswith('MPRE') or id.startswith('OLAK'): details = yt.get_album(id)
+            else: details = yt.get_playlist(id, limit=100)
+            
+            tracks = []
+            art = extract_thumbnail_hd(details)
+            for t in details.get('tracks', []):
+                try:
+                    img = extract_thumbnail_hd(t) if t.get('thumbnails') else art
+                    tracks.append({
+                        "id": t.get('videoId'), "title": t.get('title'),
+                        "performer": { "name": t.get('artists', [{'name':'Inconnu'}])[0]['name'] },
+                        "album": { "title": details.get('title'), "image": { "large": img } },
+                        "duration": parse_duration(t.get('duration') or t.get('lengthSeconds')),
+                        "source": "yt_lazy", "type": "track", "img": img
                     })
+                except: continue
+            return { "id": id, "title": details.get('title'), "tracks": tracks, "image": art }
+        except Exception as e: return {"error": str(e)}
+
+    res = await run_in_threadpool(_fetch)
+    if "error" in res: raise HTTPException(500, res["error"])
+    return JSONResponse(res)
+
+@app.get('/resolve_stream')
+async def resolve_and_stream(title: str, artist: str):
+    match = await run_in_threadpool(sync_resolve_track, title, artist)
+    if match:
+        rid = match['id']
+        if match['source'] == 'subsonic': return RedirectResponse(f"/stream_subsonic/{rid}")
+        return RedirectResponse(f"/stream/{rid}")
+    raise HTTPException(404, "Track not found")
+
+@app.get('/track')
+async def get_track_info(id: str, source: str = None):
+    if source == 'subsonic':
+        # Subsonic fetch
+        data = await run_in_threadpool(fetch_subsonic_raw, "getSong.view", {'id': id})
+        s = data.get('subsonic-response', {}).get('song')
+        if s:
+            return JSONResponse({
+                'id': s['id'], 'title': s['title'], 'performer': {'name': s['artist']},
+                'album': {'title': s.get('album'), 'image': {'large': s.get('coverArt')}},
+                'duration': s.get('duration'), 'source': 'subsonic', 'maximum_bit_depth': 16
+            })
+    elif client:
+        try:
+            res = await run_in_threadpool(client.get_track_meta, id)
+            res['source'] = 'qobuz'; fix_qobuz_title(res)
+            return JSONResponse(res)
+        except: pass
+    raise HTTPException(404)
+
+@app.get('/album')
+async def get_album(id: str, source: str = None):
+    if source == 'subsonic':
+        data = await run_in_threadpool(fetch_subsonic_raw, "getAlbum.view", {'id': id})
+        raw = data.get('subsonic-response', {}).get('album')
+        if raw:
+            tracks = []
+            for s in raw.get('song', []):
+                tracks.append({ 'id': s['id'], 'title': s['title'], 'duration': s.get('duration'), 'track_number': s.get('track'), 'performer': {'name': s.get('artist', raw.get('artist'))}, 'album': {'title': raw.get('name'), 'image': {'large': raw.get('coverArt')}}, 'source': 'subsonic' })
+            return JSONResponse({ 'id': raw['id'], 'title': raw.get('name'), 'artist': {'name': raw.get('artist')}, 'image': {'large': raw.get('coverArt')}, 'source': 'subsonic', 'tracks': {'items': tracks} })
+    elif client:
+        try:
+            res = await run_in_threadpool(client.get_album_meta, id)
+            res['source'] = 'qobuz'
+            return JSONResponse(res)
+        except: pass
+    raise HTTPException(404)
+
+@app.get('/artist')
+async def get_artist(id: str):
+    if not client: raise HTTPException(500)
+    try:
+        # On utilise api_call directement car get_artist n'est pas standardisé
+        meta = await run_in_threadpool(client.api_call, "artist/get", id=id, extra="albums", limit=50)
+        # Normalisation légère
+        albums = []
+        if 'albums' in meta and 'items' in meta['albums']: albums = meta['albums']['items']
+        meta['albums'] = {'items': albums}
+        return JSONResponse(meta)
+    except: raise HTTPException(404)
+
+@app.get('/artist_bio')
+async def get_artist_bio_route(name: str):
+    # Placeholder pour l'instant (LastFM ou autre API requise pour bio réelle)
+    # On retourne une structure compatible avec le frontend
+    return JSONResponse({"bio": f"Biographie de {name}...", "image": "", "nb_fans": 0, "top_tracks": []})
+
+@app.get('/stream/{track_id}')
+async def stream_track(track_id: str):
+    if not client: raise HTTPException(500, "Client error")
+    
+    def _get_url():
+        for fmt in [27, 7, 6, 5]:
+            try:
+                d = client.get_track_url(track_id, fmt)
+                if 'url' in d: return d['url']
             except: continue
-        return jsonify({ "id": playlist_id, "title": details.get('title'), "tracks": formatted_tracks, "image": album_art })
-    except Exception as e: return jsonify({"error": str(e)}), 500
+        return None
 
-@app.route('/resolve_stream')
-def resolve_and_stream():
-    title = request.args.get('title'); artist = request.args.get('artist')
-    if not title or not artist: return jsonify({"error": "Missing params"}), 400
-    match = try_resolve_track(title, artist)
-    if match:
-        real_id = match['id']; source = match['source']
-        if source == 'subsonic': return redirect(f"/stream_subsonic/{real_id}")
-        else: return redirect(f"/stream/{real_id}")
-    return jsonify({"error": "Track not found"}), 404
+    url = await run_in_threadpool(_get_url)
+    if url: return RedirectResponse(f"{SUPABASE_PROXY_URL}?url={urllib.parse.quote(url)}")
+    raise HTTPException(404, "URL not found")
 
-@app.route('/resolve_metadata')
-def resolve_metadata():
-    title = request.args.get('title'); artist = request.args.get('artist')
-    if not title or not artist: return jsonify({"error": "Missing params"}), 400
-    match = try_resolve_track(title, artist)
-    if match:
-        try:
-            if match['source'] == 'qobuz':
-                meta = client.get_track_meta(match['id'])
-                img = meta.get('album', {}).get('image', {}).get('large', '').replace('_300', '_600')
-                return jsonify({ 'id': match['id'], 'image': img, 'source': 'qobuz', 'album': meta.get('album', {}).get('title') })
-            elif match['source'] == 'subsonic': return jsonify({'source': 'subsonic'}) 
-        except: pass
-    return jsonify({"error": "Not found"}), 404
+@app.get('/stream_subsonic/{track_id}')
+async def stream_subsonic(track_id: str):
+    p = get_subsonic_query_params()
+    p.update({'id': track_id, 'format': 'mp3', 'maxBitRate': '320'})
+    # Construction manuelle de l'URL
+    query = urllib.parse.urlencode(p)
+    full_url = f"{SUBSONIC_BASE}stream.view?{query}"
+    return RedirectResponse(f"{SUPABASE_PROXY_URL}?url={urllib.parse.quote(full_url)}")
 
-@app.route('/track')
-def get_track_info():
-    track_id = request.args.get('id'); source = request.args.get('source')
-    if source == 'subsonic':
-        song = get_subsonic_track_details(track_id)
-        if song: return jsonify(song)
-        return jsonify({"error": "Not found"}), 404
-    if not client: return jsonify({"error": "Init error"}), 500
-    try: res = client.get_track_meta(track_id); res['source'] = 'qobuz'; fix_qobuz_title(res); return jsonify(res)
-    except: return jsonify({"error": "Not found"}), 404
+@app.get('/get_subsonic_cover/{cover_id}')
+async def get_subsonic_cover(cover_id: str):
+    p = get_subsonic_query_params()
+    p.update({'id': cover_id, 'size': 600})
+    query = urllib.parse.urlencode(p)
+    return RedirectResponse(f"{SUBSONIC_BASE}getCoverArt.view?{query}")
 
-@app.route('/album')
-def get_album():
-    album_id = request.args.get('id'); source = request.args.get('source')
-    if source == 'subsonic':
-        url = SUBSONIC_BASE + "getAlbum.view"; params = get_subsonic_query_params(); params['id'] = album_id
-        try:
-            res = requests.get(url, params=params).json(); raw = res['subsonic-response']['album']; formatted_tracks = []
-            if 'song' in raw:
-                for song in raw['song']:
-                    formatted_tracks.append({ 'id': song['id'], 'title': song['title'], 'duration': song.get('duration', 0), 'track_number': song.get('track', 0), 'performer': {'name': song.get('artist', raw.get('artist'))}, 'album': {'title': raw.get('name'), 'image': {'large': raw.get('coverArt')}}, 'source': 'subsonic' })
-            return jsonify({ 'id': raw['id'], 'title': raw.get('name'), 'artist': {'name': raw.get('artist')}, 'image': {'large': raw.get('coverArt')}, 'source': 'subsonic', 'tracks': {'items': formatted_tracks} })
-        except Exception as e: return jsonify({"error": str(e)}), 500
-    if client:
-        try: res = client.get_album_meta(album_id); res['source'] = 'qobuz'; return jsonify(res)
-        except: pass
-    return jsonify({"error": "Not found"}), 404
-
-@app.route('/stream_subsonic/<track_id>')
-def stream_subsonic(track_id):
-    url = SUBSONIC_BASE + "stream.view"; params = get_subsonic_query_params(); params['id'] = track_id; params['format'] = 'mp3'; params['maxBitRate'] = '320'
-    req = requests.Request('GET', url, params=params); prepared = req.prepare()
-    return redirect(f"{SUPABASE_PROXY_URL}?url={urllib.parse.quote(prepared.url)}")
-
-@app.route('/stream/<track_id>')
-def stream_track(track_id):
-    if not client: return jsonify({"error": "Init error"}), 500
-    for fmt in [27, 7, 6, 5]: # 27: Hi-Res, 7: CD, 6: MP3 320, 5: MP3 192
-        try:
-            url_data = client.get_track_url(track_id, fmt) # <-- Correction ici
-            if 'url' in url_data: return redirect(f"{SUPABASE_PROXY_URL}?url={urllib.parse.quote(url_data['url'])}")
-        except Exception as e:
-            logger.warning(f"Failed to get stream for track {track_id} with format {fmt}: {e}")
-            continue
-    return jsonify({"error": "No URL found"}), 404
-
-@app.route('/get_subsonic_cover/<cover_id>')
-def get_subsonic_cover(cover_id):
-    url = SUBSONIC_BASE + "getCoverArt.view"; params = get_subsonic_query_params(); params['id'] = cover_id; params['size'] = 600 
-    req = requests.Request('GET', url, params=params); prepared = req.prepare(); return redirect(prepared.url)
-
-@app.route('/lyrics')
-def get_lyrics():
-    artist = request.args.get('artist'); title = request.args.get('title'); album = request.args.get('album')
-    duration = request.args.get('duration')
+@app.get('/lyrics')
+async def get_lyrics(artist: str, title: str, album: str = None, duration: str = None):
+    # 1. YouTube (Synced)
+    yt_l = await run_in_threadpool(sync_search_yt_lyrics, title, artist)
+    if yt_l: return JSONResponse({"type": "synced", "lyrics": yt_l, "source": "YouTube"})
+    
+    # 2. LRCLib
+    dur = parse_duration(duration)
     try:
-        if duration and duration != 'undefined':
-            dur_int = int(float(duration))
-        else:
-            dur_int = 0
-    except (ValueError, TypeError):
-        dur_int = 0
-        
-    try:
-        yt_lyrics = fetch_yt_synced_lyrics(title, artist)
-        if yt_lyrics:
-            return jsonify({"type": "synced", "lyrics": yt_lyrics, "source": "YouTube"})
+        plain, synced = await run_in_threadpool(lyrics_engine.search_lyrics, artist, title, album, dur)
+        if synced: return JSONResponse({"type": "synced", "lyrics": synced, "source": "LRCLib"})
+        if plain: return JSONResponse({"type": "plain", "lyrics": plain, "source": "LRCLib"})
+    except: pass
+    
+    raise HTTPException(404, "No lyrics")
 
-        plain, synced = lyrics_engine.search_lyrics(artist, title, album, dur_int)
-        if synced: return jsonify({"type": "synced", "lyrics": synced, "source": "LRCLib"})
-        
-        if plain: return jsonify({"type": "plain", "lyrics": plain, "source": "LRCLib"})
-        
-    except Exception as e:
-        logger.error(f"Lyrics Error: {e}")
-        
-    return jsonify({"type": "none", "lyrics": None}), 404
+# --- STATIC FILES ---
+# Le frontend
+app.mount("/", StaticFiles(directory=PROJECT_ROOT, html=True), name="static")
 
-@app.route('/artist_bio')
-def get_artist_bio(): return jsonify({})
-
-# --- ROUTES STATIQUES (FRONTEND) ---
-@app.route('/')
-def serve_index():
-    return send_from_directory(PROJECT_ROOT, 'index.html')
-
-@app.route('/<path:path>')
-def serve_static(path):
-    return send_from_directory(PROJECT_ROOT, path)
-
-if __name__ == '__main__':
-    # init_client() n'est pas défini dans ce scope, retiré pour éviter une erreur locale
-    port = int(os.environ.get("PORT", 5000))
-    print(f"🚀 Serveur local lancé sur le port {port}")
-    app.run(host='0.0.0.0', port=port)
+# Pas de "if __name__ == '__main__'" car lancé par uvicorn via server.py ou Vercel
