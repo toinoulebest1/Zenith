@@ -1,4 +1,3 @@
-LRCLib Sync > YouTube Plain > LRCLib Plain).">
 import sys
 import os
 import asyncio
