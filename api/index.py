@@ -3,7 +3,7 @@ import os
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 
-# Configuration des chemins
+# Configuration des chemins pour imports locaux
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(current_dir)
 PROJECT_ROOT = os.path.abspath(os.path.join(current_dir, '..'))
@@ -15,8 +15,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.concurrency import run_in_threadpool
 
 # Imports locaux (Logique métier existante)
-from qobuz_api import QobuzClient, get_app_credentials
-from lyrics_search import LyricsSearcher 
+# On utilise try/except pour gérer les différences d'import selon l'environnement (Vercel vs Local)
+try:
+    from qobuz_api import QobuzClient, get_app_credentials
+    from lyrics_search import LyricsSearcher 
+except ImportError:
+    from .qobuz_api import QobuzClient, get_app_credentials
+    from .lyrics_search import LyricsSearcher
 
 import logging
 import random
