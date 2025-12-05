@@ -24,6 +24,9 @@ body {
     height: 100vh; overflow: hidden; display: flex; justify-content: center; align-items: center;
     color: white;
     position: relative;
+    /* Optimisation globale */
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
 }
 
 /* --- ANDROID TV MODE --- */
@@ -94,6 +97,8 @@ body.tv-mode .login-card { transform: scale(1.2); }
     text-align: center;
     position: relative;
     overflow: hidden;
+    /* Opti */
+    transform: translate3d(0,0,0);
 }
 
 .top10-title {
@@ -252,6 +257,9 @@ body.zen-active.zen-idle {
     opacity: 0;
     transition: background-image 1.5s ease-in-out, opacity 1s ease;
     pointer-events: none;
+    /* PERFORMANCE: Force GPU */
+    transform: translate3d(0,0,0);
+    will-change: opacity, background-image;
 }
 
 /* --- VIGNETTE SOMBRE --- */
@@ -261,6 +269,8 @@ body.zen-active.zen-idle {
     background: radial-gradient(circle at center, rgba(0,0,0,0.2) 0%, #0a0a0a 90%);
     z-index: 1;
     pointer-events: none;
+    /* PERFORMANCE */
+    transform: translate3d(0,0,0);
 }
 
 /* --- TRANSITIONS VISUELLES --- */
@@ -280,13 +290,21 @@ body.zen-active.zen-idle {
     transform: translate(-50%, -50%);
     opacity: 0;
     transition: top 1s cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 1s ease;
+    /* PERFORMANCE */
+    will-change: transform, opacity;
+    transform: translate3d(-50%, -50%, 0);
 }
-.orbit-orb.center-stage { top: 50%; opacity: 1; }
-.orbit-orb.orbiting { top: 50%; left: 50%; transform: translate(-50%, -50%); animation: driftAndSpin 10s linear infinite; }
+.orbit-orb.center-stage { top: 50%; opacity: 1; transform: translate3d(-50%, -50%, 0); }
+.orbit-orb.orbiting { 
+    top: 50%; left: 50%; 
+    animation: driftAndSpin 10s linear infinite; 
+    /* Force GPU for animation */
+    will-change: transform;
+}
 @keyframes driftAndSpin {
-    0% { transform: rotate(0deg) translateX(0) rotate(0deg); }
-    10% { transform: rotate(36deg) translateX(35vw) rotate(-36deg); }
-    100% { transform: rotate(360deg) translateX(35vw) rotate(-360deg); }
+    0% { transform: rotate(0deg) translate3d(0,0,0) rotate(0deg); }
+    10% { transform: rotate(36deg) translate3d(35vw,0,0) rotate(-36deg); }
+    100% { transform: rotate(360deg) translate3d(35vw,0,0) rotate(-360deg); }
 }
 
 /* --- LOGIN SCREEN --- */
@@ -296,6 +314,7 @@ body.zen-active.zen-idle {
     z-index: 9999;
     display: flex; flex-direction: column; justify-content: center; align-items: center;
     backdrop-filter: blur(20px);
+    transform: translate3d(0,0,0);
 }
 .login-card {
     background: rgba(30, 30, 40, 0.6);
@@ -351,6 +370,8 @@ body.zen-active.zen-idle {
     padding: 20px;
     box-shadow: 0 30px 60px rgba(0,0,0,0.5);
     z-index: 20; 
+    /* PERFORMANCE: Isolate stacking context */
+    transform: translate3d(0,0,0);
 }
 
 /* Desktop State when Logged In */
@@ -365,6 +386,7 @@ body.zen-active.zen-idle {
     gap: 15px; /* ESPACEMENT RÉDUIT (Avant: 25px) */
     z-index: 200;
     transition: opacity 0.5s;
+    transform: translate3d(0,0,0);
 }
 .nav-item { font-size: 22px; color: var(--text-dim); cursor: pointer; transition: 0.2s; position: relative; } 
 .nav-item:hover, .nav-item.active { color: var(--primary); text-shadow: 0 0 10px var(--primary); }
@@ -521,9 +543,29 @@ body.zen-active.zen-idle {
 /* GRID VIEW */
 .track-view { overflow-y: auto; flex: 1; display: block; }
 .track-view::-webkit-scrollbar { display: none; }
-.bento-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 15px; padding-bottom: 120px; }
-.track-card { background: rgba(255,255,255,0.03); border-radius: 16px; padding: 15px; cursor: pointer; transition: 0.2s; border: 1px solid var(--glass-border); position: relative; overflow: hidden; }
-.track-card:hover { background: rgba(255,255,255,0.1); transform: translateY(-3px); border-color: var(--primary); }
+.bento-grid { 
+    display: grid; 
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); 
+    gap: 15px; 
+    padding-bottom: 120px; 
+    /* PERFORMANCE: Containment */
+    contain: content;
+}
+.track-card { 
+    background: rgba(255,255,255,0.03); 
+    border-radius: 16px; 
+    padding: 15px; 
+    cursor: pointer; 
+    transition: 0.2s; 
+    border: 1px solid var(--glass-border); 
+    position: relative; 
+    overflow: hidden; 
+    /* PERFORMANCE: GPU */
+    transform: translate3d(0,0,0);
+    will-change: transform, background-color;
+    contain: content;
+}
+.track-card:hover { background: rgba(255,255,255,0.1); transform: translateY(-3px) translate3d(0,0,0); border-color: var(--primary); }
 .track-card.active-track { border-color: var(--primary); background: rgba(0, 210, 255, 0.1); box-shadow: 0 0 20px rgba(0, 210, 255, 0.2); }
 .playing-indicator { position: absolute; bottom: 15px; right: 15px; font-size: 12px; color: var(--primary); font-weight: bold; animation: pulseText 1.5s infinite; background: rgba(0,0,0,0.6); padding: 2px 6px; border-radius: 4px; }
 @keyframes pulseText { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }
@@ -586,7 +628,11 @@ body.zen-active.zen-idle {
 .artist-fans-badge i { color: var(--primary); }
 
 /* LYRICS VIEW */
-.lyrics-view { display: none; flex: 1; overflow-y: auto; text-align: center; padding: 20px 50px 120px 50px; scroll-behavior: smooth; position: relative; }
+.lyrics-view { 
+    display: none; flex: 1; overflow-y: auto; text-align: center; padding: 20px 50px 120px 50px; scroll-behavior: smooth; position: relative; 
+    /* PERFORMANCE: Containment */
+    contain: content;
+}
 .lyrics-view::-webkit-scrollbar { display: none; }
 .lyric-line { font-size: 24px; font-weight: 700; margin: 20px 0; color: var(--inactive-lyric); transition: 0.3s; cursor: pointer; }
 .lyric-line.active { color: var(--active-lyric); transform: scale(1.1); text-shadow: 0 0 20px rgba(255,255,255,0.3); }
@@ -614,6 +660,8 @@ body.zen-active.zen-idle {
     position: relative; 
     overflow: hidden;
     justify-content: flex-start; /* Important */
+    /* PERFORMANCE */
+    transform: translate3d(0,0,0);
 }
 
 /* CONTAINER POUR L'IMAGE ET LES INFOS */
@@ -641,7 +689,12 @@ body.zen-active.zen-idle {
 }
 
 /* PLAYER CAPSULE */
-.player-capsule { position: absolute; bottom: 25px; left: 50%; transform: translateX(-50%); width: 750px; height: 100px; background: #141416; border-radius: 25px; display: flex; align-items: center; justify-content: space-between; padding: 0 30px; box-shadow: 0 20px 50px rgba(0,0,0,0.9); border: 1px solid rgba(255,255,255,0.15); z-index: 100; }
+.player-capsule { 
+    position: absolute; bottom: 25px; left: 50%; width: 750px; height: 100px; background: #141416; border-radius: 25px; display: flex; align-items: center; justify-content: space-between; padding: 0 30px; box-shadow: 0 20px 50px rgba(0,0,0,0.9); border: 1px solid rgba(255,255,255,0.15); z-index: 100; 
+    /* PERFORMANCE: Fix position using transform */
+    transform: translate3d(-50%, 0, 0);
+    will-change: transform;
+}
 .cap-info { display: flex; align-items: center; gap: 15px; width: 240px; }
 .cap-img { width: 60px; height: 60px; border-radius: 10px; object-fit: cover; background: #222; }
 .cap-text { display: flex; flex-direction: column; overflow: hidden; width: 100%; }
@@ -728,6 +781,8 @@ body.zen-active.zen-idle {
 .queue-list {
     overflow-y: auto; flex: 1;
     position: relative; /* CRITICAL: Enables correct offsetTop calculation for children */
+    /* PERFORMANCE: Containment */
+    contain: content;
 }
 .queue-list::-webkit-scrollbar { width: 5px; }
 .queue-list::-webkit-scrollbar-thumb { background: #555; border-radius: 3px; }
@@ -978,6 +1033,8 @@ input:checked + .slider:before { transform: translateX(24px); }
         z-index: 200; 
         scrollbar-width: none; 
         -ms-overflow-style: none; 
+        /* PERFORMANCE */
+        transform: translate3d(0,0,0);
     }
     .sidebar::-webkit-scrollbar { display: none; }
     .nav-item, .sidebar > div { flex-shrink: 0; }
@@ -1004,6 +1061,7 @@ input:checked + .slider:before { transform: translateX(24px); }
         gap: 15px; 
         background: rgba(20, 20, 25, 0.98); 
         border: 1px solid rgba(255,255,255,0.1); 
+        transform: translate3d(-50%, 0, 0);
     }
     .cap-info { width: 100%; }
     .cap-center { width: 100%; gap: 15px; margin-top: 5px; }

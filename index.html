@@ -368,6 +368,8 @@
         let lyricsData = []; let firstLineTime = null; let currentTrackId = null;
         let fadeInterval = null; let isFetchingRadio = false;
         let crossfadeTimeout = null; 
+        // Optimization: Cache lyrics elements
+        let lyricsElements = [];
 
         // --- VARIABLES AUDIO WORKLET ---
         let audioCtx, zenithNode, sourceA, sourceB;
@@ -666,7 +668,7 @@
             }, 100);
         }
         
-        function resetLyricsState() { lyricsData = []; firstLineTime = null; const view = document.getElementById('lyricsView'); view.innerHTML = '<div style="margin-top: 100px; color: #888; animation: pulseText 1.5s infinite;">Recherche des paroles...</div>'; document.getElementById('introContainer').style.display = 'none'; }
+        function resetLyricsState() { lyricsData = []; firstLineTime = null; const view = document.getElementById('lyricsView'); view.innerHTML = '<div style="margin-top: 100px; color: #888; animation: pulseText 1.5s infinite;">Recherche des paroles...</div>'; document.getElementById('introContainer').style.display = 'none'; lyricsElements = []; }
 
         async function loadTrack(index, autoPlay = true, useCrossfade = true) {
             if(index < 0 || index >= tracks.length) return;
@@ -1233,11 +1235,61 @@
         function updateMediaSessionState() { if (!('mediaSession' in navigator)) return; let d = activeAudio.duration; const t = tracks[currentIndex]; if ((!d || !isFinite(d)) && t && t.duration) { d = t.duration; } if (d && isFinite(d) && activeAudio.currentTime <= d) { try { navigator.mediaSession.setPositionState({ duration: d, playbackRate: activeAudio.playbackRate, position: activeAudio.currentTime }); } catch(e) { console.warn("MediaSession Error:", e); } } }
         async function fetchLyrics(t,a,l){ try{const r=await fetch(`${API_BASE}/lyrics?artist=${encodeURIComponent(a)}&title=${encodeURIComponent(t.title)}&album=${encodeURIComponent(l||'')}&duration=${t.duration}`); const d=await r.json(); if(d.type==='synced'){parseLRC(d.lyrics);renderSyncedLyrics();}else if(d.type==='plain')document.getElementById('lyricsView').innerHTML=`<div style="white-space:pre-line;font-size:18px;line-height:1.6;">${d.lyrics}</div>`; else document.getElementById('lyricsView').innerHTML='<p style="margin-top:50px;">Non trouvé.</p>';}catch(e){document.getElementById('lyricsView').innerHTML='<p style="margin-top:50px;">Indisponible.</p>';}}
         function parseLRC(l){if(!l)return;try{const ls=l.split('\n'),rx=/^\[(\d{2}):(\d{2})[.:](\d{2,3})\](.*)/; lyricsData=[]; ls.forEach(x=>{const m=x.match(rx);if(m){const s=parseInt(m[1])*60+parseInt(m[2])+(m[3].length===2?parseInt(m[3])/100:parseInt(m[3])/1000); lyricsData.push({time:s,text:m[4].trim()});}}); if(lyricsData.length>0)firstLineTime=lyricsData[0].time;}catch(e){}}
-        function renderSyncedLyrics(){if(!isLyricsMode||!lyricsData.length)return;const c=document.getElementById('lyricsView');c.innerHTML='';const s=document.createElement('div');s.style.height="40vh";c.appendChild(s);lyricsData.forEach((l,i)=>{const d=document.createElement('div');d.className='lyric-line';d.id=`line-${i}`;d.innerText=l.text;d.onclick=()=>{activeAudio.currentTime=l.time;play();};c.appendChild(d);});const b=document.createElement('div');b.style.height="40vh";c.appendChild(b);}
+        function renderSyncedLyrics(){
+            if(!isLyricsMode||!lyricsData.length)return;
+            const c=document.getElementById('lyricsView');
+            c.innerHTML='';
+            const s=document.createElement('div');s.style.height="40vh";c.appendChild(s);
+            // Optimization: Store elements in array to avoid repeated querySelectorAll
+            lyricsElements = [];
+            lyricsData.forEach((l,i)=>{
+                const d=document.createElement('div');
+                d.className='lyric-line';
+                d.id=`line-${i}`;
+                d.innerText=l.text;
+                d.onclick=()=>{activeAudio.currentTime=l.time;play();};
+                c.appendChild(d);
+                lyricsElements.push({ el: d, time: l.time });
+            });
+            const b=document.createElement('div');b.style.height="40vh";c.appendChild(b);
+        }
         function syncLyricsUI(){ 
             if (document.hidden) return;
 
-            const ic=document.getElementById('introContainer'); if(isLyricsMode&&firstLineTime!==null&&firstLineTime>0){const lf=firstLineTime-activeAudio.currentTime; if(lf>0.5){ic.style.display='block';document.getElementById('introBarFill').style.width=(activeAudio.currentTime/firstLineTime)*100+'%';document.getElementById('introText').innerText=`Début dans ${lf.toFixed(1)}s`;}else ic.style.display='none';}else ic.style.display='none'; if(!isLyricsMode||!lyricsData.length)return; const cu=activeAudio.currentTime; let idx=-1; for(let i=0;i<lyricsData.length;i++){if(cu>=lyricsData[i].time)idx=i;else break;} document.querySelectorAll('.lyric-line').forEach((d,i)=>{if(i===idx){if(!d.classList.contains('active')){d.classList.add('active');d.scrollIntoView({behavior:"smooth",block:"center"});}}else d.classList.remove('active');}); 
+            const ic=document.getElementById('introContainer'); 
+            if(isLyricsMode&&firstLineTime!==null&&firstLineTime>0){
+                const lf=firstLineTime-activeAudio.currentTime; 
+                if(lf>0.5){
+                    ic.style.display='block';
+                    document.getElementById('introBarFill').style.width=(activeAudio.currentTime/firstLineTime)*100+'%';
+                    document.getElementById('introText').innerText=`Début dans ${lf.toFixed(1)}s`;
+                }else ic.style.display='none';
+            }else ic.style.display='none'; 
+            
+            if(!isLyricsMode||!lyricsData.length)return; 
+            
+            const cu=activeAudio.currentTime; 
+            let idx=-1; 
+            
+            // Trouver l'index actuel
+            for(let i=0;i<lyricsData.length;i++){
+                if(cu>=lyricsData[i].time)idx=i;
+                else break;
+            } 
+            
+            // Optimization: Use cached elements array instead of DOM query
+            if (lyricsElements.length > 0) {
+                lyricsElements.forEach((item, i) => {
+                    if(i===idx){
+                        if(!item.el.classList.contains('active')){
+                            item.el.classList.add('active');
+                            item.el.scrollIntoView({behavior:"smooth",block:"center"});
+                        }
+                    } else {
+                        item.el.classList.remove('active');
+                    }
+                });
+            }
         }
 
         document.addEventListener('DOMContentLoaded',()=>{
