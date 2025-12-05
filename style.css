@@ -29,6 +29,34 @@ body {
     -webkit-font-smoothing: antialiased;
 }
 
+/* --- OPTIMISATIONS SPECIFIQUES FIREFOX & TABLETTES --- */
+@-moz-document url-prefix() {
+    /* Firefox gère mal le backdrop-filter sur des éléments animés.
+       Comme le fond #ambientBg est DÉJÀ flou (blur 150px), le backdrop-filter
+       sur les panneaux est redondant et tue les perfs. On le retire ici. */
+    .app-layout, .sidebar, .player-capsule, .login-card, .right-panel, .eq-overlay {
+        backdrop-filter: none !important;
+        background: rgba(20, 20, 30, 0.85) !important; /* Opacité ajustée pour compenser */
+    }
+    
+    .track-card {
+        backdrop-filter: none !important;
+        /* Pas de box-shadow complexe sur Firefox */
+        box-shadow: none !important;
+        border: 1px solid rgba(255,255,255,0.15);
+    }
+    
+    /* Réduire la zone de flou du fond pour Firefox */
+    #ambientBg {
+        filter: blur(100px) !important; /* 150px est trop coûteux */
+    }
+    
+    /* Désactiver l'animation de l'orbe si elle est trop lourde */
+    .orbit-orb {
+        will-change: transform, opacity;
+    }
+}
+
 /* --- ANDROID TV MODE --- */
 body.tv-mode {
     cursor: none; /* Cache la souris */

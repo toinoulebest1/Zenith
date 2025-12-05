@@ -60,7 +60,11 @@ body.fire-mode .player-capsule { border: 1px solid #ff4500 !important; box-shado
     position: absolute; bottom: 0; background: #ff4500; width: 4px; height: 4px; border-radius: 50%;
     animation: riseEmber 3s linear infinite; opacity: 0; pointer-events: none; z-index: 0;
 }
-@keyframes riseEmber { 0% { bottom: 0; opacity: 1; } 100% { bottom: 100%; opacity: 0; transform: translateX(20px); } }
+/* OPTIMISATION: Utilisation de translateY au lieu de bottom */
+@keyframes riseEmber { 
+    0% { transform: translateY(0); opacity: 1; } 
+    100% { transform: translateY(-100vh) translateX(20px); opacity: 0; } 
+}
 
 /* --- 6. RAIN MODE (Pluie) --- */
 body.rain-mode {
@@ -73,6 +77,7 @@ body.rain-mode img { filter: grayscale(0.8) !important; }
     background: rgba(255,255,255,0.3); pointer-events: none;
     animation: fall 0.8s linear infinite;
 }
+/* Déjà optimisé avec transform */
 @keyframes fall { to { transform: translateY(105vh); } }
 
 /* --- 7. OCEAN MODE (Sous l'eau) --- */
@@ -90,4 +95,8 @@ body.ocean-mode .player-capsule { animation: floaty 3s ease-in-out infinite; }
     border: 1px solid rgba(255,255,255,0.4); pointer-events: none;
     animation: riseBubble 8s ease-in infinite;
 }
-@keyframes riseBubble { 0% { bottom: -20px; transform: scale(1); } 100% { bottom: 110%; transform: scale(1.5) translateX(20px); opacity: 0; } }
+/* OPTIMISATION: Utilisation de translateY */
+@keyframes riseBubble { 
+    0% { transform: translateY(0) scale(1); } 
+    100% { transform: translateY(-110vh) scale(1.5) translateX(20px); opacity: 0; } 
+}
