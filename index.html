@@ -196,7 +196,7 @@
                     <div class="artist-info">
                         <h1 id="artistProfileName" class="artist-name-large">Artiste</h1>
                         <div id="artistFans" class="artist-fans-badge" style="display:none;"><i class="fas fa-users"></i> 0 fans</div>
-                        <p id="artistProfileBio" class="artist-bio" style="display:none;"></p>
+                        <p id="artistProfileBio" class="artist-bio"></p>
                     </div>
                 </div>
                 
@@ -936,6 +936,15 @@
                 if(data.image) { 
                     document.getElementById('artistProfileImg').src = data.image; 
                     document.getElementById('artistHeaderBg').src = data.image; 
+                }
+                
+                // AFFICHAGE BIO
+                const bioEl = document.getElementById('artistProfileBio');
+                if (data.bio) {
+                    bioEl.innerHTML = data.bio;
+                    bioEl.style.display = 'block';
+                } else {
+                    bioEl.style.display = 'none';
                 }
                 
                 // 2. Top Titres (Affichage Liste)

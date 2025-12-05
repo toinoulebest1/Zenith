@@ -260,26 +260,50 @@ def sync_search_artist_full(name):
         artist = items[0]
         artist_id = artist['id']
         
-        # 2. Récupérer les détails (dont les albums)
-        details = client.api_call("artist/get", id=artist_id, extra="albums", limit=20)
+        # 2. Récupérer les détails (albums + bio)
+        # Ajout de 'biography' dans les extras
+        details = client.api_call("artist/get", id=artist_id, extra="albums,biography", limit=50)
+        
+        # Extraction de la biographie (nettoyage HTML basique si nécessaire)
+        bio = ""
+        if 'biography' in details and details['biography']:
+            # Qobuz renvoie souvent un dict { 'content': '...', 'language': '...' }
+            # ou parfois juste le texte selon la version de l'API
+            raw_bio = details['biography'].get('content', '')
+            # Nettoyage simple des balises HTML
+            bio = re.sub(r'<[^>]+>', '', raw_bio).strip()
         
         albums = []
         if 'albums' in details and 'items' in details['albums']:
             for a in details['albums']['items']:
-                a['source'] = 'qobuz'
-                albums.append(a)
+                # FILTRAGE STRICT : On ne garde que les albums où l'artiste est l'artiste principal
+                if str(a.get('artist', {}).get('id')) == str(artist_id):
+                    a['source'] = 'qobuz'
+                    albums.append(a)
                 
-        # 3. Récupérer les Top Tracks (Simulé par une recherche de tracks avec le nom de l'artiste)
-        # L'API Qobuz trie souvent par pertinence/popularité
+        # 3. Récupérer les Top Tracks (Simulé par recherche)
         top_tracks = []
-        track_search = client.api_call("track/search", query=artist['name'], limit=10)
+        track_search = client.api_call("track/search", query=artist['name'], limit=20)
         if 'tracks' in track_search and 'items' in track_search['tracks']:
             for t in track_search['tracks']['items']:
-                # Filtrage basique pour s'assurer que c'est bien l'artiste
-                # (Parfois la recherche renvoie des titres avec l'artiste en feat ou juste dans le titre)
-                t['source'] = 'qobuz'
-                fix_qobuz_title(t)
-                top_tracks.append(t)
+                # Filtrage : l'artiste doit être listé dans 'performer' ou 'artist'
+                # On vérifie si l'ID de l'artiste apparaît dans les métadonnées
+                is_related = False
+                
+                # Vérif artiste principal
+                if str(t.get('artist', {}).get('id')) == str(artist_id):
+                    is_related = True
+                # Vérif performer (plus complexe car texte)
+                elif 'performer' in t and artist['name'].lower() in t['performer']['name'].lower():
+                    is_related = True
+                
+                if is_related:
+                    t['source'] = 'qobuz'
+                    fix_qobuz_title(t)
+                    top_tracks.append(t)
+            
+            # On limite à 10 après filtrage
+            top_tracks = top_tracks[:10]
 
         return {
             "id": artist['id'],
@@ -287,7 +311,7 @@ def sync_search_artist_full(name):
             "image": artist.get('image', {}).get('large', '').replace('_300', '_600'),
             "albums": albums,
             "top_tracks": top_tracks,
-            "bio": "" # Qobuz API publique donne rarement la bio facilement ici
+            "bio": bio
         }
     except Exception as e:
         logger.error(f"Artist Full Search Error: {e}")
