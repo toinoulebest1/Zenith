@@ -931,6 +931,8 @@
             const bioEl = document.getElementById('artistProfileBio');
             bioEl.style.display = 'none';
             bioEl.innerText = '';
+            bioEl.style.cursor = 'default';
+            bioEl.onclick = null;
             
             // Suppression du bouton lire la suite s'il existe
             const prevBtn = document.getElementById('bioReadMoreBtn');
@@ -948,23 +950,25 @@
                 }
                 
                 // AFFICHAGE BIO
-                // Nettoyage bouton précédent
                 if(document.getElementById('bioReadMoreBtn')) document.getElementById('bioReadMoreBtn').remove();
 
                 if (data.bio) {
                     bioEl.innerHTML = data.bio;
                     bioEl.style.display = 'block';
                     
-                    // Logique de troncature
-                    if (data.bio.length > 250) { // Seuil de caractères
+                    // Logique de troncature plus sensible (150 chars ou 3 lignes)
+                    const lineCount = data.bio.split('\n').length;
+                    if (data.bio.length > 150 || lineCount > 3) { 
                         bioEl.classList.add('bio-collapsed');
+                        bioEl.style.cursor = 'pointer'; // Indique que c'est cliquable
                         
                         const btn = document.createElement('button');
                         btn.id = 'bioReadMoreBtn';
                         btn.className = 'bio-readmore-btn';
                         btn.innerHTML = 'Lire la suite <i class="fas fa-chevron-down"></i>';
                         
-                        btn.onclick = () => {
+                        // Fonction de bascule commune
+                        const toggleBio = () => {
                             const isCollapsed = bioEl.classList.contains('bio-collapsed');
                             if(isCollapsed) {
                                 bioEl.classList.remove('bio-collapsed');
@@ -973,6 +977,16 @@
                                 bioEl.classList.add('bio-collapsed');
                                 btn.innerHTML = 'Lire la suite <i class="fas fa-chevron-down"></i>';
                             }
+                        };
+
+                        btn.onclick = (e) => {
+                            e.stopPropagation(); // Évite double déclenchement si bioEl a aussi le click
+                            toggleBio();
+                        };
+                        
+                        // Clic sur le texte pour ouvrir
+                        bioEl.onclick = () => {
+                             if(bioEl.classList.contains('bio-collapsed')) toggleBio();
                         };
                         
                         // Ajout du bouton après la bio
@@ -1373,14 +1387,17 @@
         }
         async function openArtist(id){ safePushState({},"",`/?artist=${id}`); document.getElementById('trackGrid').innerHTML='<p style="text-align:center;margin-top:50px;">Chargement...</p>'; try{const r=await fetch(`${API_BASE}/artist?id=${id}`); const d=await r.json(); if(d.albums&&d.albums.items) renderGrid(d.albums.items.map(a=>({...a,type:'album',artist:{name:d.name}})),false); }catch(e){console.error(e);} }
         async function openAlbum(id,s){ 
+            showTracks(); // ADDED: Switch back to main grid view
             pushNavState(); 
             safePushState({},"",`/?album=${id}&source=${s||''}`); 
             document.getElementById('trackGrid').innerHTML='<p style="text-align:center;margin-top:50px;">Chargement...</p>'; 
             try{
                 const r=await fetch(`${API_BASE}/album?id=${id}&source=${s||''}`); 
                 const d=await r.json(); 
-                if(d.tracks&&d.tracks.items) 
+                if(d.tracks&&d.tracks.items) {
                     renderGrid(d.tracks.items.map(t=>({...t,type:'track',performer:t.performer||{name:d.artist.name},album:{image:{large:d.image.large},title:d.title},source:d.source||t.source||'qobuz'})), false); 
+                    if(d.title) document.getElementById('viewTitle').innerText = d.title; // ADDED: Update title
+                }
             }catch(e){console.error(e);} 
         }
         
