@@ -248,6 +248,51 @@ def sync_qobuz_search(query, limit=25, type='track'):
             return items
     except: return []
 
+def sync_search_artist_full(name):
+    """Recherche un artiste sur Qobuz et retourne ses infos + albums + top tracks"""
+    if not client: return None
+    try:
+        # 1. Rechercher l'artiste pour avoir son ID
+        r = client.api_call("artist/search", query=name, limit=1)
+        items = r.get('artists', {}).get('items', [])
+        if not items: return None
+        
+        artist = items[0]
+        artist_id = artist['id']
+        
+        # 2. Récupérer les détails (dont les albums)
+        details = client.api_call("artist/get", id=artist_id, extra="albums", limit=20)
+        
+        albums = []
+        if 'albums' in details and 'items' in details['albums']:
+            for a in details['albums']['items']:
+                a['source'] = 'qobuz'
+                albums.append(a)
+                
+        # 3. Récupérer les Top Tracks (Simulé par une recherche de tracks avec le nom de l'artiste)
+        # L'API Qobuz trie souvent par pertinence/popularité
+        top_tracks = []
+        track_search = client.api_call("track/search", query=artist['name'], limit=10)
+        if 'tracks' in track_search and 'items' in track_search['tracks']:
+            for t in track_search['tracks']['items']:
+                # Filtrage basique pour s'assurer que c'est bien l'artiste
+                # (Parfois la recherche renvoie des titres avec l'artiste en feat ou juste dans le titre)
+                t['source'] = 'qobuz'
+                fix_qobuz_title(t)
+                top_tracks.append(t)
+
+        return {
+            "id": artist['id'],
+            "name": artist['name'],
+            "image": artist.get('image', {}).get('large', '').replace('_300', '_600'),
+            "albums": albums,
+            "top_tracks": top_tracks,
+            "bio": "" # Qobuz API publique donne rarement la bio facilement ici
+        }
+    except Exception as e:
+        logger.error(f"Artist Full Search Error: {e}")
+        return None
+
 def sync_resolve_track(title, artist):
     target_artist = clean_string(artist)
     target_title = clean_string(title)
@@ -499,9 +544,12 @@ async def get_artist(id: str):
 
 @app.get('/artist_bio')
 async def get_artist_bio_route(name: str):
-    # Placeholder pour l'instant (LastFM ou autre API requise pour bio réelle)
-    # On retourne une structure compatible avec le frontend
-    return JSONResponse({"bio": f"Biographie de {name}...", "image": "", "nb_fans": 0, "top_tracks": []})
+    data = await run_in_threadpool(sync_search_artist_full, name)
+    if data:
+        return JSONResponse(data)
+    else:
+        # Fallback si non trouvé
+        return JSONResponse({"bio": f"Artiste non trouvé : {name}", "image": "", "nb_fans": 0, "top_tracks": [], "albums": []})
 
 @app.get('/stream/{track_id}')
 async def stream_track(track_id: str):
