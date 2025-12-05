@@ -591,9 +591,8 @@ body.zen-active.zen-idle {
     /* PERFORMANCE: GPU & Render Skip */
     transform: translate3d(0,0,0);
     will-change: transform, background-color;
-    contain: content;
-    content-visibility: auto; /* <--- KEY OPTIMIZATION FOR LONG LISTS */
-    contain-intrinsic-size: 200px 250px; /* Approximation of card size */
+    /* content-visibility: auto;  <-- REMOVED TO FIX HOVER ISSUE */
+    /* contain-intrinsic-size: 200px 250px; <-- REMOVED */
 }
 .track-card:hover { background: rgba(255,255,255,0.1); transform: translateY(-3px) translate3d(0,0,0); border-color: var(--primary); }
 .track-card.active-track { border-color: var(--primary); background: rgba(0, 210, 255, 0.1); box-shadow: 0 0 20px rgba(0, 210, 255, 0.2); }
