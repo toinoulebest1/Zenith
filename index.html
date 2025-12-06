@@ -1004,6 +1004,7 @@
                     data.top_tracks.forEach((t, i) => { 
                         const div = document.createElement('div'); 
                         div.className = 'track-row'; 
+                        div.dataset.id = t.id; // Added for highlight
                         
                         let img = t.album && t.album.image && t.album.image.large ? t.album.image.large.replace('_300', '_600') : 'https://placehold.co/60x60/1a1a1a/666666?text=M';
                         let badge = '';
@@ -1167,7 +1168,31 @@
         };
 
         function cleanString(s) { return s ? s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/gi,'').trim() : ""; }
-        function updateActiveCard() { document.querySelectorAll('.track-card').forEach(el => { el.classList.remove('active-track'); if(el.querySelector('.playing-indicator')) el.querySelector('.playing-indicator').remove(); }); if(!currentTrackId) return; const activeCards = document.querySelectorAll(`.track-card[data-id="${currentTrackId}"]`); activeCards.forEach(active => { active.classList.add('active-track'); const ind = document.createElement('div'); ind.className = 'playing-indicator'; ind.innerHTML = '<i class="fas fa-volume-up"></i>'; active.appendChild(ind); }); }
+        function updateActiveCard() { 
+            document.querySelectorAll('.track-card').forEach(el => { 
+                el.classList.remove('active-track'); 
+                if(el.querySelector('.playing-indicator')) el.querySelector('.playing-indicator').remove(); 
+            }); 
+            document.querySelectorAll('.track-row').forEach(el => {
+                el.classList.remove('active-row');
+            });
+
+            if(!currentTrackId) return; 
+            
+            const activeCards = document.querySelectorAll(`.track-card[data-id="${currentTrackId}"]`); 
+            activeCards.forEach(active => { 
+                active.classList.add('active-track'); 
+                const ind = document.createElement('div'); 
+                ind.className = 'playing-indicator'; 
+                ind.innerHTML = '<i class="fas fa-volume-up"></i>'; 
+                active.appendChild(ind); 
+            }); 
+
+            const activeRows = document.querySelectorAll(`.track-row[data-id="${currentTrackId}"]`);
+            activeRows.forEach(active => {
+                active.classList.add('active-row');
+            });
+        }
         function goHome(p=true){ 
             if(p) safePushState({},"","/"); 
             resetNavStack(); 

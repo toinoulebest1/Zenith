@@ -702,9 +702,6 @@ body.zen-active.zen-idle {
 }
 
 /* TRACK LIST STYLE (New) */
-.track-list {
-    display: flex; flex-direction: column; gap: 5px;
-}
 .track-row {
     display: flex; align-items: center;
     padding: 10px 15px;
@@ -717,6 +714,34 @@ body.zen-active.zen-idle {
     background: rgba(255,255,255,0.08);
     border-color: rgba(255,255,255,0.1);
 }
+
+/* Active state for track rows in artist profile */
+.track-row.active-row {
+    background: rgba(0, 210, 255, 0.15);
+    border-color: var(--primary);
+}
+.track-row.active-row .track-row-num {
+    color: var(--primary);
+    /* Hide number and show icon trick */
+    font-size: 0;
+    display: flex;
+    justify-content: center;
+}
+.track-row.active-row .track-row-num::before {
+    content: '\f028'; /* FA volume-up */
+    font-family: "Font Awesome 5 Free";
+    font-weight: 900;
+    font-size: 14px;
+    animation: pulseText 1.5s infinite;
+}
+.track-row.active-row .track-row-title {
+    color: var(--primary);
+}
+
+.track-list {
+    display: flex; flex-direction: column; gap: 5px;
+}
+
 .track-row-num {
     width: 30px; color: #666; font-size: 14px; font-weight: 600;
 }
