@@ -956,18 +956,17 @@
                     bioEl.innerHTML = data.bio;
                     bioEl.style.display = 'block';
                     
-                    // Logique de troncature plus sensible (150 chars ou 3 lignes)
+                    // Improved truncation logic (visual lines approximation)
                     const lineCount = data.bio.split('\n').length;
                     if (data.bio.length > 150 || lineCount > 3) { 
                         bioEl.classList.add('bio-collapsed');
-                        bioEl.style.cursor = 'pointer'; // Indique que c'est cliquable
+                        bioEl.style.cursor = 'pointer'; 
                         
                         const btn = document.createElement('button');
                         btn.id = 'bioReadMoreBtn';
                         btn.className = 'bio-readmore-btn';
                         btn.innerHTML = 'Lire la suite <i class="fas fa-chevron-down"></i>';
                         
-                        // Fonction de bascule commune
                         const toggleBio = () => {
                             const isCollapsed = bioEl.classList.contains('bio-collapsed');
                             if(isCollapsed) {
@@ -980,19 +979,19 @@
                         };
 
                         btn.onclick = (e) => {
-                            e.stopPropagation(); // Évite double déclenchement si bioEl a aussi le click
+                            e.stopPropagation();
                             toggleBio();
                         };
                         
-                        // Clic sur le texte pour ouvrir
                         bioEl.onclick = () => {
                              if(bioEl.classList.contains('bio-collapsed')) toggleBio();
                         };
                         
-                        // Ajout du bouton après la bio
                         bioEl.parentNode.appendChild(btn);
                     } else {
                         bioEl.classList.remove('bio-collapsed');
+                        bioEl.style.cursor = 'default';
+                        bioEl.onclick = null;
                     }
                 } else {
                     bioEl.style.display = 'none';
