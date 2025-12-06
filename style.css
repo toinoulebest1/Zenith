@@ -655,19 +655,25 @@ body.zen-active.zen-idle {
     line-height: 1; text-shadow: 0 0 30px rgba(0,0,0,0.8); 
     letter-spacing: -2px;
 }
+
+/* UPDATED BIO STYLES */
 .artist-bio { 
-    font-size: 15px; line-height: 1.6; color: #ddd; 
-    max-width: 600px; margin: 0 auto;
+    font-size: 15px; 
+    line-height: 1.6; 
+    color: #ddd; 
+    max-width: 600px; 
+    margin: 0 auto;
     text-shadow: 0 2px 4px rgba(0,0,0,0.8);
-    transition: max-height 0.3s ease;
+    
+    /* Animation et Expansion */
+    max-height: 5000px; /* Allow full height when expanded */
+    overflow: hidden;
+    transition: max-height 0.5s ease-out;
 }
 
-/* BIO COLLAPSED STATE (New) */
+/* BIO COLLAPSED STATE (Max Height Truncation) */
 .artist-bio.bio-collapsed {
-    display: -webkit-box;
-    -webkit-line-clamp: 3;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
+    max-height: 75px; /* ~3 lignes (15px * 1.6 * 3 ≈ 72px) */
     mask-image: linear-gradient(to bottom, black 50%, transparent 100%);
     -webkit-mask-image: linear-gradient(to bottom, black 50%, transparent 100%);
 }
