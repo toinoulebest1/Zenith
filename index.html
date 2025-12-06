@@ -1387,7 +1387,7 @@
         async function openArtist(id){ safePushState({},"",`/?artist=${id}`); document.getElementById('trackGrid').innerHTML='<p style="text-align:center;margin-top:50px;">Chargement...</p>'; try{const r=await fetch(`${API_BASE}/artist?id=${id}`); const d=await r.json(); if(d.albums&&d.albums.items) renderGrid(d.albums.items.map(a=>({...a,type:'album',artist:{name:d.name}})),false); }catch(e){console.error(e);} }
         async function openAlbum(id,s){ 
             showTracks(); // ADDED: Switch back to main grid view
-            document.getElementById('searchBarContainer').style.display='none'; // ADDED: Hide search bar in album view
+            // document.getElementById('searchBarContainer').style.display='none'; // REMOVED: Keep search bar visible
             pushNavState(); 
             safePushState({},"",`/?album=${id}&source=${s||''}`); 
             document.getElementById('trackGrid').innerHTML='<p style="text-align:center;margin-top:50px;">Chargement...</p>'; 
