@@ -1,0 +1,102 @@
+/* --- magic.css : TOUS LES EFFETS --- */
+
+/* --- 1. HARRY POTTER (Baguette) --- */
+.wand-container {
+    position: absolute; bottom: -500px; left: 50%; transform: translateX(-50%);
+    width: 20px; height: 400px; z-index: 5;
+    transition: bottom 3s cubic-bezier(0.19, 1, 0.22, 1);
+    display: flex; flex-direction: column; align-items: center; pointer-events: none;
+}
+.wand-container.active { bottom: -100px; }
+
+.magic-wand {
+    width: 8px; height: 100%;
+    background: linear-gradient(90deg, #1a0f0a, #5d4037, #2e1a0f, #000);
+    border-radius: 4px 4px 0 0; box-shadow: 0 0 20px rgba(0,0,0,0.8);
+}
+.wand-light {
+    width: 12px; height: 12px; background: #fff; border-radius: 50%;
+    position: absolute; top: -6px; left: 50%; transform: translateX(-50%) scale(0);
+    box-shadow: 0 0 0px #fff; transition: all 0.5s ease 2.8s; z-index: 10;
+}
+.wand-container.active .wand-light {
+    transform: translateX(-50%) scale(1.2);
+    box-shadow: 0 0 15px 5px #fff, 0 0 40px 15px var(--primary), 0 0 100px 30px rgba(0, 210, 255, 0.5);
+    animation: pulseLight 2s infinite alternate;
+}
+@keyframes pulseLight { from { opacity: 0.8; transform: translateX(-50%) scale(1); } to { opacity: 1; transform: translateX(-50%) scale(1.3); } }
+
+/* --- 2. STAR WARS (Sith) --- */
+body.starwars-mode .progress-fill {
+    background: #ff0000 !important;
+    box-shadow: 0 0 10px #ff0000, 0 0 20px #ff0000, 0 0 40px #ff0000 !important;
+}
+body.starwars-mode .progress-bg { background: #330000 !important; }
+
+/* --- 3. MATRIX (Hacker) --- */
+body.matrix-mode { background: #000 !important; font-family: 'Courier New', monospace !important; }
+body.matrix-mode * { color: #00ff41 !important; border-color: #003b00 !important; }
+body.matrix-mode .app-layout, body.matrix-mode .track-card, body.matrix-mode .player-capsule, body.matrix-mode .sidebar, body.matrix-mode .search-container {
+    background: rgba(0, 20, 0, 0.9) !important; box-shadow: none !important; border: 1px solid #00ff41 !important;
+}
+body.matrix-mode img { filter: grayscale(100%) sepia(100%) hue-rotate(90deg) saturate(500%) !important; }
+
+/* --- 4. DISCO (Fête) --- */
+body.disco-mode { animation: discoBG 2s infinite alternate !important; }
+@keyframes discoBG { 0% { background: #240b36; } 25% { background: #c31432; } 50% { background: #0f9b0f; } 75% { background: #00d2ff; } 100% { background: #f72585; } }
+
+/* --- 5. FIRE MODE (Enfer) --- */
+body.fire-mode {
+    background: linear-gradient(to top, #4a0000, #000000) !important;
+}
+body.fire-mode .album-art-xl {
+    animation: shake 0.5s infinite;
+    box-shadow: 0 0 50px #ff4500 !important;
+}
+body.fire-mode .player-capsule { border: 1px solid #ff4500 !important; box-shadow: 0 0 20px #ff4500 !important; }
+@keyframes shake { 0% { transform: translate(1px, 1px) rotate(0deg); } 50% { transform: translate(-1px, -2px) rotate(-1deg); } 100% { transform: translate(-1px, 0px) rotate(1deg); } }
+
+.ember {
+    position: absolute; bottom: 0; background: #ff4500; width: 4px; height: 4px; border-radius: 50%;
+    animation: riseEmber 3s linear infinite; opacity: 0; pointer-events: none; z-index: 0;
+}
+/* OPTIMISATION: Utilisation de translateY au lieu de bottom */
+@keyframes riseEmber { 
+    0% { transform: translateY(0); opacity: 1; } 
+    100% { transform: translateY(-100vh) translateX(20px); opacity: 0; } 
+}
+
+/* --- 6. RAIN MODE (Pluie) --- */
+body.rain-mode {
+    background: linear-gradient(to bottom, #2c3e50, #000000) !important;
+}
+body.rain-mode img { filter: grayscale(0.8) !important; }
+
+.raindrop {
+    position: absolute; top: -20px; width: 1px; height: 20px;
+    background: rgba(255,255,255,0.3); pointer-events: none;
+    animation: fall 0.8s linear infinite;
+}
+/* Déjà optimisé avec transform */
+@keyframes fall { to { transform: translateY(105vh); } }
+
+/* --- 7. OCEAN MODE (Sous l'eau) --- */
+body.ocean-mode {
+    background: radial-gradient(circle, #1a2980, #26d0ce) !important;
+    animation: oceanSway 5s ease-in-out infinite alternate;
+}
+body.ocean-mode .app-layout { backdrop-filter: blur(5px) !important; }
+body.ocean-mode .player-capsule { animation: floaty 3s ease-in-out infinite; }
+
+@keyframes floaty { 0% { transform: translateX(-50%) translateY(0px); } 50% { transform: translateX(-50%) translateY(-10px); } 100% { transform: translateX(-50%) translateY(0px); } }
+
+.bubble {
+    position: absolute; bottom: -20px; background: rgba(255,255,255,0.2); border-radius: 50%;
+    border: 1px solid rgba(255,255,255,0.4); pointer-events: none;
+    animation: riseBubble 8s ease-in infinite;
+}
+/* OPTIMISATION: Utilisation de translateY */
+@keyframes riseBubble { 
+    0% { transform: translateY(0) scale(1); } 
+    100% { transform: translateY(-110vh) scale(1.5) translateX(20px); opacity: 0; } 
+}
