@@ -26,6 +26,7 @@ except ImportError:
 import logging
 import random
 import requests
+import requests.adapters # IMPORTANT: Pour le patch global
 import re
 import urllib.parse
 import hashlib
@@ -33,6 +34,12 @@ import string
 import unicodedata 
 from ytmusicapi import YTMusic
 from deep_translator import GoogleTranslator
+
+# --- PATCH GLOBAL CONNEXIONS ---
+# Force requests à accepter 100 connexions simultanées par défaut PARTOUT
+# Cela règle le problème "Connection pool is full" pour ytmusicapi et lrclib
+requests.adapters.DEFAULT_POOLSIZE = 100
+requests.adapters.DEFAULT_RETRIES = 3
 
 # Tentative d'import pour rapidfuzz
 try:
@@ -206,7 +213,13 @@ def sync_search_yt_lyrics(title, artist):
         if isinstance(lyrics_data.get('lyrics'), str): return {"type": "plain", "lyrics": lyrics_data['lyrics']}
         return None
     except Exception as e:
-        logger.error(f"YT Lyrics Error: {e}")
+        # On log l'erreur proprement sans polluer la console avec la traceback complète
+        error_msg = str(e)
+        if 'musicResponsiveListItemRenderer' in error_msg:
+            # Erreur connue de structure YT, pas besoin de s'inquiéter
+            pass 
+        else:
+            logger.error(f"YT Lyrics Warning: {error_msg}")
         return None
 
 def sync_search_subsonic(query, limit=20):
