@@ -243,6 +243,15 @@
 
                     <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 30px 0;">
                     <h3 style="margin-bottom: 20px; text-align: left;">Audio</h3>
+                    
+                    <div class="form-group" style="display: flex; justify-content: space-between; align-items: center; background:rgba(255,255,255,0.05); padding:15px; border-radius:12px; border:1px solid rgba(255,255,255,0.1);">
+                        <div style="display:flex; flex-direction:column; align-items:flex-start;">
+                            <label class="form-label" style="margin:0; color:#00ff88;"><i class="fab fa-bluetooth-b"></i> Mode Audio Direct</label>
+                            <span style="font-size:10px; color:#aaa;">Pour Bluetooth voiture. Désactive EQ/FX pour éviter les coupures.</span>
+                        </div>
+                        <label class="switch"><input type="checkbox" id="settingDirectAudio" onchange="changeSetting('directAudio', this.checked)"><span class="slider round"></span></label>
+                    </div>
+
                     <div class="form-group" style="display: flex; justify-content: space-between; align-items: center;">
                         <label class="form-label" style="margin:0;">Normalisateur actif au démarrage</label>
                         <label class="switch"><input type="checkbox" id="settingLimiter" onchange="changeSetting('limiter', this.checked)"><span class="slider round"></span></label>
@@ -412,7 +421,8 @@
         let eqFilters = []; const eqFrequencies = [60, 230, 910, 4000, 14000];
         let compressor; 
 
-        let userSettings = { limiter: false, crossfade: 0, magic: true, eco: false }; 
+        // --- NEW: DIRECT AUDIO SETTING ---
+        let userSettings = { limiter: false, crossfade: 0, magic: true, eco: false, directAudio: false }; 
         let magicEnabled = true; 
         
         let favorites = [];
@@ -442,9 +452,30 @@
         }
 
         function applySettings(settings) {
+            // DIRECT AUDIO LOGIC
+            const isDirect = (settings.directAudio === true || settings.directAudio === 'true');
+            userSettings.directAudio = isDirect;
+            document.getElementById('settingDirectAudio').checked = isDirect;
+
+            // Si Direct Audio est activé, on désactive les effets visuellement
+            if (isDirect) {
+                 disableAudioFXButtons();
+                 document.getElementById('settingCrossfade').disabled = true;
+                 document.getElementById('settingLimiter').disabled = true;
+                 showToast("Mode Direct Audio Activé (Pas d'EQ/FX)");
+            } else {
+                 if (audioCtx) enableAudioFXButtons();
+                 document.getElementById('settingCrossfade').disabled = false;
+                 document.getElementById('settingLimiter').disabled = false;
+            }
+
             isLimiterOn = (settings.limiter === true || settings.limiter === 'true'); 
             document.getElementById('settingLimiter').checked = isLimiterOn; 
-            if (compressor && audioCtx) compressor.threshold.setTargetAtTime(isLimiterOn ? -10 : 0, audioCtx.currentTime, 0.05);
+            
+            // Only update compressor if audioCtx exists AND we are not in Direct Mode (handled by initAudioContext)
+            if (compressor && audioCtx && !isDirect) {
+                compressor.threshold.setTargetAtTime(isLimiterOn ? -10 : 0, audioCtx.currentTime, 0.05);
+            }
             document.getElementById('limiterBtn').classList.toggle('active', isLimiterOn);
 
             const xfade = parseInt(settings.crossfade || 0); 
@@ -461,7 +492,6 @@
             document.getElementById('settingEcoMode').checked = isEco;
             if (isEco) {
                 document.body.classList.add('eco-mode');
-                // Force disable magic in eco mode
                 settings.magic = false;
                 document.getElementById('settingMagic').checked = false;
             } else {
@@ -478,7 +508,30 @@
                 if(typeof stopEffects === 'function') stopEffects(); 
             }
         }
-        async function changeSetting(key, value) { userSettings[key] = value; applySettings(userSettings); localStorage.setItem('zenith_pref_' + key, value); if(!supabaseClient) return; const { data: { user } } = await supabaseClient.auth.getUser(); if(user) { try { await supabaseClient.from('profiles').update({ settings: userSettings }).eq('id', user.id); } catch(e) { console.error("Sync settings error", e); } } }
+
+        async function changeSetting(key, value) { 
+            userSettings[key] = value; 
+            
+            if (key === 'directAudio') {
+                // Changing audio routing requires reload to be clean
+                localStorage.setItem('zenith_pref_' + key, value);
+                if(confirm("Le changement de mode audio nécessite un rechargement. Recharger maintenant ?")) {
+                    window.location.reload();
+                }
+                return;
+            }
+            
+            applySettings(userSettings); 
+            localStorage.setItem('zenith_pref_' + key, value); 
+            
+            if(!supabaseClient) return; 
+            const { data: { user } } = await supabaseClient.auth.getUser(); 
+            if(user) { 
+                try { await supabaseClient.from('profiles').update({ settings: userSettings }).eq('id', user.id); } 
+                catch(e) { console.error("Sync settings error", e); } 
+            } 
+        }
+
         function loadLocalSettings() { 
             const sLimiter = localStorage.getItem('zenith_pref_limiter'); 
             if(sLimiter !== null) userSettings.limiter = (sLimiter === 'true'); 
@@ -487,14 +540,30 @@
             const sXfade = localStorage.getItem('zenith_pref_crossfade'); if(sXfade !== null) userSettings.crossfade = parseInt(sXfade); 
             const sMagic = localStorage.getItem('zenith_pref_magic'); if(sMagic !== null) userSettings.magic = (sMagic === 'true'); 
             const sEco = localStorage.getItem('zenith_pref_eco'); if(sEco !== null) userSettings.eco = (sEco === 'true');
+            const sDirect = localStorage.getItem('zenith_pref_directAudio'); if(sDirect !== null) userSettings.directAudio = (sDirect === 'true');
+
             applySettings(userSettings); 
         }
-        const originalLoadProfile = window.loadProfile; window.loadProfile = async function() { if(originalLoadProfile) await originalLoadProfile(); const { data: { user } } = await supabaseClient.auth.getUser(); if(!user) return; if (window.loadUserPlaylists) window.loadUserPlaylists(); if (window.loadUserHistory) await window.loadUserHistory(); const { data, error } = await supabaseClient.from('profiles').select('settings').eq('id', user.id).single(); if (data && data.settings) { userSettings = { ...userSettings, ...data.settings }; applySettings(userSettings); localStorage.setItem('zenith_pref_limiter', userSettings.limiter); localStorage.setItem('zenith_pref_crossfade', userSettings.crossfade); localStorage.setItem('zenith_pref_magic', userSettings.magic); localStorage.setItem('zenith_pref_eco', userSettings.eco); } };
+
+        const originalLoadProfile = window.loadProfile; window.loadProfile = async function() { if(originalLoadProfile) await originalLoadProfile(); const { data: { user } } = await supabaseClient.auth.getUser(); if(!user) return; if (window.loadUserPlaylists) window.loadUserPlaylists(); if (window.loadUserHistory) await window.loadUserHistory(); const { data, error } = await supabaseClient.from('profiles').select('settings').eq('id', user.id).single(); if (data && data.settings) { userSettings = { ...userSettings, ...data.settings }; applySettings(userSettings); localStorage.setItem('zenith_pref_limiter', userSettings.limiter); localStorage.setItem('zenith_pref_crossfade', userSettings.crossfade); localStorage.setItem('zenith_pref_magic', userSettings.magic); localStorage.setItem('zenith_pref_eco', userSettings.eco); localStorage.setItem('zenith_pref_directAudio', userSettings.directAudio); } };
         function showProfileSettings() { document.getElementById('trackView').style.display = 'none'; document.getElementById('artistView').style.display = 'none'; document.getElementById('lyricsView').style.display = 'none'; document.getElementById('blindTestView').style.display = 'none'; document.getElementById('allPlaylistsView').style.display = 'none'; document.getElementById('playlistView').style.display = 'none'; document.getElementById('searchBarContainer').style.display = 'none'; document.getElementById('profileView').style.display = 'block'; window.loadProfile(); }
         window.loadUserFavorites = async function() { if(!supabaseClient) return; const { data: { user } } = await supabaseClient.auth.getUser(); if(!user) return; const { data, error } = await supabaseClient.from('favorites').select('*'); if(data) { favorites = data.map(f => ({...f.track_data, fromSearch: false})); updateLikeButtonState(); } window.loadProfile(); };
         function safePushState(data, title, url) { try { if (window.history && window.history.pushState) { window.history.pushState(data, title, url); } } catch (e) { console.warn("History pushState blocked", e); } }
         
         async function initAudioContext() {
+            // IF DIRECT AUDIO MODE IS ON, WE DO NOT CREATE AUDIO CONTEXT NODES
+            // THIS CONNECTS AUDIO ELEMENTS DIRECTLY TO SYSTEM OUTPUT
+            if (userSettings.directAudio) {
+                console.log("🔊 MODE DIRECT AUDIO ACTIVÉ: Web Audio API Bypassé pour performance Bluetooth.");
+                disableAudioFXButtons();
+                // Assure que les lecteurs sont "libres"
+                try {
+                    if (audioCtx) await audioCtx.close();
+                    audioCtx = null;
+                } catch(e) {}
+                return;
+            }
+
             const AudioContext = window.AudioContext || window.webkitAudioContext;
             if (!audioCtx) {
                 audioCtx = new AudioContext({ latencyHint: 'playback' });
@@ -571,6 +640,8 @@
             document.querySelectorAll('.eq-range').forEach(s => s.disabled = true);
             document.querySelector('.xfade-range').disabled = true;
             document.getElementById('eqView').querySelector('.eq-reset-btn').disabled = true;
+            document.getElementById('limiterBtn').style.opacity = "0.5";
+            document.getElementById('orbitBtn').style.opacity = "0.5";
         }
 
         function enableAudioFXButtons() {
@@ -579,11 +650,13 @@
             document.querySelectorAll('.eq-range').forEach(s => s.disabled = false);
             document.querySelector('.xfade-range').disabled = false;
             document.getElementById('eqView').querySelector('.eq-reset-btn').disabled = false;
+            document.getElementById('limiterBtn').style.opacity = "1";
+            document.getElementById('orbitBtn').style.opacity = "1";
         }
 
         function setGlobalVolume(val) {
             globalVolume = parseFloat(val);
-            if (zenithNode && audioCtx) {
+            if (zenithNode && audioCtx && !userSettings.directAudio) {
                 zenithNode.parameters.get('volume').setTargetAtTime(globalVolume, audioCtx.currentTime, 0.05);
             } else {
                 playerA.volume = globalVolume;
@@ -592,6 +665,7 @@
         }
         
         function toggleLimiter() {
+            if (userSettings.directAudio) { showToast("Indisponible en mode Direct Audio"); return; }
             if (!audioCtx || !compressor) return;
             isLimiterOn = !isLimiterOn;
             document.getElementById('limiterBtn').classList.toggle('active', isLimiterOn);
@@ -606,6 +680,7 @@
         }
 
         function toggleOrbit() {
+            if (userSettings.directAudio) { showToast("Indisponible en mode Direct Audio"); return; }
             if (!audioCtx || !zenithNode) return;
             isOrbitOn = !isOrbitOn;
             document.getElementById('orbitBtn').classList.toggle('active', isOrbitOn);
@@ -623,17 +698,20 @@
         }
 
         function updateCrossfade(val) {
+            if (userSettings.directAudio) return;
             const duration = parseFloat(val);
             document.getElementById('xfadeVal').innerText = duration + "s";
             changeSetting('crossfade', duration);
         }
 
         function updateEQ(index, value) {
+            if (userSettings.directAudio) return;
             if (!audioCtx || !eqFilters[index]) return;
             eqFilters[index].gain.setTargetAtTime(parseFloat(value), audioCtx.currentTime, 0.05);
         }
 
         function resetEQ() {
+            if (userSettings.directAudio) return;
             if (!audioCtx || !eqFilters.length) return;
             eqFilters.forEach((filter, i) => {
                 filter.gain.setTargetAtTime(0, audioCtx.currentTime, 0.05);
@@ -734,12 +812,16 @@
                 return; 
             }
 
-            if (!audioCtx) await initAudioContext();
-            if (audioCtx.state === 'suspended') await audioCtx.resume();
+            // ONLY init Web Audio if NOT in Direct Mode
+            if (!userSettings.directAudio) {
+                if (!audioCtx) await initAudioContext();
+                if (audioCtx && audioCtx.state === 'suspended') await audioCtx.resume();
+            }
 
             nextTrackTriggered = false; 
             const nextTrack = tracks[index];
             
+            // In Direct Mode, we can reuse same player or switch, but crossfade is disabled anyway
             const nextAudio = (activeAudio === playerA) ? playerB : playerA; 
             const prevAudio = activeAudio;
             
@@ -762,7 +844,8 @@
             
             if(nextTrack.source !== 'yt_lazy' && nextTrack.source !== 'spotify_lazy' && nextTrack.source !== 'deezer') safePushState({}, "", `/?track=${nextTrack.id}&source=${nextTrack.source}`);
             
-            startCrossfade(prevAudio, nextAudio, useCrossfade); 
+            // Force disable crossfade if direct audio
+            startCrossfade(prevAudio, nextAudio, useCrossfade && !userSettings.directAudio); 
             
             activeAudio = nextAudio; 
             
@@ -782,7 +865,8 @@
         }
 
         function startCrossfade(prevAudio, nextAudio, enableFade) { 
-            if (!audioCtx || !zenithNode) {
+            // DIRECT AUDIO MODE: Hard Cut (No Web Audio)
+            if (userSettings.directAudio || !audioCtx || !zenithNode) {
                 prevAudio.pause();
                 prevAudio.currentTime = 0;
                 return;
@@ -1126,7 +1210,7 @@
                 document.getElementById('artistTopTracks').innerHTML = '<p style="color:red;">Erreur de chargement.</p>';
             } 
         }
-        function play() { if(audioCtx && audioCtx.state === 'suspended') audioCtx.resume(); activeAudio.play().then(() => { isPlaying = true; document.getElementById('playIcon').className = 'fas fa-pause'; updateMediaSessionState(); if('mediaSession' in navigator) navigator.mediaSession.playbackState = "playing"; if (typeof broadcastPlay === 'function') broadcastPlay(); }).catch(e => {}); }
+        function play() { if(audioCtx && audioCtx.state === 'suspended' && !userSettings.directAudio) audioCtx.resume(); activeAudio.play().then(() => { isPlaying = true; document.getElementById('playIcon').className = 'fas fa-pause'; updateMediaSessionState(); if('mediaSession' in navigator) navigator.mediaSession.playbackState = "playing"; if (typeof broadcastPlay === 'function') broadcastPlay(); }).catch(e => {}); }
         function pause() { playerA.pause(); playerB.pause(); isPlaying = false; document.getElementById('playIcon').className = 'fas fa-play'; if('mediaSession' in navigator) navigator.mediaSession.playbackState = "paused"; if (typeof broadcastPause === 'function') broadcastPause(); }
         function fmtTime(s) { if(!s || isNaN(s)) return "0:00"; let m=Math.floor(s/60), sec=Math.floor(s%60); return m+":"+(sec<10?"0":"")+sec; }
         function showToast(msg) { const t=document.getElementById('toast'); t.innerText=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),2000); }
