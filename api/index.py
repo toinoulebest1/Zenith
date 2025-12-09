@@ -52,8 +52,6 @@ SUBSONIC_PASSWORD = "EbPNO8NRaEko"
 SUBSONIC_CLIENT = "Feishin"
 SUBSONIC_VERSION = "1.13.0"
 
-SUPABASE_PROXY_URL = "https://mzxfcvzqxgslyopkkaej.supabase.co/functions/v1/stream-proxy"
-
 # --- INIT FASTAPI ---
 app = FastAPI(title="Zenith API", docs_url=None, redoc_url=None)
 
@@ -647,7 +645,7 @@ async def get_yt_playlist_details_route(id: str):
                         "id": t.get("videoId"), "title": t.get("title"),
                         "performer": { "name": t.get("artists", [{'name':'Inconnu'}])[0]['name'] },
                         "album": { "title": details.get('title'), "image": { "large": img } },
-                        "duration": parse_duration(t.get('duration') or t.get('lengthSeconds')),
+                        "duration": parse_duration(t.get('duration') or t.get("lengthSeconds")),
                         "source": "yt_lazy", "type": "track", "img": img
                     })
                 except: continue
@@ -781,7 +779,7 @@ async def stream_track(track_id: str):
             except: continue
         return None
     url = await run_in_threadpool(_get_url)
-    if url: return RedirectResponse(f"{SUPABASE_PROXY_URL}?url={urllib.parse.quote(url)}")
+    if url: return RedirectResponse(url)
     raise HTTPException(404, "URL not found")
 
 @app.get('/stream_subsonic/{track_id}')
@@ -790,7 +788,7 @@ async def stream_subsonic(track_id: str):
     p.update({'id': track_id, 'format': 'mp3', 'maxBitRate': '320'})
     query = urllib.parse.urlencode(p)
     full_url = f"{SUBSONIC_BASE}stream.view?{query}"
-    return RedirectResponse(f"{SUPABASE_PROXY_URL}?url={urllib.parse.quote(full_url)}")
+    return RedirectResponse(full_url)
 
 @app.get('/get_subsonic_cover/{cover_id}')
 async def get_subsonic_cover(cover_id: str):
