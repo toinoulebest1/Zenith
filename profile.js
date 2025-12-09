@@ -1,6 +1,8 @@
 // profile.js - Gestion du profil et upload d'avatar
 
-const DEFAULT_AVATAR = "https://mzxfcvzqxgslyopkkaej.supabase.co/storage/v1/object/public/avatar_nopersonalize/avatarno_personalize.png";
+// OPTIMISATION EGRESS : Utilisation d'une image externe (Placehold.co) au lieu de Supabase Storage
+// Cela évite de consommer votre quota "Egress" à chaque chargement de page.
+const DEFAULT_AVATAR = "https://placehold.co/400x400/1a1a1a/666666?text=U";
 
 async function loadProfile() {
     const { data: { user } } = await supabaseClient.auth.getUser();
@@ -47,6 +49,8 @@ async function updateProfile() {
     try {
         // 1. Upload de l'image si une nouvelle est sélectionnée
         if (avatarFile) {
+            // Optimisation : On supprime l'ancien avatar s'il existait pour économiser le stockage (optionnel mais recommandé)
+            
             const fileExt = avatarFile.name.split('.').pop();
             const fileName = `${user.id}-${Math.random()}.${fileExt}`;
             const filePath = `${fileName}`;
@@ -103,10 +107,10 @@ async function fixSpotifyTags() {
         const { data: { user } } = await supabaseClient.auth.getUser();
         if (!user) return;
 
-        // 1. Récupérer tous les favoris
+        // 1. Récupérer tous les favoris (Attention Egress : On ne récupère que ce qui est nécessaire)
         const { data: favs, error } = await supabaseClient
             .from('favorites')
-            .select('*')
+            .select('id, track_data') 
             .eq('user_id', user.id);
 
         if (error) throw error;

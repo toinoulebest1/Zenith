@@ -227,7 +227,7 @@
                 <div class="profile-container">
                     <h2 style="margin-bottom: 30px; font-size: 24px;">Mon Profil</h2>
                     <div class="profile-avatar-wrapper" onclick="triggerAvatarUpload()">
-                        <img src="https://mzxfcvzqxgslyopkkaej.supabase.co/storage/v1/object/public/avatar_nopersonalize/avatarno_personalize.png" id="profileAvatarPreview" class="profile-avatar">
+                        <img src="https://placehold.co/400x400/1a1a1a/666666?text=U" id="profileAvatarPreview" class="profile-avatar">
                         <div class="profile-avatar-overlay"><i class="fas fa-camera"></i></div>
                         <input type="file" id="profileAvatarInput" accept="image/*" style="display: none;">
                     </div>
@@ -758,7 +758,7 @@
                 const artist = t.performer ? t.performer.name : (t.artist ? t.artist.name : 'Inconnu');
                 
                 el.innerHTML = `
-                    <img src="${img}" loading="lazy">
+                    <img src="${img}" loading="lazy" decoding="async">
                     <div class="queue-info">
                         <div class="queue-title">${t.title}</div>
                         <div class="queue-artist">${artist}</div>
@@ -1667,7 +1667,7 @@
                     details.tracks.forEach((it) => {
                         const displayImg = it.img || it.album.image.large || 'https://placehold.co/300x300/1a1a1a/666666?text=Music'; 
                         const div = document.createElement('div'); div.className = 'track-card'; div.dataset.id = it.id;
-                        div.innerHTML = `<div class="badges-container"></div><img src="${displayImg}" loading="lazy"><h3>${it.title}</h3><p>${it.performer.name}</p>`;
+                        div.innerHTML = `<div class="badges-container"></div><img src="${displayImg}" loading="lazy" decoding="async"><h3>${it.title}</h3><p>${it.performer.name}</p>`;
                         div.onclick = () => { 
                             // Important : on propage la source pour que loadTrack sache comment résoudre
                             tracks = details.tracks.map(t => ({ 
@@ -1702,21 +1702,21 @@
                     else if (it.image && it.image.large) u = it.image.large;
                     
                     if(!u) u = 'https://placehold.co/300x300/1a1a1a/666666?text=Artiste';
-                    mediaElement = `<img src="${u}" loading="lazy" style="border-radius:50%; aspect-ratio:1/1; object-fit:cover;">`;
+                    mediaElement = `<img src="${u}" loading="lazy" decoding="async" style="border-radius:50%; aspect-ratio:1/1; object-fit:cover;">`;
                 } 
                 else if (isPl) { 
                     if (typeof getPlaylistCoverHTML === 'function' && src !== 'ytmusic' && src !== 'deezer') { 
                         mediaElement = getPlaylistCoverHTML(it); 
                     } else { 
                         let imgUrl = it.image || 'https://placehold.co/300x300/1a1a1a/666666?text=Playlist'; 
-                        mediaElement = `<img src="${imgUrl}" loading="lazy">`; 
+                        mediaElement = `<img src="${imgUrl}" loading="lazy" decoding="async">`; 
                     } 
                 } else { 
                     let u = ''; 
                     if(src==='subsonic'){ u=`${API_BASE}/get_subsonic_cover/${isAlb?it.image.large:it.album.image.large}`; } 
                     else { u=(isAlb?it.image.large:it.album.image.large)||it.image||''; u=u.replace('_300','_600'); } 
                     if(!u)u='https://placehold.co/300x300/1a1a1a/666666?text=Music'; 
-                    mediaElement = `<img src="${u}" loading="lazy">`; 
+                    mediaElement = `<img src="${u}" loading="lazy" decoding="async">`; 
                 } 
                 
                 const d=document.createElement('div'); d.className='track-card'; if(isArt) d.classList.add('artist-card'); d.dataset.id=it.id; 
