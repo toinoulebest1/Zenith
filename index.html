@@ -242,18 +242,6 @@
                     </div>
 
                     <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 30px 0;">
-                    
-                    <!-- ZONE STRESS TEST -->
-                    <div style="background: rgba(255, 0, 85, 0.1); border: 1px solid #ff0055; padding: 15px; border-radius: 12px; margin-bottom: 30px;">
-                        <h3 style="color: #ff0055; margin-bottom: 15px; text-transform: uppercase; font-size: 14px;">⚠️ Stress Test API</h3>
-                        <p style="font-size: 12px; color: #ccc; margin-bottom: 15px;">Simulez des utilisateurs pour tester la charge du serveur Python (Supabase ignoré).</p>
-                        <div style="display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
-                            <button class="action-btn-mini" style="border:1px solid #ff0055; padding: 5px 15px;" onclick="StressTest.start(10)">10 Bots</button>
-                            <button class="action-btn-mini" style="border:1px solid #ff0055; padding: 5px 15px;" onclick="StressTest.start(30)">30 Bots</button>
-                            <button class="action-btn-mini" style="border:1px solid #ff0055; padding: 5px 15px;" onclick="StressTest.start(50)">50 Bots</button>
-                            <button class="action-btn-mini" style="background: #ff0055; color: white; padding: 5px 15px;" onclick="StressTest.stop()">STOP</button>
-                        </div>
-                    </div>
 
                     <h3 style="margin-bottom: 20px; text-align: left;">Audio</h3>
                     
@@ -388,7 +376,6 @@
     <script src="party.js"></script>
     <script src="tv.js"></script>
     <script src="bluetooth.js"></script>
-    <script src="stress_test.js"></script>
     
     <script>
         if ('serviceWorker' in navigator) {
