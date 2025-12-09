@@ -45,18 +45,35 @@ const StressTest = {
             try {
                 // 1. RECHERCHE
                 const term = this.terms[Math.floor(Math.random() * this.terms.length)];
-                await this.makeRequest(`/search?q=${term}&type=track`);
+                
+                // On récupère le JSON pour trouver un vrai ID
+                const searchData = await this.makeRequest(`/search?q=${term}&type=track`, true);
                 
                 if (!this.isRunning) break;
                 await new Promise(r => setTimeout(r, 200 + Math.random() * 500));
 
-                // 2. RECUPERATION TRACK INFO
-                await this.makeRequest(`/track?id=5966783&source=qobuz`); 
+                if (searchData && searchData.tracks && searchData.tracks.length > 0) {
+                    // On prend un track au hasard dans les résultats
+                    const randomTrack = searchData.tracks[Math.floor(Math.random() * Math.min(5, searchData.tracks.length))];
+                    const trackId = randomTrack.id;
+                    const source = randomTrack.source || 'qobuz';
+                    
+                    // 2. RECUPERATION TRACK INFO (Avec un ID valide !)
+                    await this.makeRequest(`/track?id=${trackId}&source=${source}`);
 
-                if (!this.isRunning) break;
-                
-                // 3. RECUPERATION PAROLES
-                await this.makeRequest(`/lyrics?artist=${term}&title=Love&duration=200`);
+                    if (!this.isRunning) break;
+                    
+                    // 3. RECUPERATION PAROLES (Avec les vraies infos du titre)
+                    // On encode proprement les paramètres
+                    const artist = randomTrack.performer ? randomTrack.performer.name : (randomTrack.artist ? randomTrack.artist.name : "Unknown");
+                    const title = randomTrack.title;
+                    const duration = randomTrack.duration || 200;
+                    
+                    await this.makeRequest(`/lyrics?artist=${encodeURIComponent(artist)}&title=${encodeURIComponent(title)}&duration=${duration}`);
+                } else {
+                    // Si pas de résultat de recherche, on attend juste un peu
+                    this.stats.lastError = "Search: No results found (Bot skipped cycle)";
+                }
 
                 // Délai avant prochain cycle
                 await new Promise(r => setTimeout(r, 1000 + Math.random() * 2000));
@@ -67,33 +84,45 @@ const StressTest = {
         }
     },
 
-    makeRequest: async function(url) {
-        if (!this.isRunning) return;
+    makeRequest: async function(url, returnJson = false) {
+        if (!this.isRunning) return null;
         try {
             const res = await fetch(url);
             this.stats.requests++;
             
             if (res.ok) {
                 this.stats.success++;
+                if (returnJson) {
+                    try { return await res.json(); } catch(e) { return null; }
+                }
+                return true;
             } else {
                 this.stats.errors++;
-                // Tentative d'extraction du message d'erreur
                 let msg = res.statusText;
                 try {
                     const json = await res.json();
                     msg = json.detail || json.error || msg;
                 } catch(e) {}
                 
-                this.stats.lastError = `HTTP ${res.status}: ${msg}`;
-                console.warn(`StressTest Error: ${this.stats.lastError} (${url})`);
+                // On ignore les 404 lyrics qui sont "normales" (pas de paroles trouvées)
+                if (url.includes('/lyrics') && res.status === 404) {
+                    // On ne log pas ça comme une erreur critique dans l'overlay, c'est juste la vie
+                } else {
+                    this.stats.lastError = `HTTP ${res.status}: ${msg}`;
+                    console.warn(`StressTest Error: ${this.stats.lastError} (${url})`);
+                }
+                return null;
             }
         } catch (e) {
             this.stats.requests++;
             this.stats.errors++;
             this.stats.lastError = `Net: ${e.message}`;
             console.error(`StressTest Network Error:`, e);
+            return null;
         }
-        this.updateOverlay();
+        finally {
+            this.updateOverlay();
+        }
     },
 
     showOverlay: function() {
@@ -126,7 +155,7 @@ const StressTest = {
         if (this.stats.lastError) {
             errorHtml = `
                 <div style="margin-top:10px; padding-top:5px; border-top:1px solid #333; color:#ff5555; font-size:10px; word-break:break-word;">
-                    Dernière erreur :<br>
+                    Dernière erreur critique :<br>
                     ${this.stats.lastError}
                 </div>
             `;

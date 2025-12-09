@@ -5,6 +5,8 @@
 """
 import re
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 import logging
 import unicodedata
 from typing import Optional, Tuple, List, Dict
@@ -28,6 +30,13 @@ class LyricsSearcher:
     
     def __init__(self):
         self.session = requests.Session()
+        
+        # --- OPTIMISATION STRESS TEST ---
+        # Augmentation drastique du pool de connexions pour éviter "Connection pool is full"
+        adapter = HTTPAdapter(pool_connections=100, pool_maxsize=100, max_retries=Retry(total=3, backoff_factor=0.5))
+        self.session.mount("https://", adapter)
+        self.session.mount("http://", adapter)
+        
         self.session.headers.update({
             'User-Agent': 'Qobuz GUI Downloader v1.0.5 (https://github.com/Basil-AS/Qobuz_Gui_Downloader)'
         })
