@@ -512,6 +512,12 @@ def sync_get_radio_queue(title, artist):
         final = []
         for t in watch["tracks"]:
             if t.get("videoId") == vid: continue
+            
+            # FILTRE AJOUTÉ : On ne garde que les items qui ont un album (ce sont généralement les vrais sons)
+            # Les clips vidéos n'ont souvent pas d'album associé dans l'API.
+            if not t.get("album") or not t.get("album", {}).get("name"):
+                continue
+
             img = extract_thumbnail_hd(t)
             final.append({
                 "id": t.get("videoId"), "title": t.get("title"),
