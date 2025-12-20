@@ -1,0 +1,1 @@
+# Ce fichier permet à Python de traiter le dossier api comme un package
