@@ -810,9 +810,9 @@ async def stream_subsonic(track_id: str):
     return RedirectResponse(full_url)
 
 @app.get('/get_subsonic_cover/{cover_id}')
-async def get_subsonic_cover(cover_id: str):
+async def get_subsonic_cover(cover_id: str, size: int = 600):
     p = get_subsonic_query_params()
-    p.update({'id': cover_id, 'size': 600})
+    p.update({'id': cover_id, 'size': size})
     query = urllib.parse.urlencode(p)
     return RedirectResponse(f"{SUBSONIC_BASE}getCoverArt.view?{query}")
 

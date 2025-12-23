@@ -1050,6 +1050,22 @@
             }
 
             if (!img) img = "https://placehold.co/600x600/1a1a1a/666666?text=Zenith";
+
+            // GENERATION IMAGE BASSE QUALITÉ POUR LE BACKGROUND (OPTIMISATION)
+            let bgImg = img;
+            if (t.source === 'subsonic') {
+                if (bgImg.includes('/get_subsonic_cover/')) {
+                    // On demande une taille de 50px pour le fond flou
+                    bgImg += "?size=50"; 
+                }
+            } else {
+                // Remplacement intelligent des patterns d'URL
+                if (bgImg.includes('_600')) bgImg = bgImg.replace('_600', '_300'); // Qobuz
+                else if (bgImg.includes('1000x1000')) bgImg = bgImg.replace('1000x1000', '200x200'); // Deezer
+                else if (bgImg.includes('600x600')) bgImg = bgImg.replace('600x600', '200x200'); // Deezer fallback
+                else if (bgImg.includes('w1200-h1200')) bgImg = bgImg.replace('w1200-h1200', 'w200-h200'); // YouTube
+            }
+
             let artistName = t.performer ? t.performer.name : 'Artiste';
             const xlArt = document.getElementById('xlArt'); const capArt = document.getElementById('capArt'); const amb = document.getElementById('ambientBg');
             const textEls = [ 'xlTitle', 'xlArtist', 'xlBadge', 'capTitle', 'capArtist' ].map(id=>document.getElementById(id));
@@ -1060,12 +1076,32 @@
                 if(magicEnabled) checkMagic(t.title, artistName);
                 textEls.forEach(el => el.classList.remove('fade-out-active'));
             }, 300);
+            
             const currentSrc = xlArt.getAttribute('src') || ''; 
             if (currentSrc !== img) {
                 xlArt.classList.add('fade-out-active'); capArt.classList.add('fade-out-active');
-                const tempImg = new Image(); tempImg.onload = () => { xlArt.src = img; capArt.src = img; amb.style.backgroundImage = `url('${img}')`; amb.style.opacity = '1'; xlArt.classList.remove('fade-out-active'); capArt.classList.remove('fade-out-active'); }; tempImg.src = img;
-                setTimeout(() => { xlArt.classList.remove('fade-out-active'); capArt.classList.remove('fade-out-active'); if(amb.style.opacity != '1') amb.style.opacity = '1'; }, 1000);
-            } else { if(amb.style.opacity != '1') { amb.style.backgroundImage = `url('${img}')`; amb.style.opacity = '1'; } }
+                
+                // On met à jour le background immédiatement avec la basse qualité
+                if(amb.style.opacity != '1') amb.style.opacity = '1';
+                amb.style.backgroundImage = `url('${bgImg}')`;
+
+                const tempImg = new Image(); 
+                tempImg.onload = () => { 
+                    xlArt.src = img; 
+                    capArt.src = img; 
+                    // On ne touche plus au background ici, il est déjà chargé en low-res
+                    xlArt.classList.remove('fade-out-active'); 
+                    capArt.classList.remove('fade-out-active'); 
+                }; 
+                tempImg.src = img;
+                setTimeout(() => { xlArt.classList.remove('fade-out-active'); capArt.classList.remove('fade-out-active'); }, 1000);
+            } else { 
+                // Même si l'image principale ne change pas, on s'assure que le fond est là
+                if(amb.style.opacity != '1') { 
+                    amb.style.backgroundImage = `url('${bgImg}')`; 
+                    amb.style.opacity = '1'; 
+                } 
+            }
         }
 
         async function openArtistProfile(name, id=null, source=null) { 
