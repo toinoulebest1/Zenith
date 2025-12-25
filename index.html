@@ -882,7 +882,9 @@
                 await nextShaka.unload();
                 
                 let url = '';
-                if(nextTrack.source === 'yt_lazy' || nextTrack.source === 'spotify_lazy' || nextTrack.source === 'deezer') {
+                // CORRECTION SUBSONIC : On considère 'subsonic' comme 'lazy' pour forcer la résolution par nom
+                // car les ID Subsonic ne sont plus valides.
+                if(nextTrack.source === 'yt_lazy' || nextTrack.source === 'spotify_lazy' || nextTrack.source === 'deezer' || nextTrack.source === 'subsonic') {
                     const artist = nextTrack.performer ? nextTrack.performer.name : 'Inconnu';
                     url = `${API_BASE}/resolve_stream?title=${encodeURIComponent(nextTrack.title)}&artist=${encodeURIComponent(artist)}`;
                 }
@@ -894,7 +896,7 @@
             currentIndex = index; currentTrackId = nextTrack.id;
             updateInterfaceInfo(nextTrack);
             
-            if(nextTrack.source !== 'yt_lazy' && nextTrack.source !== 'spotify_lazy' && nextTrack.source !== 'deezer') safePushState({}, "", `/?track=${nextTrack.id}&source=${nextTrack.source}`);
+            if(nextTrack.source !== 'yt_lazy' && nextTrack.source !== 'spotify_lazy' && nextTrack.source !== 'deezer' && nextTrack.source !== 'subsonic') safePushState({}, "", `/?track=${nextTrack.id}&source=${nextTrack.source}`);
             
             // Force disable crossfade if direct audio
             startCrossfade(prevAudio, nextAudio, useCrossfade && !userSettings.directAudio); 
@@ -1083,18 +1085,25 @@
 
         function updateInterfaceInfo(t) {
             let img = ''; 
-            img = (t.album.image.large||'').replace('_300','_600');
+            if(t.source === 'subsonic') {
+                // FALLBACK POUR SUBSONIC : On utilise le placeholder car les ID images sont morts
+                img = 'https://placehold.co/600x600/1a1a1a/666666?text=Musique';
+            } else {
+                img = (t.album.image.large||'').replace('_300','_600');
+            }
 
             if (!img) img = "https://placehold.co/600x600/1a1a1a/666666?text=Zenith";
 
             // GENERATION IMAGE BASSE QUALITÉ POUR LE BACKGROUND (OPTIMISATION)
             let bgImg = img;
-            // Remplacement intelligent des patterns d'URL
-            if (bgImg.includes('_600')) bgImg = bgImg.replace('_600', '_300'); // Qobuz
-            else if (bgImg.includes('1000x1000')) bgImg = bgImg.replace('1000x1000', '200x200'); // Deezer
-            else if (bgImg.includes('600x600')) bgImg = bgImg.replace('600x600', '200x200'); // Deezer fallback
-            else if (bgImg.includes('w1200-h1200')) bgImg = bgImg.replace('w1200-h1200', 'w200-h200'); // YouTube
-            else if (bgImg.includes('resources.tidal.com')) bgImg = bgImg.replace('640x640', '320x320'); // Tidal
+            if (t.source !== 'subsonic') {
+                // Remplacement intelligent des patterns d'URL
+                if (bgImg.includes('_600')) bgImg = bgImg.replace('_600', '_300'); // Qobuz
+                else if (bgImg.includes('1000x1000')) bgImg = bgImg.replace('1000x1000', '200x200'); // Deezer
+                else if (bgImg.includes('600x600')) bgImg = bgImg.replace('600x600', '200x200'); // Deezer fallback
+                else if (bgImg.includes('w1200-h1200')) bgImg = bgImg.replace('w1200-h1200', 'w200-h200'); // YouTube
+                else if (bgImg.includes('resources.tidal.com')) bgImg = bgImg.replace('640x640', '320x320'); // Tidal
+            }
 
             let artistName = t.performer ? t.performer.name : 'Artiste';
             const xlArt = document.getElementById('xlArt'); const capArt = document.getElementById('capArt'); const amb = document.getElementById('ambientBg');
@@ -1102,7 +1111,7 @@
             textEls.forEach(el => el.classList.add('fade-out-active'));
             setTimeout(() => {
                 document.getElementById('xlTitle').innerText = t.title; document.getElementById('xlArtist').innerText = artistName; document.getElementById('capTitle').innerText = t.title; document.getElementById('capArtist').innerText = artistName;
-                const badge = document.getElementById('xlBadge'); badge.style.display = (t.maximum_bit_depth > 16) ? 'block' : 'none';
+                const badge = document.getElementById('xlBadge'); badge.style.display = (t.source !== 'subsonic' && t.maximum_bit_depth > 16) ? 'block' : 'none';
                 if(magicEnabled) checkMagic(t.title, artistName);
                 textEls.forEach(el => el.classList.remove('fade-out-active'));
             }, 300);
@@ -1781,13 +1790,8 @@
                 } else { 
                     let u = ''; 
                     if(src==='subsonic'){ 
-                        const raw = isAlb?it.image.large:it.album.image.large;
-                        // Correction double préfixe
-                        if (raw && raw.startsWith('http')) {
-                            u = raw;
-                        } else {
-                            u = `${API_BASE}/get_subsonic_cover/${raw}`; 
-                        }
+                        // SUBSONIC FIX : Utilisation du placeholder car le serveur est mort
+                        u = 'https://placehold.co/300x300/1a1a1a/666666?text=Musique';
                     } 
                     else { u=(isAlb?it.image.large:it.album.image.large)||it.image||''; u=u.replace('_300','_600'); } 
                     if(!u)u='https://placehold.co/300x300/1a1a1a/666666?text=Music'; 
@@ -1866,13 +1870,8 @@
             if ('mediaSession' in navigator) {
                 let img = 'https://placehold.co/300x300/1a1a1a/666666?text=Music';
                 if(t.source === 'subsonic') {
-                     // Correction double préfixe pour MediaSession
-                     const raw = t.album.image.large;
-                     if (raw && raw.startsWith('http')) {
-                         img = raw;
-                     } else {
-                         img = `${API_BASE}/get_subsonic_cover/${raw}`;
-                     }
+                     // Subsonic Fix : placeholder
+                     img = 'https://placehold.co/300x300/1a1a1a/666666?text=Musique';
                 }
                 else if(t.album && t.album.image) img = t.album.image.large.replace('_300','_600');
                 
