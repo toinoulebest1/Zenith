@@ -20,6 +20,8 @@
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
+    <!-- SHAKA PLAYER pour DASH/HLS -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/shaka-player/4.3.5/shaka-player.compiled.js"></script>
     <script src="cast.js"></script>
     <script src="zenith-processor.js"></script>
 </head>
@@ -397,6 +399,10 @@
         const playerB = new Audio(); playerB.id = "playerB"; playerB.preload = "auto"; playerB.crossOrigin = "anonymous"; playerB.volume = 1;
         document.body.appendChild(playerA);
         document.body.appendChild(playerB);
+        
+        // SHAKA PLAYER INSTANCES (Une par lecteur pour le crossfade)
+        let shakaPlayerA = null;
+        let shakaPlayerB = null;
 
         let activeAudio = playerA; 
         let crossfadeDuration = 0; let globalVolume = 1; 
@@ -551,6 +557,23 @@
         window.loadUserFavorites = async function() { if(!supabaseClient) return; const { data: { user } } = await supabaseClient.auth.getUser(); if(!user) return; const { data, error } = await supabaseClient.from('favorites').select('*'); if(data) { favorites = data.map(f => ({...f.track_data, fromSearch: false})); updateLikeButtonState(); } window.loadProfile(); };
         function safePushState(data, title, url) { try { if (window.history && window.history.pushState) { window.history.pushState(data, title, url); } } catch (e) { console.warn("History pushState blocked", e); } }
         
+        // --- SHAKA PLAYER INIT ---
+        async function initShaka() {
+            shaka.polyfill.installAll();
+            if (shaka.Player.isBrowserSupported()) {
+                shakaPlayerA = new shaka.Player(playerA);
+                shakaPlayerB = new shaka.Player(playerB);
+                
+                // Gestion d'erreurs basique
+                const onError = (e) => console.error('Shaka Error', e);
+                shakaPlayerA.addEventListener('error', onError);
+                shakaPlayerB.addEventListener('error', onError);
+                console.log("✅ Shaka Player Ready");
+            } else {
+                console.error('Browser not supported for Shaka Player');
+            }
+        }
+
         async function initAudioContext() {
             // IF DIRECT AUDIO MODE IS ON, WE DO NOT CREATE AUDIO CONTEXT NODES
             // THIS CONNECTS AUDIO ELEMENTS DIRECTLY TO SYSTEM OUTPUT
@@ -749,15 +772,7 @@
                 el.className = itemClass;
                 
                 let img = t.img || (t.album ? t.album.image.large : null) || 'https://placehold.co/40x40/222/666?text=M';
-                if(t.source === 'subsonic') {
-                     // Correction double préfixe
-                     const raw = t.album.image.large;
-                     if (raw && raw.startsWith('http')) {
-                         img = raw;
-                     } else {
-                         img = `${API_BASE}/get_subsonic_cover/${raw}`;
-                     }
-                } else if (img && img.includes('_300')) {
+                if (img && img.includes('_300')) {
                      img = img.replace('_300', '_600');
                 }
                 
@@ -832,19 +847,49 @@
             const nextAudio = (activeAudio === playerA) ? playerB : playerA; 
             const prevAudio = activeAudio;
             
+            // Determine Shaka Player instance
+            const nextShaka = (nextAudio === playerA) ? shakaPlayerA : shakaPlayerB;
+            const prevShaka = (prevAudio === playerA) ? shakaPlayerA : shakaPlayerB;
+
             if (nextTrack.isRadio) { document.getElementById('radioBadge').style.display = 'block'; isRadioActive = true; } else { document.getElementById('radioBadge').style.display = 'none'; isRadioActive = false; }
             if (typeof broadcastTrackChange === 'function') broadcastTrackChange(nextTrack);
             resetLyricsState();
 
-            let url = '';
-            if(nextTrack.source === 'subsonic') url = `${API_BASE}/stream_subsonic/${nextTrack.id}`;
-            else if(nextTrack.source === 'yt_lazy' || nextTrack.source === 'spotify_lazy' || nextTrack.source === 'deezer') {
-                const artist = nextTrack.performer ? nextTrack.performer.name : 'Inconnu';
-                url = `${API_BASE}/resolve_stream?title=${encodeURIComponent(nextTrack.title)}&artist=${encodeURIComponent(artist)}`;
+            // Gestion Source TIDAL (DASH)
+            if (nextTrack.source === 'tidal_hund') {
+                try {
+                    // Detach prev shaka if it was running
+                    await nextShaka.unload(); 
+                    
+                    const res = await fetch(`${API_BASE}/tidal_manifest/${nextTrack.id}`);
+                    const manifestData = await res.json();
+                    
+                    if (manifestData.manifest) {
+                        const dashUri = 'data:application/dash+xml;base64,' + manifestData.manifest;
+                        await nextShaka.load(dashUri);
+                        console.log("Loaded DASH manifest for Tidal track");
+                    } else {
+                        throw new Error("No manifest");
+                    }
+                } catch (e) {
+                    console.error("Tidal Load Error", e);
+                    showToast("Erreur lecture Tidal");
+                    return;
+                }
+            } else {
+                // Standard Track (URL directe)
+                // Important: Unload Shaka to detach MediaSource and allow src attribute
+                await nextShaka.unload();
+                
+                let url = '';
+                if(nextTrack.source === 'yt_lazy' || nextTrack.source === 'spotify_lazy' || nextTrack.source === 'deezer') {
+                    const artist = nextTrack.performer ? nextTrack.performer.name : 'Inconnu';
+                    url = `${API_BASE}/resolve_stream?title=${encodeURIComponent(nextTrack.title)}&artist=${encodeURIComponent(artist)}`;
+                }
+                else url = `${API_BASE}/stream/${nextTrack.id}`;
+                
+                nextAudio.src = url;
             }
-            else url = `${API_BASE}/stream/${nextTrack.id}`;
-
-            nextAudio.src = url;
 
             currentIndex = index; currentTrackId = nextTrack.id;
             updateInterfaceInfo(nextTrack);
@@ -958,7 +1003,8 @@
                     if (t && (t.source === 'spotify_lazy' || t.source === 'yt_lazy')) {
                         showToast(`⚠️ Titre introuvable : ${t.title}`);
                     } else {
-                        showToast("Erreur lors de la lecture audio ❌");
+                        // Pour Shaka Player, les erreurs sont gérées par son event listener
+                        if (t && t.source !== 'tidal_hund') showToast("Erreur lors de la lecture audio ❌");
                     }
                     
                     document.getElementById('playIcon').className = 'fas fa-exclamation-triangle';
@@ -1037,34 +1083,18 @@
 
         function updateInterfaceInfo(t) {
             let img = ''; 
-            if(t.source === 'subsonic') {
-                const raw = t.album.image.large;
-                // Correction double préfixe
-                if (raw && raw.startsWith('http')) {
-                    img = raw;
-                } else {
-                    img = `${API_BASE}/get_subsonic_cover/${raw}`;
-                }
-            } else {
-                img = (t.album.image.large||'').replace('_300','_600');
-            }
+            img = (t.album.image.large||'').replace('_300','_600');
 
             if (!img) img = "https://placehold.co/600x600/1a1a1a/666666?text=Zenith";
 
             // GENERATION IMAGE BASSE QUALITÉ POUR LE BACKGROUND (OPTIMISATION)
             let bgImg = img;
-            if (t.source === 'subsonic') {
-                if (bgImg.includes('/get_subsonic_cover/')) {
-                    // On demande une taille de 50px pour le fond flou
-                    bgImg += "?size=50"; 
-                }
-            } else {
-                // Remplacement intelligent des patterns d'URL
-                if (bgImg.includes('_600')) bgImg = bgImg.replace('_600', '_300'); // Qobuz
-                else if (bgImg.includes('1000x1000')) bgImg = bgImg.replace('1000x1000', '200x200'); // Deezer
-                else if (bgImg.includes('600x600')) bgImg = bgImg.replace('600x600', '200x200'); // Deezer fallback
-                else if (bgImg.includes('w1200-h1200')) bgImg = bgImg.replace('w1200-h1200', 'w200-h200'); // YouTube
-            }
+            // Remplacement intelligent des patterns d'URL
+            if (bgImg.includes('_600')) bgImg = bgImg.replace('_600', '_300'); // Qobuz
+            else if (bgImg.includes('1000x1000')) bgImg = bgImg.replace('1000x1000', '200x200'); // Deezer
+            else if (bgImg.includes('600x600')) bgImg = bgImg.replace('600x600', '200x200'); // Deezer fallback
+            else if (bgImg.includes('w1200-h1200')) bgImg = bgImg.replace('w1200-h1200', 'w200-h200'); // YouTube
+            else if (bgImg.includes('resources.tidal.com')) bgImg = bgImg.replace('640x640', '320x320'); // Tidal
 
             let artistName = t.performer ? t.performer.name : 'Artiste';
             const xlArt = document.getElementById('xlArt'); const capArt = document.getElementById('capArt'); const amb = document.getElementById('ambientBg');
@@ -1072,7 +1102,7 @@
             textEls.forEach(el => el.classList.add('fade-out-active'));
             setTimeout(() => {
                 document.getElementById('xlTitle').innerText = t.title; document.getElementById('xlArtist').innerText = artistName; document.getElementById('capTitle').innerText = t.title; document.getElementById('capArtist').innerText = artistName;
-                const badge = document.getElementById('xlBadge'); badge.style.display = (t.source !== 'subsonic' && t.maximum_bit_depth > 16) ? 'block' : 'none';
+                const badge = document.getElementById('xlBadge'); badge.style.display = (t.maximum_bit_depth > 16) ? 'block' : 'none';
                 if(magicEnabled) checkMagic(t.title, artistName);
                 textEls.forEach(el => el.classList.remove('fade-out-active'));
             }, 300);
@@ -1588,6 +1618,7 @@
 
         window.onpopstate = async (e) => { const p=new URLSearchParams(window.location.search); if(p.get('artist_profile')) await openArtistProfile(p.get('artist_profile'), p.get('id'), p.get('source')); else if(p.get('artist')) await openArtist(p.get('artist')); else if(p.get('album')) await openAlbum(p.get('album'),p.get('source')); else if(p.get('q')) {document.getElementById('searchInput').value=p.get('q'); await performSearch();} else goHome(false); };
         window.onload = async () => { 
+            initShaka(); // Init Shaka
             loadLocalSettings(); 
             const p=new URLSearchParams(window.location.search); 
             if(p.get('track')) await openTrackDirect(p.get('track'),p.get('source')); 

@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
-# Imports locaux (Logique métier existante)
+# Imports locaux
 try:
     from qobuz_api import QobuzClient, get_app_credentials
     from lyrics_search import LyricsSearcher 
@@ -26,7 +26,7 @@ except ImportError:
 import logging
 import random
 import requests
-import requests.adapters # IMPORTANT: Pour le patch global
+import requests.adapters
 import re
 import urllib.parse
 import hashlib
@@ -36,8 +36,6 @@ from ytmusicapi import YTMusic
 from deep_translator import GoogleTranslator
 
 # --- PATCH GLOBAL CONNEXIONS ---
-# Force requests à accepter 100 connexions simultanées par défaut PARTOUT
-# Cela règle le problème "Connection pool is full" pour ytmusicapi et lrclib
 requests.adapters.DEFAULT_POOLSIZE = 100
 requests.adapters.DEFAULT_RETRIES = 3
 
@@ -53,11 +51,7 @@ USER_ID = '7610812'
 TOKEN = 'wTJvd-7fc8haH3zdRrZYqcULUQ1wA6wJBLNmDkn38JaMrfRtHlaGpSVLHN0205rSQ23psXhJrnQNrRmEiGS-zw' 
 APP_ID = '798273057'
 
-SUBSONIC_BASE = "https://api.401658.xyz/rest/"
-SUBSONIC_USER = "toinoulebest"
-SUBSONIC_PASSWORD = "EbPNO8NRaEko" 
-SUBSONIC_CLIENT = "Feishin"
-SUBSONIC_VERSION = "1.13.0"
+TIDAL_HUND_BASE = "https://hund.qqdl.site"
 
 # --- INIT FASTAPI ---
 app = FastAPI(title="Zenith API", docs_url=None, redoc_url=None)
@@ -156,7 +150,6 @@ def parse_duration(d):
     return 0
 
 def ms_to_lrc(ms):
-    """Convertit des millisecondes en format LRC [MM:SS.xx]"""
     try:
         s = float(ms) / 1000
         m = int(s // 60)
@@ -165,20 +158,74 @@ def ms_to_lrc(ms):
     except:
         return "[00:00.00]"
 
-# --- SUBSONIC ---
-def get_subsonic_query_params():
-    salt = ''.join(random.choices(string.ascii_letters + string.digits, k=6))
-    token = hashlib.md5((SUBSONIC_PASSWORD + salt).encode('utf-8')).hexdigest()
-    return { 'u': SUBSONIC_USER, 's': salt, 't': token, 'v': SUBSONIC_VERSION, 'c': SUBSONIC_CLIENT, 'f': 'json' }
+def tidal_uuid_to_url(uuid):
+    if not uuid: return 'https://placehold.co/300x300/1a1a1a/666666?text=Tidal'
+    path = uuid.replace('-', '/')
+    return f"https://resources.tidal.com/images/{path}/640x640.jpg"
 
-def fetch_subsonic_raw(endpoint, params):
+# --- TIDAL / HUND API ---
+
+def sync_search_tidal(query, limit=25):
     try:
-        url = SUBSONIC_BASE + endpoint
-        p = get_subsonic_query_params()
-        p.update(params)
-        res = requests.get(url, params=p, timeout=5)
-        return res.json()
-    except: return {}
+        # Recherche sur Hund
+        url = f"{TIDAL_HUND_BASE}/search/?s={urllib.parse.quote(query)}"
+        res = requests.get(url, timeout=10)
+        data = res.json()
+        
+        results = []
+        if 'items' in data:
+            # Gestion si items est un dict (ex: indexé par 0, 1, 2) ou une liste
+            items = data['items']
+            iterable = items.values() if isinstance(items, dict) else items
+            
+            for t in iterable:
+                try:
+                    # Détection Hi-Res / 24 bits
+                    bit_depth = 16
+                    tags = t.get('mediaMetadata', {}).get('tags', [])
+                    # Les tags peuvent être un dict ou une liste selon l'API
+                    if isinstance(tags, dict): tags = tags.values()
+                    if "HIRES_LOSSLESS" in tags or "MQA" in tags:
+                        bit_depth = 24
+                    
+                    track = {
+                        'id': str(t['id']),
+                        'title': t['title'],
+                        'performer': {'name': t.get('artist', {}).get('name', 'Inconnu')},
+                        'album': {
+                            'title': t.get('album', {}).get('title'),
+                            'image': {'large': tidal_uuid_to_url(t.get('album', {}).get('cover'))}
+                        },
+                        'duration': t.get('duration', 0),
+                        'maximum_bit_depth': bit_depth,
+                        'source': 'tidal_hund'
+                    }
+                    results.append(track)
+                except Exception as e:
+                    continue
+        return results[:limit]
+    except Exception as e:
+        logger.error(f"Tidal Hund Search Error: {e}")
+        return []
+
+def get_tidal_stream_manifest(track_id):
+    """Récupère le manifeste DASH pour Shaka Player"""
+    try:
+        url = f"{TIDAL_HUND_BASE}/track/?id={track_id}&quality=HI_RES_LOSSLESS"
+        res = requests.get(url, timeout=10)
+        data = res.json()
+        
+        if data.get('data', {}).get('manifestMimeType') == 'application/dash+xml':
+            return {
+                "manifest": data['data']['manifest'], # Base64 encoded
+                "mimeType": "application/dash+xml",
+                "bitDepth": data['data'].get('bitDepth', 16),
+                "sampleRate": data['data'].get('sampleRate', 44100)
+            }
+        return None
+    except Exception as e:
+        logger.error(f"Tidal Manifest Error: {e}")
+        return None
 
 # --- FONCTIONS SYNCHRONES (WRAPPED) ---
 
@@ -213,35 +260,10 @@ def sync_search_yt_lyrics(title, artist):
         if isinstance(lyrics_data.get('lyrics'), str): return {"type": "plain", "lyrics": lyrics_data['lyrics']}
         return None
     except Exception as e:
-        # On log l'erreur proprement sans polluer la console avec la traceback complète
         error_msg = str(e)
-        if 'musicResponsiveListItemRenderer' in error_msg:
-            # Erreur connue de structure YT, pas besoin de s'inquiéter
-            pass 
-        else:
-            logger.error(f"YT Lyrics Warning: {error_msg}")
+        if 'musicResponsiveListItemRenderer' in error_msg: pass 
+        else: logger.error(f"YT Lyrics Warning: {error_msg}")
         return None
-
-def sync_search_subsonic(query, limit=20):
-    data = fetch_subsonic_raw("search3.view", {'query': query, 'songCount': limit, 'albumCount': 0, 'artistCount': 0})
-    if data.get('subsonic-response', {}).get('status') == 'ok':
-        songs = data['subsonic-response'].get('searchResult3', {}).get('song', [])
-        return [{
-            'id': s.get('id'), 'title': s.get('title'), 'performer': {'name': s.get('artist', 'Inconnu')},
-            'album': {'title': s.get('album'), 'image': {'large': s.get('coverArt')}},
-            'duration': s.get('duration', 0), 'maximum_bit_depth': 16, 'source': 'subsonic'
-        } for s in songs]
-    return []
-
-def sync_search_subsonic_albums(query, limit=15):
-    data = fetch_subsonic_raw("search3.view", {'query': query, 'songCount': 0, 'albumCount': limit, 'artistCount': 0})
-    if data.get('subsonic-response', {}).get('status') == 'ok':
-        albums = data['subsonic-response'].get('searchResult3', {}).get('album', [])
-        return [{
-            'id': a.get('id'), 'title': a.get('name', a.get('title')), 
-            'artist': {'name': a.get('artist')}, 'image': {'large': a.get('coverArt')}, 'source': 'subsonic'
-        } for a in albums]
-    return []
 
 def sync_search_deezer(query, limit=25):
     try:
@@ -344,14 +366,11 @@ def sync_qobuz_search(query, limit=25, type='track'):
     except: return []
 
 def sync_get_deezer_artist_by_id(artist_id):
-    """Récupère les infos d'un artiste Deezer via son ID direct"""
     try:
-        logger.info(f"Direct Deezer fetch for ID: {artist_id}")
         r = requests.get(f"https://api.deezer.com/artist/{artist_id}", timeout=5)
         artist = r.json()
         if 'error' in artist or not artist.get('name'): return None
 
-        # Top Tracks
         r_top = requests.get(f"https://api.deezer.com/artist/{artist_id}/top", params={"limit": 20}, timeout=5)
         top_data = r_top.json()
         top_tracks = []
@@ -366,7 +385,6 @@ def sync_get_deezer_artist_by_id(artist_id):
                 "maximum_bit_depth": 16
             })
             
-        # Albums
         r_alb = requests.get(f"https://api.deezer.com/artist/{artist_id}/albums", params={"limit": 50}, timeout=5)
         alb_data = r_alb.json()
         albums = []
@@ -380,9 +398,7 @@ def sync_get_deezer_artist_by_id(artist_id):
                 "maximum_bit_depth": 16
             })
             
-        # Récupération du nombre de fans
         nb_fans = artist.get('nb_fan', 0)
-        # Formatage avec espace comme séparateur de milliers (ex: 1 234)
         formatted_fans = f"{nb_fans:,}".replace(",", " ")
             
         return {
@@ -440,9 +456,8 @@ def sync_search_artist_full(name):
         except Exception as e:
             logger.error(f"Qobuz Artist Search Error: {e}")
 
-    # 2. Fallback DEEZER (Avec vérification stricte du nom)
+    # 2. Fallback DEEZER
     try:
-        logger.info(f"Fallback Deezer pour l'artiste : {name}")
         r = requests.get("https://api.deezer.com/search/artist", params={"q": name, "limit": 10}, timeout=5)
         data = r.json()
         if not data.get("data"): return None
@@ -466,8 +481,6 @@ def sync_search_artist_full(name):
                 break
         
         if not found_artist: return None
-
-        # Si on a trouvé un candidat via le nom, on utilise son ID pour récupérer le reste proprement
         return sync_get_deezer_artist_by_id(found_artist["id"])
 
     except Exception as e:
@@ -494,11 +507,14 @@ def sync_resolve_track(title, artist):
                     elif target_title in rec_title or rec_title in target_title: match_title = True
                     if match_title: return {'id': rec['id'], 'source': 'qobuz'}
         except: pass
-    subs = sync_search_subsonic(f"{title} {artist}", limit=5)
-    for s in subs:
-        s_artist = clean_string(s['performer']['name'])
-        if target_artist in s_artist or s_artist in target_artist:
-            return {'id': s['id'], 'source': 'subsonic'}
+    
+    # Fallback Tidal si Qobuz échoue
+    tidal_res = sync_search_tidal(f"{title} {artist}", limit=5)
+    for t in tidal_res:
+        t_artist = clean_string(t['performer']['name'])
+        if target_artist in t_artist or t_artist in target_artist:
+            return {'id': t['id'], 'source': 'tidal_hund'}
+            
     return None
 
 def sync_get_radio_queue(title, artist):
@@ -512,11 +528,7 @@ def sync_get_radio_queue(title, artist):
         final = []
         for t in watch["tracks"]:
             if t.get("videoId") == vid: continue
-            
-            # FILTRE AJOUTÉ : On ne garde que les items qui ont un album (ce sont généralement les vrais sons)
-            # Les clips vidéos n'ont souvent pas d'album associé dans l'API.
-            if not t.get("album") or not t.get("album", {}).get("name"):
-                continue
+            if not t.get("album") or not t.get("album", {}).get("name"): continue
 
             img = extract_thumbnail_hd(t)
             final.append({
@@ -559,29 +571,27 @@ async def search_tracks(q: str, type: str = 'all'):
     tasks = []
     if type in ['track', 'all']:
         tasks.append(run_in_threadpool(sync_qobuz_search, q, 25, 'track'))
-        tasks.append(run_in_threadpool(sync_search_subsonic, q, 25))
+        tasks.append(run_in_threadpool(sync_search_tidal, q, 25))
         tasks.append(run_in_threadpool(sync_search_deezer, q, 25))
     if type in ['album', 'all']:
         tasks.append(run_in_threadpool(sync_qobuz_search, q, 15, 'album'))
-        tasks.append(run_in_threadpool(sync_search_subsonic_albums, q, 15))
         tasks.append(run_in_threadpool(sync_search_deezer_albums, q, 15))
     if type in ['artist', 'all']:
         tasks.append(run_in_threadpool(sync_search_deezer_artists, q, 15))
 
     finished = await asyncio.gather(*tasks, return_exceptions=True)
     idx = 0
-    qobuz_tracks = []; subsonic_tracks = []; deezer_tracks = []
-    qobuz_albums = []; subsonic_albums = []; deezer_albums = []
+    qobuz_tracks = []; tidal_tracks = []; deezer_tracks = []
+    qobuz_albums = []; deezer_albums = []
     deezer_artists = []
 
     if type in ['track', 'all']:
         r1 = finished[idx]; idx += 1; qobuz_tracks = r1 if isinstance(r1, list) else []
-        r2 = finished[idx]; idx += 1; subsonic_tracks = r2 if isinstance(r2, list) else []
+        r2 = finished[idx]; idx += 1; tidal_tracks = r2 if isinstance(r2, list) else []
         r3 = finished[idx]; idx += 1; deezer_tracks = r3 if isinstance(r3, list) else []
     if type in ['album', 'all']:
         r4 = finished[idx]; idx += 1; qobuz_albums = r4 if isinstance(r4, list) else []
-        r5 = finished[idx]; idx += 1; subsonic_albums = r5 if isinstance(r5, list) else []
-        r6 = finished[idx]; idx += 1; deezer_albums = r6 if isinstance(r6, list) else []
+        r5 = finished[idx]; idx += 1; deezer_albums = r5 if isinstance(r5, list) else []
     if type in ['artist', 'all']:
         r7 = finished[idx]; idx += 1; deezer_artists = r7 if isinstance(r7, list) else []
 
@@ -592,9 +602,12 @@ async def search_tracks(q: str, type: str = 'all'):
     combined_tracks = qobuz_tracks
     sigs = set()
     for t in qobuz_tracks: sigs.add(f"{clean_string(t['title'])}{clean_string(t.get('performer',{}).get('name'))}")
-    for t in subsonic_tracks:
+    
+    # Insertion Tidal
+    for t in tidal_tracks:
         s = f"{clean_string(t['title'])}{clean_string(t['performer']['name'])}"
         if s not in sigs: combined_tracks.append(t); sigs.add(s)
+        
     for t in deezer_tracks:
         s = f"{clean_string(t['title'])}{clean_string(t['performer']['name'])}"
         if s not in sigs: combined_tracks.append(t); sigs.add(s)
@@ -602,9 +615,6 @@ async def search_tracks(q: str, type: str = 'all'):
     combined_albums = qobuz_albums
     album_sigs = set()
     for a in qobuz_albums: album_sigs.add(f"{clean_string(a['title'])}{clean_string(a.get('artist',{}).get('name'))}")
-    for a in subsonic_albums:
-        s = f"{clean_string(a['title'])}{clean_string(a.get('artist',{}).get('name'))}"
-        if s not in album_sigs: combined_albums.append(a); album_sigs.add(s)
     for a in deezer_albums:
         s = f"{clean_string(a['title'])}{clean_string(a.get('artist',{}).get('name'))}"
         if s not in album_sigs: combined_albums.append(a); album_sigs.add(s)
@@ -618,17 +628,14 @@ async def search_tracks(q: str, type: str = 'all'):
 
 @app.get('/artist_bio')
 async def get_artist_bio_route(name: str, id: str = None, source: str = None):
-    # Si on a un ID Deezer spécifique, on l'utilise en priorité absolue
     if source == 'deezer' and id:
         data = await run_in_threadpool(sync_get_deezer_artist_by_id, id)
         if data: return JSONResponse(data)
     
-    # Sinon recherche normale (Qobuz > Fallback Deezer avec nom strict)
     data = await run_in_threadpool(sync_search_artist_full, name)
     if data: return JSONResponse(data)
     else: return JSONResponse({"bio": f"Artiste non trouvé : {name}", "image": "", "nb_fans": 0, "top_tracks": [], "albums": []})
 
-# ... (reste des routes inchangées)
 @app.get('/blind_test_tracks')
 async def get_blind_test_tracks(theme: str = 'Global Hits', limit: int = 5):
     try:
@@ -708,21 +715,16 @@ async def resolve_and_stream(title: str, artist: str):
     match = await run_in_threadpool(sync_resolve_track, title, artist)
     if match:
         rid = match['id']
-        if match['source'] == 'subsonic': return RedirectResponse(f"/stream_subsonic/{rid}")
+        if match['source'] == 'tidal_hund': return RedirectResponse(f"/tidal_manifest/{rid}")
         return RedirectResponse(f"/stream/{rid}")
     raise HTTPException(404, "Track not found")
 
 @app.get('/track')
 async def get_track_info(id: str, source: str = None):
-    if source == 'subsonic':
-        data = await run_in_threadpool(fetch_subsonic_raw, "getSong.view", {'id': id})
-        s = data.get('subsonic-response', {}).get('song')
-        if s:
-            return JSONResponse({
-                'id': s['id'], 'title': s['title'], 'performer': {'name': s['artist']},
-                'album': {'title': s.get('album'), 'image': {'large': s.get('coverArt')}},
-                'duration': s.get('duration'), 'source': 'subsonic', 'maximum_bit_depth': 16
-            })
+    if source == 'tidal_hund':
+        # Pas d'info track spécifique implémentée pour l'instant hors search
+        # On renvoie une erreur pour forcer le client à utiliser les données qu'il a déjà
+        raise HTTPException(404)
     elif client:
         try:
             res = await run_in_threadpool(client.get_track_meta, id)
@@ -733,15 +735,7 @@ async def get_track_info(id: str, source: str = None):
 
 @app.get('/album')
 async def get_album(id: str, source: str = None):
-    if source == 'subsonic':
-        data = await run_in_threadpool(fetch_subsonic_raw, "getAlbum.view", {'id': id})
-        raw = data.get('subsonic-response', {}).get('album')
-        if raw:
-            tracks = []
-            for s in raw.get('song', []):
-                tracks.append({ 'id': s['id'], 'title': s['title'], 'duration': s.get('duration'), 'track_number': s.get('track'), 'performer': {'name': s.get('artist', raw.get('artist'))}, 'album': {'title': raw.get('name'), 'image': {'large': raw.get('coverArt')}}, 'source': 'subsonic' })
-            return JSONResponse({ 'id': raw['id'], 'title': raw.get('name'), 'artist': {'name': raw.get('artist')}, 'image': {'large': raw.get('coverArt')}, 'source': 'subsonic', 'tracks': {'items': tracks} })
-    elif source == 'deezer':
+    if source == 'deezer':
         def _fetch_deezer_album():
             try:
                 r = requests.get(f"https://api.deezer.com/album/{id}", timeout=5)
@@ -801,20 +795,12 @@ async def stream_track(track_id: str):
     if url: return RedirectResponse(url)
     raise HTTPException(404, "URL not found")
 
-@app.get('/stream_subsonic/{track_id}')
-async def stream_subsonic(track_id: str):
-    p = get_subsonic_query_params()
-    p.update({'id': track_id, 'format': 'mp3', 'maxBitRate': '320'})
-    query = urllib.parse.urlencode(p)
-    full_url = f"{SUBSONIC_BASE}stream.view?{query}"
-    return RedirectResponse(full_url)
-
-@app.get('/get_subsonic_cover/{cover_id}')
-async def get_subsonic_cover(cover_id: str, size: int = 600):
-    p = get_subsonic_query_params()
-    p.update({'id': cover_id, 'size': size})
-    query = urllib.parse.urlencode(p)
-    return RedirectResponse(f"{SUBSONIC_BASE}getCoverArt.view?{query}")
+@app.get('/tidal_manifest/{track_id}')
+async def get_tidal_manifest_route(track_id: str):
+    manifest_data = await run_in_threadpool(get_tidal_stream_manifest, track_id)
+    if manifest_data:
+        return JSONResponse(manifest_data)
+    raise HTTPException(404, "Tidal manifest not found")
 
 @app.get('/lyrics')
 async def get_lyrics(artist: str, title: str, album: str = None, duration: str = None):
