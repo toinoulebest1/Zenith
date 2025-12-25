@@ -841,7 +841,7 @@
             }
 
             nextTrackTriggered = false; 
-            const nextTrack = tracks[index];
+            let nextTrack = tracks[index]; // Use let to allow modification
             
             // In Direct Mode, we can reuse same player or switch, but crossfade is disabled anyway
             const nextAudio = (activeAudio === playerA) ? playerB : playerA; 
@@ -854,6 +854,27 @@
             if (nextTrack.isRadio) { document.getElementById('radioBadge').style.display = 'block'; isRadioActive = true; } else { document.getElementById('radioBadge').style.display = 'none'; isRadioActive = false; }
             if (typeof broadcastTrackChange === 'function') broadcastTrackChange(nextTrack);
             resetLyricsState();
+
+            // RESOLUTION PREALABLE POUR SUBSONIC (Pour récupérer l'image et la bonne source)
+            if (nextTrack.source === 'subsonic') {
+                showToast("Mise à jour des métadonnées...");
+                try {
+                    const res = await fetch(`${API_BASE}/resolve_metadata?title=${encodeURIComponent(nextTrack.title)}&artist=${encodeURIComponent(nextTrack.performer ? nextTrack.performer.name : nextTrack.artist)}`);
+                    if(res.ok) {
+                        const newMeta = await res.json();
+                        // On met à jour l'objet track actuel avec les nouvelles infos
+                        nextTrack.id = newMeta.id;
+                        nextTrack.source = newMeta.source;
+                        if(newMeta.album && newMeta.album.image) nextTrack.album.image = newMeta.album.image;
+                        if(newMeta.duration) nextTrack.duration = newMeta.duration;
+                        // On sauvegarde l'image spécifique si présente
+                        if(newMeta.img) nextTrack.img = newMeta.img;
+                        
+                        // Mise à jour visuelle immédiate
+                        updateInterfaceInfo(nextTrack);
+                    }
+                } catch(e) { console.error("Resolve error", e); }
+            }
 
             // Gestion Source TIDAL (DASH)
             if (nextTrack.source === 'tidal_hund') {
@@ -882,8 +903,6 @@
                 await nextShaka.unload();
                 
                 let url = '';
-                // CORRECTION SUBSONIC : On considère 'subsonic' comme 'lazy' pour forcer la résolution par nom
-                // car les ID Subsonic ne sont plus valides.
                 if(nextTrack.source === 'yt_lazy' || nextTrack.source === 'spotify_lazy' || nextTrack.source === 'deezer' || nextTrack.source === 'subsonic') {
                     const artist = nextTrack.performer ? nextTrack.performer.name : 'Inconnu';
                     url = `${API_BASE}/resolve_stream?title=${encodeURIComponent(nextTrack.title)}&artist=${encodeURIComponent(artist)}`;
@@ -1870,8 +1889,13 @@
             if ('mediaSession' in navigator) {
                 let img = 'https://placehold.co/300x300/1a1a1a/666666?text=Music';
                 if(t.source === 'subsonic') {
-                     // Subsonic Fix : placeholder
-                     img = 'https://placehold.co/300x300/1a1a1a/666666?text=Musique';
+                     // Correction double préfixe pour MediaSession
+                     const raw = t.album.image.large;
+                     if (raw && raw.startsWith('http')) {
+                         img = raw;
+                     } else {
+                         img = `${API_BASE}/get_subsonic_cover/${raw}`;
+                     }
                 }
                 else if(t.album && t.album.image) img = t.album.image.large.replace('_300','_600');
                 

@@ -488,8 +488,14 @@ def sync_search_artist_full(name):
         return None
 
 def sync_resolve_track(title, artist):
+    """
+    Recherche le titre sur Qobuz ou Tidal et retourne l'objet COMPLET (avec image)
+    au lieu de juste l'ID.
+    """
     target_artist = clean_string(artist)
     target_title = clean_string(title)
+    
+    # 1. Recherche Qobuz
     if client:
         try:
             items = sync_qobuz_search(f"{title} {artist}", limit=5)
@@ -500,20 +506,28 @@ def sync_resolve_track(title, artist):
                 if FUZZ_AVAILABLE:
                     if fuzz.ratio(target_artist, rec_artist) > 65: match_artist = True
                 elif target_artist in rec_artist or rec_artist in target_artist: match_artist = True
+                
                 if match_artist:
                     match_title = False
                     if FUZZ_AVAILABLE:
                         if fuzz.ratio(target_title, rec_title) > 60: match_title = True
                     elif target_title in rec_title or rec_title in target_title: match_title = True
-                    if match_title: return {'id': rec['id'], 'source': 'qobuz'}
+                    
+                    if match_title: 
+                        rec['source'] = 'qobuz'
+                        # S'assurer que l'image est bien formatée
+                        if rec.get('album', {}).get('image', {}).get('large'):
+                            rec['album']['image']['large'] = rec['album']['image']['large'].replace('_300', '_600')
+                        return rec
         except: pass
     
-    # Fallback Tidal si Qobuz échoue
+    # 2. Fallback Tidal
     tidal_res = sync_search_tidal(f"{title} {artist}", limit=5)
     for t in tidal_res:
         t_artist = clean_string(t['performer']['name'])
         if target_artist in t_artist or t_artist in target_artist:
-            return {'id': t['id'], 'source': 'tidal_hund'}
+            t['source'] = 'tidal_hund'
+            return t
             
     return None
 
@@ -671,7 +685,7 @@ async def get_yt_playlist_details_route(id: str):
                         "id": t.get("videoId"), "title": t.get("title"),
                         "performer": { "name": t.get("artists", [{'name':'Inconnu'}])[0]['name'] },
                         "album": { "title": details.get('title'), "image": { "large": img } },
-                        "duration": parse_duration(t.get('duration') or t.get("lengthSeconds")),
+                        "duration": parse_duration(t.get("duration") or t.get("lengthSeconds")),
                         "source": "yt_lazy", "type": "track", "img": img
                     })
                 except: continue
@@ -712,12 +726,23 @@ async def get_deezer_playlist_details_route(id: str):
 
 @app.get('/resolve_stream')
 async def resolve_and_stream(title: str, artist: str):
+    # Conserve la logique de redirection pour les sources 'lazy' classiques
     match = await run_in_threadpool(sync_resolve_track, title, artist)
     if match:
         rid = match['id']
         if match['source'] == 'tidal_hund': return RedirectResponse(f"/tidal_manifest/{rid}")
         return RedirectResponse(f"/stream/{rid}")
     raise HTTPException(404, "Track not found")
+
+@app.get('/resolve_metadata')
+async def resolve_metadata_route(title: str, artist: str):
+    """
+    Retourne l'objet track complet (ID, source, image, etc.) pour mettre à jour l'interface
+    avant la lecture.
+    """
+    match = await run_in_threadpool(sync_resolve_track, title, artist)
+    if match: return JSONResponse(match)
+    raise HTTPException(404, "Not found")
 
 @app.get('/track')
 async def get_track_info(id: str, source: str = None):
