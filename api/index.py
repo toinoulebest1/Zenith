@@ -4,6 +4,7 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import time
 import json
+import base64 # Nécessaire pour décoder le manifeste Tidal 16-bit
 
 # Configuration des chemins pour imports locaux
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -352,57 +353,73 @@ def sync_search_tidal_albums(query, limit=15):
 
 def get_tidal_stream_manifest(track_id):
     """
-    Récupère le manifeste DASH pour Shaka Player via HUND (Proxy).
+    Récupère le manifeste audio pour Shaka Player (DASH) OU l'URL directe (BTS/16-bit).
     """
-    # 1. Tentative HI_RES
+    # 1. Tentative HI_RES (pour Dash)
     logger.info(f"[Tidal Audio] 🎵 Requesting manifest for ID: {track_id} (Quality: HI_RES_LOSSLESS)")
     try:
         url = f"{TIDAL_HUND_BASE}/track/?id={track_id}&quality=HI_RES_LOSSLESS"
         res = requests.get(url, timeout=15)
         
+        # Si erreur 401/403/etc, on retente en LOSSLESS standard
         if res.status_code != 200:
-            logger.error(f"[Tidal Audio] ❌ Error {res.status_code} for ID {track_id}")
-            logger.error(f"[Tidal Audio] Response Body: {res.text}")
-            
-            # Tentative de fallback si erreur 4xx/5xx (souvent 401/403 si qualité non dispo)
-            logger.info(f"[Tidal Audio] 🔄 Retrying with LOSSLESS quality for ID {track_id}...")
+            logger.error(f"[Tidal Audio] ❌ Error {res.status_code} for HI_RES. Retrying LOSSLESS...")
             url_fallback = f"{TIDAL_HUND_BASE}/track/?id={track_id}&quality=LOSSLESS"
             res = requests.get(url_fallback, timeout=15)
             
             if res.status_code != 200:
-                logger.error(f"[Tidal Audio] ❌ Fallback failed {res.status_code}")
+                logger.error(f"[Tidal Audio] ❌ Fallback to LOSSLESS also failed.")
                 return None
-            else:
-                logger.info(f"[Tidal Audio] ✅ Fallback to LOSSLESS successful")
 
         data = res.json()
         
-        # Vérification structure
         if 'data' not in data:
-             logger.warning(f"[Tidal Audio] ⚠️ 'data' field missing in response: {data}")
+             logger.warning(f"[Tidal Audio] ⚠️ 'data' field missing.")
              return None
              
         track_data = data['data']
         mime = track_data.get('manifestMimeType')
         
+        # CAS 1: DASH (24-bit / Hi-Res) -> Utilise Shaka Player
         if mime == 'application/dash+xml':
-            bit_depth = track_data.get('bitDepth', 16)
-            sample_rate = track_data.get('sampleRate', 44100)
-            logger.info(f"[Tidal Audio] ✅ Manifest received. Audio: {bit_depth}bit / {sample_rate}Hz")
+            logger.info(f"[Tidal Audio] ✅ DASH Manifest received (24-bit/Hi-Res).")
             return {
                 "manifest": track_data['manifest'],
                 "mimeType": "application/dash+xml",
-                "bitDepth": bit_depth,
-                "sampleRate": sample_rate
+                "bitDepth": track_data.get('bitDepth', 24),
+                "sampleRate": track_data.get('sampleRate', 44100)
             }
+            
+        # CAS 2: BTS (16-bit / Lossless) -> Fichier direct -> Lecteur natif
+        elif mime == 'application/vnd.tidal.bts':
+            logger.info(f"[Tidal Audio] ✅ BTS Manifest received (16-bit/File). Decoding...")
+            try:
+                # Le manifeste BTS est un JSON encodé en base64
+                decoded_json = json.loads(base64.b64decode(track_data['manifest']).decode('utf-8'))
+                
+                # Il contient une liste 'urls', on prend la première
+                if 'urls' in decoded_json and len(decoded_json['urls']) > 0:
+                    audio_url = decoded_json['urls'][0]
+                    logger.info(f"[Tidal Audio] -> Direct URL extracted.")
+                    return {
+                        "url": audio_url,
+                        "mimeType": "audio/flac", # ou mp4 selon le codec indiqué dans le json
+                        "bitDepth": 16,
+                        "sampleRate": 44100
+                    }
+                else:
+                    logger.error("[Tidal Audio] BTS Manifest decoded but no 'urls' found.")
+                    return None
+            except Exception as e:
+                logger.error(f"[Tidal Audio] Error decoding BTS manifest: {e}")
+                return None
+                
         else:
             logger.warning(f"[Tidal Audio] ⚠️ Unexpected MIME type: {mime}")
-            # Log plus de détails pour le debug
-            logger.debug(f"[Tidal Audio] Full Data: {str(track_data)[:200]}...")
             return None
 
     except Exception as e:
-        logger.error(f"[Tidal Audio] 💥 CRITICAL EXCEPTION for ID {track_id}: {e}")
+        logger.error(f"[Tidal Audio] 💥 CRITICAL EXCEPTION: {e}")
         return None
 
 # --- FONCTIONS SYNCHRONES (WRAPPED) ---

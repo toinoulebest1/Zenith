@@ -876,7 +876,7 @@
                 } catch(e) { console.error("Resolve error", e); }
             }
 
-            // Gestion Source TIDAL (DASH)
+            // Gestion Source TIDAL
             if (nextTrack.source === 'tidal_hund') {
                 try {
                     // Detach prev shaka if it was running
@@ -885,12 +885,20 @@
                     const res = await fetch(`${API_BASE}/tidal_manifest/${nextTrack.id}`);
                     const manifestData = await res.json();
                     
-                    if (manifestData.manifest) {
+                    if (manifestData.mimeType === 'application/dash+xml') {
+                        // CAS 24-BIT / DASH (Hi-Res)
                         const dashUri = 'data:application/dash+xml;base64,' + manifestData.manifest;
                         await nextShaka.load(dashUri);
-                        console.log("Loaded DASH manifest for Tidal track");
-                    } else {
-                        throw new Error("No manifest");
+                        console.log("✅ Loaded DASH manifest for Tidal Hi-Res");
+                    } 
+                    else if (manifestData.url) {
+                        // CAS 16-BIT / FILE (Lossless)
+                        // On utilise le lecteur HTML5 natif en bypassant Shaka
+                        nextAudio.src = manifestData.url;
+                        console.log("✅ Loaded Direct URL for Tidal Lossless (16-bit)");
+                    } 
+                    else {
+                        throw new Error("No valid manifest or URL");
                     }
                 } catch (e) {
                     console.error("Tidal Load Error", e);
