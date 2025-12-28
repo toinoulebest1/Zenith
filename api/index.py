@@ -351,6 +351,59 @@ def sync_search_tidal_albums(query, limit=15):
         logger.error(f"[Tidal Album Search] Error: {e}")
         return []
 
+def sync_get_tidal_album(album_id):
+    """
+    Récupère les détails d'un album Tidal (métadonnées + pistes)
+    """
+    token = tidal_auth.get_token()
+    if not token: return None
+    
+    headers = {"Authorization": f"Bearer {token}"}
+    
+    # 1. Metadata
+    try:
+        r_meta = requests.get(f"https://api.tidal.com/v1/albums/{album_id}", params={"countryCode": "US"}, headers=headers, timeout=10)
+        meta = r_meta.json()
+        if 'error' in meta: return None
+    except: return None
+
+    # 2. Tracks
+    try:
+        r_tracks = requests.get(f"https://api.tidal.com/v1/albums/{album_id}/items", params={"limit": 100, "offset": 0, "countryCode": "US"}, headers=headers, timeout=10)
+        data_tracks = r_tracks.json()
+        items = data_tracks.get('items', [])
+    except: items = []
+
+    formatted_tracks = []
+    cover_url = tidal_uuid_to_url(meta.get('cover'))
+    
+    for t in items:
+        # Detect HiRes
+        bit_depth = 16
+        tags = t.get('mediaMetadata', {}).get('tags', [])
+        if "HIRES_LOSSLESS" in tags or "MQA" in tags:
+            bit_depth = 24
+            
+        formatted_tracks.append({
+            'id': str(t['id']),
+            'title': t['title'],
+            'duration': t.get('duration', 0),
+            'track_number': t.get('trackNumber'),
+            'performer': {'name': t.get('artist', {}).get('name', 'Inconnu')},
+            'album': {'title': meta.get('title'), 'image': {'large': cover_url}},
+            'source': 'tidal_hund', # Important pour la lecture
+            'maximum_bit_depth': bit_depth
+        })
+
+    return {
+        'id': str(meta.get('id')),
+        'title': meta.get('title'),
+        'artist': {'name': meta.get('artist', {}).get('name')},
+        'image': {'large': cover_url},
+        'source': 'tidal_hund',
+        'tracks': {'items': formatted_tracks}
+    }
+
 def get_tidal_stream_manifest(track_id):
     """
     Récupère le manifeste audio pour Shaka Player (DASH) OU l'URL directe (BTS/16-bit).
@@ -992,7 +1045,10 @@ async def get_track_info(id: str, source: str = None):
 
 @app.get('/album')
 async def get_album(id: str, source: str = None):
-    if source == 'deezer':
+    if source == 'tidal_hund':
+        res = await run_in_threadpool(sync_get_tidal_album, id)
+        if res: return JSONResponse(res)
+    elif source == 'deezer':
         def _fetch_deezer_album():
             try:
                 r = requests.get(f"https://api.deezer.com/album/{id}", timeout=5)
