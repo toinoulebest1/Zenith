@@ -410,7 +410,12 @@
         let isPlaying = false; let isRadioActive = false; let isLyricsMode = false;
         let isShuffle = false; // Ajout état shuffle
         let lyricsData = []; let firstLineTime = null; let currentTrackId = null;
-        let fadeInterval = null; let isFetchingRadio = false;
+        let fadeInterval = null; 
+        
+        // GESTION RADIO & FETCHING
+        let isFetchingRadio = false;
+        let radioTimeout = null;
+        
         let crossfadeTimeout = null; 
         // Optimization: Cache lyrics elements
         let lyricsElements = [];
@@ -851,7 +856,15 @@
             const nextShaka = (nextAudio === playerA) ? shakaPlayerA : shakaPlayerB;
             const prevShaka = (prevAudio === playerA) ? shakaPlayerA : shakaPlayerB;
 
-            if (nextTrack.isRadio) { document.getElementById('radioBadge').style.display = 'block'; isRadioActive = true; } else { document.getElementById('radioBadge').style.display = 'none'; isRadioActive = false; }
+            // MISE A JOUR ETAT RADIO (Correction Bug isFetchingRadio)
+            if (nextTrack.isRadio) { 
+                document.getElementById('radioBadge').style.display = 'block'; 
+                isRadioActive = true; 
+            } else { 
+                document.getElementById('radioBadge').style.display = 'none'; 
+                isRadioActive = false; 
+            }
+            
             if (typeof broadcastTrackChange === 'function') broadcastTrackChange(nextTrack);
             resetLyricsState();
 
@@ -934,8 +947,13 @@
             updateLikeButtonState();
             setTimeout(() => { if(isPlaying && currentTrackId === nextTrack.id) saveTrackToHistory(nextTrack); }, 10000);
             
-            if (index === tracks.length - 1 && !isFetchingRadio) { 
-                triggerRadio(true);
+            // RADIO TRIGGER LOGIC (Improved)
+            // Si on est à la fin de la playlist, on lance la radio quelque soit le mode
+            if (index === tracks.length - 1) { 
+                // On attend un tout petit peu pour ne pas bloquer l'UI
+                setTimeout(() => {
+                    if (!isFetchingRadio) triggerRadio(true);
+                }, 500);
             }
 
             if (autoPlay) {
@@ -995,8 +1013,11 @@
                 } 
             };
             audioObj.ontimeupdate = () => {
-                if (isRadioActive && currentIndex === tracks.length - 1 && !isFetchingRadio) {
+                // RADIO LOGIC: Trigger near end of track if queue is exhausted
+                // On vérifie seulement si on est à la fin de la file d'attente
+                if (currentIndex === tracks.length - 1 && !isFetchingRadio && isPlaying) {
                      const rem = audioObj.duration - audioObj.currentTime;
+                     // On déclenche si reste moins de 40s (préchargement)
                      if (rem < 40 && rem > 0) { triggerRadio(true); }
                 }
                 if (audioObj === activeAudio && isPlaying && !nextTrackTriggered) {
@@ -1070,15 +1091,34 @@
                 do { r = Math.floor(Math.random() * tracks.length); } while(r === currentIndex && tracks.length > 1);
                 loadTrack(r);
             } else {
-                if (currentIndex < tracks.length - 1) { loadTrack(currentIndex + 1); } else { triggerRadio(); } 
+                if (currentIndex < tracks.length - 1) { 
+                    loadTrack(currentIndex + 1); 
+                } else { 
+                    // Si on est à la fin, on force la radio
+                    triggerRadio(); 
+                } 
             }
         }
         
         async function triggerRadio(isBackground = false) {
-            if(isFetchingRadio) return; isFetchingRadio = true;
+            if(isFetchingRadio) return; 
+            
+            isFetchingRadio = true;
+            
+            // SECURITY TIMEOUT: Force reset if request takes too long
+            if(radioTimeout) clearTimeout(radioTimeout);
+            radioTimeout = setTimeout(() => {
+                if(isFetchingRadio) {
+                    console.warn("Radio fetch timed out, resetting state.");
+                    isFetchingRadio = false;
+                }
+            }, 20000); // 20 secondes max
+
             if(!isBackground) { showToast("Recherche radio... 📻"); document.getElementById('radioBadge').style.display = 'block'; isRadioActive = true; }
             
             const cur = tracks[currentIndex]; 
+            if (!cur) { isFetchingRadio = false; return; }
+            
             const artist = cur.performer ? cur.performer.name : cur.artist;
 
             try {
@@ -1088,6 +1128,7 @@
                 if(Array.isArray(nextTracks) && nextTracks.length > 0) {
                     let addedCount = 0;
                     nextTracks.forEach(raw => {
+                        // Avoid duplicates if possible (simple ID check)
                         if (raw.id !== cur.id) {
                             tracks.push(raw);
                             addedCount++;
@@ -1096,18 +1137,33 @@
                     
                     if (addedCount > 0) {
                         if (!isBackground) { 
+                            // Si déclenché manuellement, on passe au suivant
                             loadTrack(currentIndex + 1); 
                         } else {
+                            // Si background, on met juste à jour la liste
                             if(document.getElementById('queuePanel').classList.contains('active')) renderQueueList();
+                            showToast(`Radio : +${addedCount} titres ajoutés`);
                         }
+                    } else {
+                        if(!isBackground) showToast("Fin de la radio (doublons).");
                     }
                 } else {
                     if(!isBackground) showToast("Aucune recommandation trouvée.");
+                    // En cas d'échec "vide", on force un petit délai avant de pouvoir ré-appeler
+                    setTimeout(() => { isFetchingRadio = false; }, 2000);
+                    return; 
                 }
             } catch(e) { 
                 console.error(e);
                 if(!isBackground) showToast("Erreur radio."); 
-            } finally { isFetchingRadio = false; }
+                // En cas d'erreur réseau, on force un délai
+                setTimeout(() => { isFetchingRadio = false; }, 2000);
+                return;
+            } 
+            
+            // Succès normal
+            isFetchingRadio = false;
+            if(radioTimeout) clearTimeout(radioTimeout);
         }
 
         function updateInterfaceInfo(t) {
@@ -1863,7 +1919,8 @@
                             isRadioActive = true;
                             document.getElementById('radioBadge').style.display = 'block';
                             loadTrack(0);
-                            triggerRadio(true);
+                            // On déclenche la radio après un court délai pour laisser l'interface se caler
+                            setTimeout(() => triggerRadio(true), 500);
                         } else {
                             tracks = items; 
                             const idx = tracks.findIndex(x => x.id === it.id);
