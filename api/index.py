@@ -354,7 +354,7 @@ def sync_search_tidal_albums(query, limit=15):
 def sync_get_tidal_album(album_id):
     """
     Récupère les détails d'un album Tidal (métadonnées + pistes)
-    Version Sécurisée contre les NoneType
+    Version Sécurisée : gère les pistes imbriquées dans 'item'
     """
     token = tidal_auth.get_token()
     if not token: return None
@@ -370,6 +370,7 @@ def sync_get_tidal_album(album_id):
 
     # 2. Tracks
     try:
+        # Le endpoint /items retourne souvent : { "items": [ { "item": { ...track... }, "type": "track" } ] }
         r_tracks = requests.get(f"https://api.tidal.com/v1/albums/{album_id}/items", params={"limit": 100, "offset": 0, "countryCode": "US"}, headers=headers, timeout=10)
         data_tracks = r_tracks.json()
         items = data_tracks.get('items', [])
@@ -381,18 +382,27 @@ def sync_get_tidal_album(album_id):
     for t in items:
         if not t: continue
         try:
+            # CORRECTION : On déballe l'objet si nécessaire
+            # Si 'item' existe, c'est que l'info est dedans (structure wrapper)
+            # Sinon on utilise t directement (structure plate)
+            actual_track = t.get('item') or t
+            
+            # Vérification basique
+            if not actual_track or 'id' not in actual_track:
+                continue
+
             # Detect HiRes
             bit_depth = 16
-            tags = (t.get('mediaMetadata') or {}).get('tags', [])
+            tags = (actual_track.get('mediaMetadata') or {}).get('tags', [])
             if "HIRES_LOSSLESS" in tags or "MQA" in tags:
                 bit_depth = 24
                 
             formatted_tracks.append({
-                'id': str(t['id']),
-                'title': t['title'],
-                'duration': t.get('duration', 0),
-                'track_number': t.get('trackNumber'),
-                'performer': {'name': (t.get('artist') or {}).get('name', 'Inconnu')},
+                'id': str(actual_track['id']),
+                'title': actual_track.get('title', 'Titre Inconnu'),
+                'duration': actual_track.get('duration', 0),
+                'track_number': actual_track.get('trackNumber'),
+                'performer': {'name': (actual_track.get('artist') or {}).get('name', 'Inconnu')},
                 'album': {'title': meta.get('title'), 'image': {'large': cover_url}},
                 'source': 'tidal_hund', # Important pour la lecture
                 'maximum_bit_depth': bit_depth
