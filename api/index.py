@@ -613,22 +613,50 @@ async def search_tracks(q: str, type: str = 'all'):
     if type in ['playlist', 'all']:
         deezer_playlists = await run_in_threadpool(sync_search_deezer_playlists, q, 100)
 
-    combined_tracks = qobuz_tracks
-    sigs = set()
-    for t in qobuz_tracks: sigs.add(f"{clean_string(t['title'])}{clean_string(t.get('performer',{}).get('name'))}")
+    # DEDUPLICATION AVANCÉE
+    combined_tracks = []
+    combined_tracks.extend(qobuz_tracks)
     
-    # Insertion Tidal
-    for t in tidal_tracks:
-        s = f"{clean_string(t['title'])}{clean_string(t['performer']['name'])}"
-        if s not in sigs: combined_tracks.append(t); sigs.add(s)
+    sigs = set()
+    
+    def get_dedup_sig(track):
+        # 1. Nettoyage Titre (suppression parenthèses, version, etc.)
+        t = track.get('title', '').lower()
+        t = re.sub(r'\s*[\(\[].*?[\)\]]', '', t) # Enlève (...) et [...]
+        t = re.sub(r'\s*-\s*.*', '', t) # Enlève tout après un tiret (ex: - Remaster)
+        t = clean_string(t)
         
+        # 2. Nettoyage Artiste
+        p = track.get('performer', {}).get('name', '')
+        if not p: p = track.get('artist', {}).get('name', '')
+        p = clean_string(p)
+        
+        return f"{t}|{p}"
+
+    # Enregistrement des signatures Qobuz
+    for t in qobuz_tracks:
+        sigs.add(get_dedup_sig(t))
+    
+    # Insertion Tidal (si pas de doublon)
+    for t in tidal_tracks:
+        s = get_dedup_sig(t)
+        if s not in sigs: 
+            combined_tracks.append(t)
+            sigs.add(s)
+        
+    # Insertion Deezer (si pas de doublon)
     for t in deezer_tracks:
-        s = f"{clean_string(t['title'])}{clean_string(t['performer']['name'])}"
-        if s not in sigs: combined_tracks.append(t); sigs.add(s)
+        s = get_dedup_sig(t)
+        if s not in sigs: 
+            combined_tracks.append(t)
+            sigs.add(s)
 
     combined_albums = qobuz_albums
     album_sigs = set()
-    for a in qobuz_albums: album_sigs.add(f"{clean_string(a['title'])}{clean_string(a.get('artist',{}).get('name'))}")
+    for a in qobuz_albums: 
+        s = f"{clean_string(a['title'])}{clean_string(a.get('artist',{}).get('name'))}"
+        album_sigs.add(s)
+        
     for a in deezer_albums:
         s = f"{clean_string(a['title'])}{clean_string(a.get('artist',{}).get('name'))}"
         if s not in album_sigs: combined_albums.append(a); album_sigs.add(s)
