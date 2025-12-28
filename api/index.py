@@ -295,10 +295,10 @@ def sync_search_tidal(query, limit=50):
                 track = {
                     'id': str(t['id']),
                     'title': t['title'],
-                    'performer': {'name': t.get('artist', {}).get('name', 'Inconnu')},
+                    'performer': {'name': (t.get('artist') or {}).get('name', 'Inconnu')},
                     'album': {
-                        'title': t.get('album', {}).get('title'),
-                        'image': {'large': tidal_uuid_to_url(t.get('album', {}).get('cover'))}
+                        'title': (t.get('album') or {}).get('title'),
+                        'image': {'large': tidal_uuid_to_url((t.get('album') or {}).get('cover'))}
                     },
                     'duration': t.get('duration', 0),
                     'maximum_bit_depth': bit_depth,
@@ -341,7 +341,7 @@ def sync_search_tidal_albums(query, limit=15):
                 results.append({
                     'id': str(a['id']),
                     'title': a['title'],
-                    'artist': {'name': a.get('artist', {}).get('name', 'Inconnu')},
+                    'artist': {'name': (a.get('artist') or {}).get('name', 'Inconnu')},
                     'image': {'large': tidal_uuid_to_url(a.get('cover'))},
                     'source': 'tidal_hund'
                 })
@@ -354,6 +354,7 @@ def sync_search_tidal_albums(query, limit=15):
 def sync_get_tidal_album(album_id):
     """
     Récupère les détails d'un album Tidal (métadonnées + pistes)
+    Version Sécurisée contre les NoneType
     """
     token = tidal_auth.get_token()
     if not token: return None
@@ -378,27 +379,32 @@ def sync_get_tidal_album(album_id):
     cover_url = tidal_uuid_to_url(meta.get('cover'))
     
     for t in items:
-        # Detect HiRes
-        bit_depth = 16
-        tags = t.get('mediaMetadata', {}).get('tags', [])
-        if "HIRES_LOSSLESS" in tags or "MQA" in tags:
-            bit_depth = 24
-            
-        formatted_tracks.append({
-            'id': str(t['id']),
-            'title': t['title'],
-            'duration': t.get('duration', 0),
-            'track_number': t.get('trackNumber'),
-            'performer': {'name': t.get('artist', {}).get('name', 'Inconnu')},
-            'album': {'title': meta.get('title'), 'image': {'large': cover_url}},
-            'source': 'tidal_hund', # Important pour la lecture
-            'maximum_bit_depth': bit_depth
-        })
+        if not t: continue
+        try:
+            # Detect HiRes
+            bit_depth = 16
+            tags = (t.get('mediaMetadata') or {}).get('tags', [])
+            if "HIRES_LOSSLESS" in tags or "MQA" in tags:
+                bit_depth = 24
+                
+            formatted_tracks.append({
+                'id': str(t['id']),
+                'title': t['title'],
+                'duration': t.get('duration', 0),
+                'track_number': t.get('trackNumber'),
+                'performer': {'name': (t.get('artist') or {}).get('name', 'Inconnu')},
+                'album': {'title': meta.get('title'), 'image': {'large': cover_url}},
+                'source': 'tidal_hund', # Important pour la lecture
+                'maximum_bit_depth': bit_depth
+            })
+        except Exception as e:
+            logger.error(f"[Tidal Album] Parse track error: {e}")
+            continue
 
     return {
         'id': str(meta.get('id')),
         'title': meta.get('title'),
-        'artist': {'name': meta.get('artist', {}).get('name')},
+        'artist': {'name': (meta.get('artist') or {}).get('name', 'Inconnu')},
         'image': {'large': cover_url},
         'source': 'tidal_hund',
         'tracks': {'items': formatted_tracks}
