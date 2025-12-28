@@ -353,34 +353,56 @@ def sync_search_tidal_albums(query, limit=15):
 def get_tidal_stream_manifest(track_id):
     """
     Récupère le manifeste DASH pour Shaka Player via HUND (Proxy).
-    C'est ici qu'on utilise "celui pour l'audio" demandé par l'utilisateur.
     """
-    logger.info(f"[Tidal Audio] Fetching manifest from Hund for ID: {track_id}")
+    # 1. Tentative HI_RES
+    logger.info(f"[Tidal Audio] 🎵 Requesting manifest for ID: {track_id} (Quality: HI_RES_LOSSLESS)")
     try:
-        # On utilise le proxy Hund ici comme demandé
         url = f"{TIDAL_HUND_BASE}/track/?id={track_id}&quality=HI_RES_LOSSLESS"
-        res = requests.get(url, timeout=15) # Timeout un peu plus long pour le proxy
+        res = requests.get(url, timeout=15)
         
         if res.status_code != 200:
-            logger.error(f"[Tidal Audio] Hund Proxy Error {res.status_code}: {res.text}")
-            return None
+            logger.error(f"[Tidal Audio] ❌ Error {res.status_code} for ID {track_id}")
+            logger.error(f"[Tidal Audio] Response Body: {res.text}")
             
+            # Tentative de fallback si erreur 4xx/5xx (souvent 401/403 si qualité non dispo)
+            logger.info(f"[Tidal Audio] 🔄 Retrying with LOSSLESS quality for ID {track_id}...")
+            url_fallback = f"{TIDAL_HUND_BASE}/track/?id={track_id}&quality=LOSSLESS"
+            res = requests.get(url_fallback, timeout=15)
+            
+            if res.status_code != 200:
+                logger.error(f"[Tidal Audio] ❌ Fallback failed {res.status_code}")
+                return None
+            else:
+                logger.info(f"[Tidal Audio] ✅ Fallback to LOSSLESS successful")
+
         data = res.json()
         
-        # Vérification structure réponse Hund
-        if 'data' in data and data['data'].get('manifestMimeType') == 'application/dash+xml':
-            logger.info("[Tidal Audio] Manifest retrieved successfully")
-            return {
-                "manifest": data['data']['manifest'], # Base64 encoded
-                "mimeType": "application/dash+xml",
-                "bitDepth": data['data'].get('bitDepth', 16),
-                "sampleRate": data['data'].get('sampleRate', 44100)
-            }
+        # Vérification structure
+        if 'data' not in data:
+             logger.warning(f"[Tidal Audio] ⚠️ 'data' field missing in response: {data}")
+             return None
+             
+        track_data = data['data']
+        mime = track_data.get('manifestMimeType')
         
-        logger.warning(f"[Tidal Audio] Invalid data format from Hund: {str(data)[:100]}...")
-        return None
+        if mime == 'application/dash+xml':
+            bit_depth = track_data.get('bitDepth', 16)
+            sample_rate = track_data.get('sampleRate', 44100)
+            logger.info(f"[Tidal Audio] ✅ Manifest received. Audio: {bit_depth}bit / {sample_rate}Hz")
+            return {
+                "manifest": track_data['manifest'],
+                "mimeType": "application/dash+xml",
+                "bitDepth": bit_depth,
+                "sampleRate": sample_rate
+            }
+        else:
+            logger.warning(f"[Tidal Audio] ⚠️ Unexpected MIME type: {mime}")
+            # Log plus de détails pour le debug
+            logger.debug(f"[Tidal Audio] Full Data: {str(track_data)[:200]}...")
+            return None
+
     except Exception as e:
-        logger.error(f"[Tidal Audio] Exception: {e}")
+        logger.error(f"[Tidal Audio] 💥 CRITICAL EXCEPTION for ID {track_id}: {e}")
         return None
 
 # --- FONCTIONS SYNCHRONES (WRAPPED) ---
