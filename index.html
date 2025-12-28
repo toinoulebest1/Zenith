@@ -1142,7 +1142,7 @@
                         } else {
                             // Si background, on met juste à jour la liste
                             if(document.getElementById('queuePanel').classList.contains('active')) renderQueueList();
-                            showToast(`Radio : +${addedCount} titres ajoutés`);
+                            // SUPPRESSION DU TOAST DEMANDÉE ICI
                         }
                     } else {
                         if(!isBackground) showToast("Fin de la radio (doublons).");
