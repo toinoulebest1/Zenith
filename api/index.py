@@ -789,10 +789,25 @@ def sync_resolve_track(title, artist):
     tidal_res = sync_search_tidal(f"{title} {artist}", limit=5)
     for t in tidal_res:
         t_artist = clean_string(t['performer']['name'])
-        if target_artist in t_artist or t_artist in target_artist:
-            # On conserve tidal_hund car c'est ce que frontend attend pour streamer
-            t['source'] = 'tidal_hund'
-            return t
+        t_title = clean_string(t['title'])
+        
+        # Vérification Artiste
+        match_artist = False
+        if FUZZ_AVAILABLE:
+            if fuzz.ratio(target_artist, t_artist) > 65: match_artist = True
+        elif target_artist in t_artist or t_artist in target_artist: match_artist = True
+        
+        if match_artist:
+            # Vérification Titre (nouveau)
+            match_title = False
+            if FUZZ_AVAILABLE:
+                if fuzz.ratio(target_title, t_title) > 60: match_title = True
+            elif target_title in t_title or t_title in target_title: match_title = True
+            
+            if match_title:
+                # On conserve tidal_hund car c'est ce que frontend attend pour streamer
+                t['source'] = 'tidal_hund'
+                return t
             
     return None
 
