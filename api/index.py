@@ -55,11 +55,10 @@ APP_ID = '798273057'
 
 TIDAL_HUND_BASE = "https://hund.qqdl.site"
 
-# Config Tidal Officiel (issue de main.py)
-TIDAL_CLIENT_ID = os.getenv("CLIENT_ID", "zU4XHVVkc2tDPo4t")
-TIDAL_CLIENT_SECRET = os.getenv("CLIENT_SECRET", "VJKhDFqJPqvsPVNBV6ukXTJmwlvbttP7wlMlrc72se4=")
-# Le refresh token peut venir de l'ENV ou de token.json
-TIDAL_REFRESH_TOKEN_ENV = os.getenv("REFRESH_TOKEN") 
+# Config Tidal par défaut (fallback)
+DEFAULT_TIDAL_CLIENT_ID = os.getenv("CLIENT_ID", "zU4XHVVkc2tDPo4t")
+DEFAULT_TIDAL_CLIENT_SECRET = os.getenv("CLIENT_SECRET", "VJKhDFqJPqvsPVNBV6ukXTJmwlvbttP7wlMlrc72se4=")
+DEFAULT_TIDAL_REFRESH_TOKEN = os.getenv("REFRESH_TOKEN") 
 
 # --- INIT FASTAPI ---
 app = FastAPI(title="Zenith API", docs_url=None, redoc_url=None)
@@ -83,13 +82,13 @@ class TidalAuthManager:
     def __init__(self):
         self.access_token = None
         self.expires_at = 0
+        self.client_id = DEFAULT_TIDAL_CLIENT_ID
+        self.client_secret = DEFAULT_TIDAL_CLIENT_SECRET
+        self.refresh_token = DEFAULT_TIDAL_REFRESH_TOKEN
+        self.load_config()
         
-    def get_refresh_token(self):
-        # 1. Priorité à la variable d'environnement
-        if TIDAL_REFRESH_TOKEN_ENV:
-            return TIDAL_REFRESH_TOKEN_ENV
-            
-        # 2. Fallback sur token.json à la racine ou dans api/
+    def load_config(self):
+        # 1. Essayer de charger depuis token.json
         possible_paths = ['token.json', 'api/token.json', '../token.json']
         for path in possible_paths:
             full_path = os.path.join(PROJECT_ROOT, path) if '..' not in path else os.path.abspath(os.path.join(current_dir, '..', 'token.json'))
@@ -98,34 +97,41 @@ class TidalAuthManager:
                     with open(path, 'r') as f:
                         data = json.load(f)
                         # Support liste ou dict
+                        entry = None
                         if isinstance(data, list) and len(data) > 0:
-                            return data[0].get('refresh_token')
+                            entry = data[0]
                         elif isinstance(data, dict):
-                            return data.get('refresh_token')
+                            entry = data
+                        
+                        if entry:
+                            self.refresh_token = entry.get('refresh_token') or self.refresh_token
+                            # Important: On surcharge les ID/Secret car le refresh token est lié à eux
+                            self.client_id = entry.get('client_ID') or self.client_id
+                            self.client_secret = entry.get('client_secret') or self.client_secret
+                            logger.info(f"[TidalAuth] Config loaded from {path} (Client: {self.client_id[:4]}...)")
+                            return
                 except Exception as e:
                     logger.error(f"[TidalAuth] Error reading {path}: {e}")
-        return None
 
     def get_token(self):
         if self.access_token and time.time() < self.expires_at:
             return self.access_token
             
-        refresh_token = self.get_refresh_token()
-        if not refresh_token:
-            logger.warning("[TidalAuth] Aucun REFRESH_TOKEN trouvé (Env ou token.json). La recherche officielle va échouer.")
+        if not self.refresh_token:
+            logger.warning("[TidalAuth] Aucun REFRESH_TOKEN trouvé. La recherche officielle va échouer.")
             return None
 
-        logger.info("[TidalAuth] Refreshing Token...")
+        logger.info(f"[TidalAuth] Refreshing Token with Client ID {self.client_id}...")
         try:
             r = requests.post(
                 "https://auth.tidal.com/v1/oauth2/token",
                 data={
-                    "client_id": TIDAL_CLIENT_ID,
-                    "refresh_token": refresh_token,
+                    "client_id": self.client_id,
+                    "refresh_token": self.refresh_token,
                     "grant_type": "refresh_token",
                     "scope": "r_usr+w_usr+w_sub",
                 },
-                auth=(TIDAL_CLIENT_ID, TIDAL_CLIENT_SECRET),
+                auth=(self.client_id, self.client_secret),
                 timeout=10
             )
             r.raise_for_status()
@@ -136,6 +142,9 @@ class TidalAuthManager:
             return self.access_token
         except Exception as e:
             logger.error(f"[TidalAuth] Error refreshing token: {e}")
+            try:
+                logger.error(f"[TidalAuth] Response: {r.text}")
+            except: pass
             return None
 
 tidal_auth = TidalAuthManager()
