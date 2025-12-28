@@ -4,11 +4,12 @@ services:
     env_file:
       - .env
     ports:
-      - "0.0.0.0:8000:8000"
+      - "8000:8000"
     volumes:
       - .:/app
     working_dir: /app
-    command: uvicorn main:app --host 0.0.0.0 --port 8000
+    # CORRECTION CRITIQUE : On lance api.index:app (Application Principale) au lieu de main:app (Proxy Tidal seul)
+    command: uvicorn api.index:app --host 0.0.0.0 --port 8000
     restart: unless-stopped
 
 networks:
