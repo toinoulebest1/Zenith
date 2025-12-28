@@ -167,45 +167,78 @@ def tidal_uuid_to_url(uuid):
 
 def sync_search_tidal(query, limit=25):
     try:
-        # Recherche sur Hund
+        # Recherche sur Hund avec s=
         url = f"{TIDAL_HUND_BASE}/search/?s={urllib.parse.quote(query)}"
         res = requests.get(url, timeout=10)
         data = res.json()
         
         results = []
-        if 'items' in data:
-            # Gestion si items est un dict (ex: indexé par 0, 1, 2) ou une liste
+        items = []
+        
+        # Adaptation à la structure du proxy { "data": { "items": [...] } }
+        if 'data' in data and 'items' in data['data']:
+            items = data['data']['items']
+        elif 'items' in data: # Fallback au cas où
             items = data['items']
-            iterable = items.values() if isinstance(items, dict) else items
             
-            for t in iterable:
-                try:
-                    # Détection Hi-Res / 24 bits
-                    bit_depth = 16
-                    tags = t.get('mediaMetadata', {}).get('tags', [])
-                    # Les tags peuvent être un dict ou une liste selon l'API
-                    if isinstance(tags, dict): tags = tags.values()
-                    if "HIRES_LOSSLESS" in tags or "MQA" in tags:
-                        bit_depth = 24
-                    
-                    track = {
-                        'id': str(t['id']),
-                        'title': t['title'],
-                        'performer': {'name': t.get('artist', {}).get('name', 'Inconnu')},
-                        'album': {
-                            'title': t.get('album', {}).get('title'),
-                            'image': {'large': tidal_uuid_to_url(t.get('album', {}).get('cover'))}
-                        },
-                        'duration': t.get('duration', 0),
-                        'maximum_bit_depth': bit_depth,
-                        'source': 'tidal_hund'
-                    }
-                    results.append(track)
-                except Exception as e:
-                    continue
+        iterable = items.values() if isinstance(items, dict) else items
+        
+        for t in iterable:
+            try:
+                # Détection Hi-Res / 24 bits
+                bit_depth = 16
+                tags = t.get('mediaMetadata', {}).get('tags', [])
+                if isinstance(tags, dict): tags = tags.values()
+                if "HIRES_LOSSLESS" in tags or "MQA" in tags:
+                    bit_depth = 24
+                
+                track = {
+                    'id': str(t['id']),
+                    'title': t['title'],
+                    'performer': {'name': t.get('artist', {}).get('name', 'Inconnu')},
+                    'album': {
+                        'title': t.get('album', {}).get('title'),
+                        'image': {'large': tidal_uuid_to_url(t.get('album', {}).get('cover'))}
+                    },
+                    'duration': t.get('duration', 0),
+                    'maximum_bit_depth': bit_depth,
+                    'source': 'tidal_hund'
+                }
+                results.append(track)
+            except Exception as e:
+                continue
         return results[:limit]
     except Exception as e:
         logger.error(f"Tidal Hund Search Error: {e}")
+        return []
+
+def sync_search_tidal_albums(query, limit=15):
+    try:
+        # Recherche albums avec al=
+        url = f"{TIDAL_HUND_BASE}/search/?al={urllib.parse.quote(query)}"
+        res = requests.get(url, timeout=10)
+        data = res.json()
+        
+        results = []
+        items = []
+        if 'data' in data and 'items' in data['data']:
+            items = data['data']['items']
+        elif 'items' in data:
+            items = data['items']
+            
+        for a in items:
+            try:
+                results.append({
+                    'id': str(a['id']),
+                    'title': a['title'],
+                    'artist': {'name': a.get('artists', [{}])[0].get('name', 'Inconnu')},
+                    'image': {'large': tidal_uuid_to_url(a.get('cover'))},
+                    'source': 'tidal_hund'
+                })
+            except: continue
+        return results[:limit]
+    except Exception as e:
+        logger.error(f"Tidal Album Search Error: {e}")
         return []
 
 def get_tidal_stream_manifest(track_id):
@@ -589,6 +622,7 @@ async def search_tracks(q: str, type: str = 'all'):
         tasks.append(run_in_threadpool(sync_search_deezer, q, 25))
     if type in ['album', 'all']:
         tasks.append(run_in_threadpool(sync_qobuz_search, q, 15, 'album'))
+        tasks.append(run_in_threadpool(sync_search_tidal_albums, q, 15))
         tasks.append(run_in_threadpool(sync_search_deezer_albums, q, 15))
     if type in ['artist', 'all']:
         tasks.append(run_in_threadpool(sync_search_deezer_artists, q, 15))
@@ -596,7 +630,7 @@ async def search_tracks(q: str, type: str = 'all'):
     finished = await asyncio.gather(*tasks, return_exceptions=True)
     idx = 0
     qobuz_tracks = []; tidal_tracks = []; deezer_tracks = []
-    qobuz_albums = []; deezer_albums = []
+    qobuz_albums = []; tidal_albums = []; deezer_albums = []
     deezer_artists = []
 
     if type in ['track', 'all']:
@@ -605,7 +639,8 @@ async def search_tracks(q: str, type: str = 'all'):
         r3 = finished[idx]; idx += 1; deezer_tracks = r3 if isinstance(r3, list) else []
     if type in ['album', 'all']:
         r4 = finished[idx]; idx += 1; qobuz_albums = r4 if isinstance(r4, list) else []
-        r5 = finished[idx]; idx += 1; deezer_albums = r5 if isinstance(r5, list) else []
+        r5 = finished[idx]; idx += 1; tidal_albums = r5 if isinstance(r5, list) else []
+        r6 = finished[idx]; idx += 1; deezer_albums = r6 if isinstance(r6, list) else []
     if type in ['artist', 'all']:
         r7 = finished[idx]; idx += 1; deezer_artists = r7 if isinstance(r7, list) else []
 
@@ -613,7 +648,7 @@ async def search_tracks(q: str, type: str = 'all'):
     if type in ['playlist', 'all']:
         deezer_playlists = await run_in_threadpool(sync_search_deezer_playlists, q, 100)
 
-    # DEDUPLICATION AVANCÉE
+    # DEDUPLICATION AVANCÉE POUR LES TITRES
     combined_tracks = []
     combined_tracks.extend(qobuz_tracks)
     
@@ -651,12 +686,19 @@ async def search_tracks(q: str, type: str = 'all'):
             combined_tracks.append(t)
             sigs.add(s)
 
+    # DEDUPLICATION AVANCÉE POUR LES ALBUMS
     combined_albums = qobuz_albums
     album_sigs = set()
     for a in qobuz_albums: 
         s = f"{clean_string(a['title'])}{clean_string(a.get('artist',{}).get('name'))}"
         album_sigs.add(s)
+
+    # Insertion Tidal Albums
+    for a in tidal_albums:
+        s = f"{clean_string(a['title'])}{clean_string(a.get('artist',{}).get('name'))}"
+        if s not in album_sigs: combined_albums.append(a); album_sigs.add(s)
         
+    # Insertion Deezer Albums
     for a in deezer_albums:
         s = f"{clean_string(a['title'])}{clean_string(a.get('artist',{}).get('name'))}"
         if s not in album_sigs: combined_albums.append(a); album_sigs.add(s)
