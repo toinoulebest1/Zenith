@@ -58,8 +58,8 @@ TIDAL_HUND_BASE = "https://hund.qqdl.site"
 # Config Tidal Officiel (issue de main.py)
 TIDAL_CLIENT_ID = os.getenv("CLIENT_ID", "zU4XHVVkc2tDPo4t")
 TIDAL_CLIENT_SECRET = os.getenv("CLIENT_SECRET", "VJKhDFqJPqvsPVNBV6ukXTJmwlvbttP7wlMlrc72se4=")
-# IMPORTANT : Le refresh token doit être dans les variables d'environnement
-TIDAL_REFRESH_TOKEN = os.getenv("REFRESH_TOKEN") 
+# Le refresh token peut venir de l'ENV ou de token.json
+TIDAL_REFRESH_TOKEN_ENV = os.getenv("REFRESH_TOKEN") 
 
 # --- INIT FASTAPI ---
 app = FastAPI(title="Zenith API", docs_url=None, redoc_url=None)
@@ -84,13 +84,35 @@ class TidalAuthManager:
         self.access_token = None
         self.expires_at = 0
         
+    def get_refresh_token(self):
+        # 1. Priorité à la variable d'environnement
+        if TIDAL_REFRESH_TOKEN_ENV:
+            return TIDAL_REFRESH_TOKEN_ENV
+            
+        # 2. Fallback sur token.json à la racine ou dans api/
+        possible_paths = ['token.json', 'api/token.json', '../token.json']
+        for path in possible_paths:
+            full_path = os.path.join(PROJECT_ROOT, path) if '..' not in path else os.path.abspath(os.path.join(current_dir, '..', 'token.json'))
+            if os.path.exists(path):
+                try:
+                    with open(path, 'r') as f:
+                        data = json.load(f)
+                        # Support liste ou dict
+                        if isinstance(data, list) and len(data) > 0:
+                            return data[0].get('refresh_token')
+                        elif isinstance(data, dict):
+                            return data.get('refresh_token')
+                except Exception as e:
+                    logger.error(f"[TidalAuth] Error reading {path}: {e}")
+        return None
+
     def get_token(self):
-        # Si on a un token valide, on le retourne
         if self.access_token and time.time() < self.expires_at:
             return self.access_token
             
-        if not TIDAL_REFRESH_TOKEN:
-            logger.warning("[TidalAuth] Aucun REFRESH_TOKEN trouvé. La recherche officielle va échouer.")
+        refresh_token = self.get_refresh_token()
+        if not refresh_token:
+            logger.warning("[TidalAuth] Aucun REFRESH_TOKEN trouvé (Env ou token.json). La recherche officielle va échouer.")
             return None
 
         logger.info("[TidalAuth] Refreshing Token...")
@@ -99,7 +121,7 @@ class TidalAuthManager:
                 "https://auth.tidal.com/v1/oauth2/token",
                 data={
                     "client_id": TIDAL_CLIENT_ID,
-                    "refresh_token": TIDAL_REFRESH_TOKEN,
+                    "refresh_token": refresh_token,
                     "grant_type": "refresh_token",
                     "scope": "r_usr+w_usr+w_sub",
                 },
@@ -220,7 +242,7 @@ def sync_search_tidal(query, limit=25):
     """
     token = tidal_auth.get_token()
     if not token:
-        logger.error("[Tidal Search] Pas de token disponible. Vérifiez REFRESH_TOKEN.")
+        logger.error("[Tidal Search] Pas de token disponible. Vérifiez REFRESH_TOKEN ou token.json.")
         return []
 
     logger.info(f"[Tidal Search] Query: {query}")
