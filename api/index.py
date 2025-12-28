@@ -2,6 +2,8 @@ import sys
 import os
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+import time
+import json
 
 # Configuration des chemins pour imports locaux
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -53,6 +55,12 @@ APP_ID = '798273057'
 
 TIDAL_HUND_BASE = "https://hund.qqdl.site"
 
+# Config Tidal Officiel (issue de main.py)
+TIDAL_CLIENT_ID = os.getenv("CLIENT_ID", "zU4XHVVkc2tDPo4t")
+TIDAL_CLIENT_SECRET = os.getenv("CLIENT_SECRET", "VJKhDFqJPqvsPVNBV6ukXTJmwlvbttP7wlMlrc72se4=")
+# IMPORTANT : Le refresh token doit être dans les variables d'environnement
+TIDAL_REFRESH_TOKEN = os.getenv("REFRESH_TOKEN") 
+
 # --- INIT FASTAPI ---
 app = FastAPI(title="Zenith API", docs_url=None, redoc_url=None)
 
@@ -65,10 +73,50 @@ app.add_middleware(
 )
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("ZenithAsync")
+logger = logging.getLogger("ZenithAPI")
 
 lyrics_engine = LyricsSearcher()
 yt = YTMusic()
+
+# --- GESTION TOKEN TIDAL OFFICIEL ---
+class TidalAuthManager:
+    def __init__(self):
+        self.access_token = None
+        self.expires_at = 0
+        
+    def get_token(self):
+        # Si on a un token valide, on le retourne
+        if self.access_token and time.time() < self.expires_at:
+            return self.access_token
+            
+        if not TIDAL_REFRESH_TOKEN:
+            logger.warning("[TidalAuth] Aucun REFRESH_TOKEN trouvé. La recherche officielle va échouer.")
+            return None
+
+        logger.info("[TidalAuth] Refreshing Token...")
+        try:
+            r = requests.post(
+                "https://auth.tidal.com/v1/oauth2/token",
+                data={
+                    "client_id": TIDAL_CLIENT_ID,
+                    "refresh_token": TIDAL_REFRESH_TOKEN,
+                    "grant_type": "refresh_token",
+                    "scope": "r_usr+w_usr+w_sub",
+                },
+                auth=(TIDAL_CLIENT_ID, TIDAL_CLIENT_SECRET),
+                timeout=10
+            )
+            r.raise_for_status()
+            data = r.json()
+            self.access_token = data["access_token"]
+            self.expires_at = time.time() + data.get("expires_in", 3600) - 60
+            logger.info("[TidalAuth] Token refreshed successfully.")
+            return self.access_token
+        except Exception as e:
+            logger.error(f"[TidalAuth] Error refreshing token: {e}")
+            return None
+
+tidal_auth = TidalAuthManager()
 
 # --- CLIENT QOBUZ ---
 class TokenQobuzClient(QobuzClient):
@@ -163,32 +211,45 @@ def tidal_uuid_to_url(uuid):
     path = uuid.replace('-', '/')
     return f"https://resources.tidal.com/images/{path}/640x640.jpg"
 
-# --- TIDAL / HUND API ---
+# --- TIDAL OFFICIAL SEARCH & HUND AUDIO ---
 
 def sync_search_tidal(query, limit=25):
+    """
+    Recherche via l'API Officielle Tidal (plus fiable)
+    Mais on taggue la source 'tidal_hund' pour utiliser le proxy audio plus tard.
+    """
+    token = tidal_auth.get_token()
+    if not token:
+        logger.error("[Tidal Search] Pas de token disponible. Vérifiez REFRESH_TOKEN.")
+        return []
+
+    logger.info(f"[Tidal Search] Query: {query}")
     try:
-        # Recherche sur Hund avec s=
-        url = f"{TIDAL_HUND_BASE}/search/?s={urllib.parse.quote(query)}"
-        res = requests.get(url, timeout=10)
+        url = "https://api.tidal.com/v1/search/tracks"
+        params = {
+            "query": query,
+            "limit": limit,
+            "offset": 0,
+            "countryCode": "US"
+        }
+        headers = {"Authorization": f"Bearer {token}"}
+        
+        res = requests.get(url, headers=headers, params=params, timeout=10)
+        logger.info(f"[Tidal Search] Status: {res.status_code}")
+        
+        if res.status_code != 200:
+            logger.error(f"[Tidal Search] Error Body: {res.text}")
+            return []
+
         data = res.json()
-        
+        items = data.get('items', [])
         results = []
-        items = []
         
-        # Adaptation à la structure du proxy { "data": { "items": [...] } }
-        if 'data' in data and 'items' in data['data']:
-            items = data['data']['items']
-        elif 'items' in data: # Fallback au cas où
-            items = data['items']
-            
-        iterable = items.values() if isinstance(items, dict) else items
-        
-        for t in iterable:
+        for t in items:
             try:
-                # Détection Hi-Res / 24 bits
+                # Détection Hi-Res / 24 bits via les tags officiels
                 bit_depth = 16
                 tags = t.get('mediaMetadata', {}).get('tags', [])
-                if isinstance(tags, dict): tags = tags.values()
                 if "HIRES_LOSSLESS" in tags or "MQA" in tags:
                     bit_depth = 24
                 
@@ -202,62 +263,86 @@ def sync_search_tidal(query, limit=25):
                     },
                     'duration': t.get('duration', 0),
                     'maximum_bit_depth': bit_depth,
-                    'source': 'tidal_hund'
+                    # IMPORTANT: On garde 'tidal_hund' pour que le frontend sache appeler /tidal_manifest
+                    'source': 'tidal_hund' 
                 }
                 results.append(track)
             except Exception as e:
+                logger.error(f"[Tidal Search] Parse Error: {e}")
                 continue
-        return results[:limit]
+                
+        logger.info(f"[Tidal Search] Found {len(results)} items")
+        return results
+
     except Exception as e:
-        logger.error(f"Tidal Hund Search Error: {e}")
+        logger.error(f"[Tidal Search] Exception: {e}")
         return []
 
 def sync_search_tidal_albums(query, limit=15):
+    token = tidal_auth.get_token()
+    if not token: return []
+
     try:
-        # Recherche albums avec al=
-        url = f"{TIDAL_HUND_BASE}/search/?al={urllib.parse.quote(query)}"
-        res = requests.get(url, timeout=10)
+        url = "https://api.tidal.com/v1/search/albums"
+        params = {
+            "query": query,
+            "limit": limit,
+            "offset": 0,
+            "countryCode": "US"
+        }
+        headers = {"Authorization": f"Bearer {token}"}
+        
+        res = requests.get(url, headers=headers, params=params, timeout=10)
         data = res.json()
+        items = data.get('items', [])
         
         results = []
-        items = []
-        if 'data' in data and 'items' in data['data']:
-            items = data['data']['items']
-        elif 'items' in data:
-            items = data['items']
-            
         for a in items:
             try:
                 results.append({
                     'id': str(a['id']),
                     'title': a['title'],
-                    'artist': {'name': a.get('artists', [{}])[0].get('name', 'Inconnu')},
+                    'artist': {'name': a.get('artist', {}).get('name', 'Inconnu')},
                     'image': {'large': tidal_uuid_to_url(a.get('cover'))},
                     'source': 'tidal_hund'
                 })
             except: continue
-        return results[:limit]
+        return results
     except Exception as e:
-        logger.error(f"Tidal Album Search Error: {e}")
+        logger.error(f"[Tidal Album Search] Error: {e}")
         return []
 
 def get_tidal_stream_manifest(track_id):
-    """Récupère le manifeste DASH pour Shaka Player"""
+    """
+    Récupère le manifeste DASH pour Shaka Player via HUND (Proxy).
+    C'est ici qu'on utilise "celui pour l'audio" demandé par l'utilisateur.
+    """
+    logger.info(f"[Tidal Audio] Fetching manifest from Hund for ID: {track_id}")
     try:
+        # On utilise le proxy Hund ici comme demandé
         url = f"{TIDAL_HUND_BASE}/track/?id={track_id}&quality=HI_RES_LOSSLESS"
-        res = requests.get(url, timeout=10)
+        res = requests.get(url, timeout=15) # Timeout un peu plus long pour le proxy
+        
+        if res.status_code != 200:
+            logger.error(f"[Tidal Audio] Hund Proxy Error {res.status_code}: {res.text}")
+            return None
+            
         data = res.json()
         
-        if data.get('data', {}).get('manifestMimeType') == 'application/dash+xml':
+        # Vérification structure réponse Hund
+        if 'data' in data and data['data'].get('manifestMimeType') == 'application/dash+xml':
+            logger.info("[Tidal Audio] Manifest retrieved successfully")
             return {
                 "manifest": data['data']['manifest'], # Base64 encoded
                 "mimeType": "application/dash+xml",
                 "bitDepth": data['data'].get('bitDepth', 16),
                 "sampleRate": data['data'].get('sampleRate', 44100)
             }
+        
+        logger.warning(f"[Tidal Audio] Invalid data format from Hund: {str(data)[:100]}...")
         return None
     except Exception as e:
-        logger.error(f"Tidal Manifest Error: {e}")
+        logger.error(f"[Tidal Audio] Exception: {e}")
         return None
 
 # --- FONCTIONS SYNCHRONES (WRAPPED) ---
@@ -559,6 +644,7 @@ def sync_resolve_track(title, artist):
     for t in tidal_res:
         t_artist = clean_string(t['performer']['name'])
         if target_artist in t_artist or t_artist in target_artist:
+            # On conserve tidal_hund car c'est ce que frontend attend pour streamer
             t['source'] = 'tidal_hund'
             return t
             
