@@ -113,7 +113,6 @@ class TidalAuthManager:
                             entry = data
                         
                         if entry:
-                            # Si le fichier existe, on l'utilise en priorité
                             if entry.get('refresh_token'): self.refresh_token = entry.get('refresh_token')
                             if entry.get('client_ID'): self.client_id = entry.get('client_ID')
                             if entry.get('client_secret'): self.client_secret = entry.get('client_secret')
@@ -252,7 +251,7 @@ def tidal_uuid_to_url(uuid):
 
 # --- TIDAL OFFICIAL SEARCH & HUND AUDIO ---
 
-def sync_search_tidal(query, limit=25):
+def sync_search_tidal(query, limit=50):
     """
     Recherche via l'API Officielle Tidal (plus fiable)
     Mais on taggue la source 'tidal_hund' pour utiliser le proxy audio plus tard.
@@ -742,9 +741,9 @@ async def get_radio_queue(artist: str, title: str):
 async def search_tracks(q: str, type: str = 'all'):
     tasks = []
     if type in ['track', 'all']:
-        tasks.append(run_in_threadpool(sync_qobuz_search, q, 25, 'track'))
-        tasks.append(run_in_threadpool(sync_search_tidal, q, 25))
-        tasks.append(run_in_threadpool(sync_search_deezer, q, 25))
+        tasks.append(run_in_threadpool(sync_qobuz_search, q, 50, 'track'))
+        tasks.append(run_in_threadpool(sync_search_tidal, q, 50))
+        tasks.append(run_in_threadpool(sync_search_deezer, q, 50))
     if type in ['album', 'all']:
         tasks.append(run_in_threadpool(sync_qobuz_search, q, 15, 'album'))
         tasks.append(run_in_threadpool(sync_search_tidal_albums, q, 15))
