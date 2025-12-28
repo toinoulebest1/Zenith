@@ -811,29 +811,75 @@ def sync_resolve_track(title, artist):
             
     return None
 
+# --- REECRITURE : FORCE YOUTUBE RETRY ---
 def sync_get_radio_queue(title, artist):
+    """
+    Force l'API YouTube Music à fonctionner avec un système de réessai agressif (Retry Logic).
+    Pas de fallback vers Deezer ou Qobuz.
+    """
     query = f"{title} {artist}"
-    try:
-        results = yt.search(query, filter="songs", limit=1)
-        if not results: return []
-        vid = results[0]["videoId"]
-        watch = yt.get_watch_playlist(vid, limit=25)
-        if "tracks" not in watch: return []
-        final = []
-        for t in watch["tracks"]:
-            if t.get("videoId") == vid: continue
-            if not t.get("album") or not t.get("album", {}).get("name"): continue
+    retries = 3 # Nombre de tentatives max
+    last_error = None
 
-            img = extract_thumbnail_hd(t)
-            final.append({
-                "id": t.get("videoId"), "title": t.get("title"),
-                "performer": { "name": t.get("artists", [{}])[0].get("name", "Inconnu") },
-                "album": { "title": t.get("album", {}).get("name"), "image": { "large": img } },
-                "img": img, "duration": parse_duration(t.get("duration") or t.get("length")),
-                "source": "yt_lazy", "isRadio": True
-            })
-        return final
-    except Exception as e: return []
+    for attempt in range(retries):
+        try:
+            logger.info(f"[Radio] Tentative {attempt+1}/{retries} pour '{query}'")
+            
+            # 1. Recherche du morceau initial pour avoir le VideoID
+            results = yt.search(query, filter="songs", limit=1)
+            if not results:
+                logger.warning(f"[Radio] Aucun résultat de recherche (Tentative {attempt+1})")
+                time.sleep(1) # Attente avant retry
+                continue
+
+            vid = results[0]["videoId"]
+            
+            # 2. Récupération de la "Watch Playlist" (La Radio)
+            # On demande un peu plus de titres pour avoir du choix
+            watch = yt.get_watch_playlist(vid, limit=25)
+
+            if "tracks" not in watch or not watch["tracks"]:
+                logger.warning(f"[Radio] Playlist vide retournée par YouTube (Tentative {attempt+1})")
+                time.sleep(1)
+                continue
+
+            # 3. Traitement des résultats
+            final = []
+            for t in watch["tracks"]:
+                # On ignore le titre en cours de lecture pour ne pas le dupliquer
+                if t.get("videoId") == vid: continue
+                
+                # Vérification de base
+                if not t.get("album") or not t.get("album", {}).get("name"): continue
+
+                img = extract_thumbnail_hd(t)
+                
+                final.append({
+                    "id": t.get("videoId"), 
+                    "title": t.get("title"),
+                    "performer": { "name": t.get("artists", [{}])[0].get("name", "Inconnu") },
+                    "album": { "title": t.get("album", {}).get("name"), "image": { "large": img } },
+                    "img": img, 
+                    "duration": parse_duration(t.get("duration") or t.get("length")),
+                    "source": "yt_lazy", 
+                    "isRadio": True
+                })
+            
+            if final:
+                logger.info(f"[Radio] Succès ! {len(final)} titres trouvés.")
+                return final
+            else:
+                logger.warning("[Radio] Résultats vides après filtrage, retry...")
+
+        except Exception as e:
+            last_error = e
+            logger.error(f"[Radio] Erreur (Tentative {attempt+1}): {e}")
+            time.sleep(1 + attempt) # Backoff (1s, 2s, 3s...)
+
+    # Si on arrive ici, c'est que toutes les tentatives ont échoué
+    logger.error(f"[Radio] ECHEC TOTAL après {retries} tentatives. Dernière erreur : {last_error}")
+    # On renvoie une liste vide, le frontend gérera (pas de toast "Erreur radio" constant, juste pas de suite)
+    return []
 
 class TranslationRequest(BaseModel):
     lines: list[str]
