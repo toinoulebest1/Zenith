@@ -898,13 +898,10 @@
                         nextTrack.source = newMeta.source; // Deviendra 'tidal_hund' ou 'qobuz'
                         
                         // Mise à jour métadonnées secondaires si dispos
-                        if(newMeta.duration) nextTrack.duration = newMeta.duration;
-                        if(newMeta.album && newMeta.album.image) {
-                             if(!nextTrack.album) nextTrack.album = {};
-                             nextTrack.album.image = newMeta.album.image;
-                        }
+                        if(newMeta.duration && (!nextTrack.duration || nextTrack.duration === 0)) nextTrack.duration = newMeta.duration;
                         
-                        updateInterfaceInfo(nextTrack); // Rafraîchir l'UI avec la bonne image/titre
+                        // On ne met PLUS à jour l'image ni le titre pour garder l'aspect visuel de la playlist
+                        // updateInterfaceInfo(nextTrack); 
                     } else {
                         console.warn("❌ Echec résolution métadonnées");
                     }
