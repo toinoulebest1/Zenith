@@ -425,17 +425,22 @@ def get_tidal_stream_manifest(track_id):
     """
     Récupère le manifeste audio pour Shaka Player (DASH) OU l'URL directe (BTS/16-bit).
     """
+    # Ajout d'un User-Agent pour éviter le blocage 403
+    request_headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+
     # 1. Tentative HI_RES (pour Dash)
     logger.info(f"[Tidal Audio] 🎵 Requesting manifest for ID: {track_id} (Quality: HI_RES_LOSSLESS)")
     try:
         url = f"{TIDAL_HUND_BASE}/track/?id={track_id}&quality=HI_RES_LOSSLESS"
-        res = requests.get(url, timeout=15)
+        res = requests.get(url, headers=request_headers, timeout=15)
         
         # Si erreur 401/403/etc, on retente en LOSSLESS standard
         if res.status_code != 200:
             logger.error(f"[Tidal Audio] ❌ Error {res.status_code} for HI_RES. Retrying LOSSLESS...")
             url_fallback = f"{TIDAL_HUND_BASE}/track/?id={track_id}&quality=LOSSLESS"
-            res = requests.get(url_fallback, timeout=15)
+            res = requests.get(url_fallback, headers=request_headers, timeout=15)
             
             if res.status_code != 200:
                 logger.error(f"[Tidal Audio] ❌ Fallback to LOSSLESS also failed.")
