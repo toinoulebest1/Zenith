@@ -881,7 +881,7 @@
             const lazySources = ['subsonic', 'yt_lazy', 'spotify_lazy', 'deezer', 'tidal', 'tidal_old'];
             
             if (lazySources.includes(nextTrack.source)) {
-                showToast("Résolution de la source...");
+                // TOAST SUPPRIMÉ
                 try {
                     const artist = nextTrack.performer ? nextTrack.performer.name : (nextTrack.artist ? nextTrack.artist.name : 'Inconnu');
                     const res = await fetch(`${API_BASE}/resolve_metadata?title=${encodeURIComponent(nextTrack.title)}&artist=${encodeURIComponent(artist)}`);
