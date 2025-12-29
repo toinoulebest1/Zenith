@@ -876,25 +876,41 @@
             updateActiveCard();
             updateLikeButtonState();
 
-            // RESOLUTION PREALABLE POUR SUBSONIC (Pour récupérer l'image et la bonne source)
-            if (nextTrack.source === 'subsonic') {
-                showToast("Mise à jour des métadonnées...");
+            // --- NOUVELLE LOGIQUE DE RÉSOLUTION UNIFIÉE ---
+            // On résout systématiquement les sources "floues" avant de tenter la lecture
+            const lazySources = ['subsonic', 'yt_lazy', 'spotify_lazy', 'deezer', 'tidal', 'tidal_old'];
+            
+            if (lazySources.includes(nextTrack.source)) {
+                showToast("Résolution de la source...");
                 try {
-                    const res = await fetch(`${API_BASE}/resolve_metadata?title=${encodeURIComponent(nextTrack.title)}&artist=${encodeURIComponent(nextTrack.performer ? nextTrack.performer.name : nextTrack.artist)}`);
+                    const artist = nextTrack.performer ? nextTrack.performer.name : (nextTrack.artist ? nextTrack.artist.name : 'Inconnu');
+                    const res = await fetch(`${API_BASE}/resolve_metadata?title=${encodeURIComponent(nextTrack.title)}&artist=${encodeURIComponent(artist)}`);
                     
                     // CHECK CONCURRENCY
                     if (thisLoadId !== currentLoadId) return;
 
                     if(res.ok) {
                         const newMeta = await res.json();
+                        console.log("✅ Résolution réussie:", newMeta.source);
+                        
+                        // Mise à jour des infos critiques pour la lecture
                         nextTrack.id = newMeta.id;
-                        nextTrack.source = newMeta.source;
-                        if(newMeta.album && newMeta.album.image) nextTrack.album.image = newMeta.album.image;
+                        nextTrack.source = newMeta.source; // Deviendra 'tidal_hund' ou 'qobuz'
+                        
+                        // Mise à jour métadonnées secondaires si dispos
                         if(newMeta.duration) nextTrack.duration = newMeta.duration;
-                        if(newMeta.img) nextTrack.img = newMeta.img;
-                        updateInterfaceInfo(nextTrack);
+                        if(newMeta.album && newMeta.album.image) {
+                             if(!nextTrack.album) nextTrack.album = {};
+                             nextTrack.album.image = newMeta.album.image;
+                        }
+                        
+                        updateInterfaceInfo(nextTrack); // Rafraîchir l'UI avec la bonne image/titre
+                    } else {
+                        console.warn("❌ Echec résolution métadonnées");
                     }
-                } catch(e) { console.error("Resolve error", e); }
+                } catch(e) { 
+                    console.error("Resolve error", e); 
+                }
             }
 
             // Gestion Source TIDAL
@@ -932,11 +948,14 @@
                 await nextShaka.unload();
                 
                 let url = '';
-                if(nextTrack.source === 'yt_lazy' || nextTrack.source === 'spotify_lazy' || nextTrack.source === 'deezer' || nextTrack.source === 'subsonic') {
+                // Fallback ultime : si la source est toujours "lazy" après la tentative de résolution, on tente quand même le vieux resolve_stream
+                if(lazySources.includes(nextTrack.source)) {
                     const artist = nextTrack.performer ? nextTrack.performer.name : 'Inconnu';
                     url = `${API_BASE}/resolve_stream?title=${encodeURIComponent(nextTrack.title)}&artist=${encodeURIComponent(artist)}`;
                 }
-                else url = `${API_BASE}/stream/${nextTrack.id}`;
+                else {
+                    url = `${API_BASE}/stream/${nextTrack.id}`;
+                }
                 
                 // CHECK CONCURRENCY
                 if (thisLoadId !== currentLoadId) return;
