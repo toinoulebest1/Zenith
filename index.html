@@ -823,8 +823,14 @@
             lyricsElements = []; 
         }
 
+        // Variable globale pour gérer la concurrence des chargements
+        let currentLoadId = 0;
+
         async function loadTrack(index, autoPlay = true, useCrossfade = true) {
             if(index < 0 || index >= tracks.length) return;
+            
+            // Increment ID to invalidate previous pending loads
+            const thisLoadId = ++currentLoadId;
             
             if(document.getElementById('queuePanel').classList.contains('active')) {
                 const oldIndex = currentIndex;
@@ -857,34 +863,35 @@
             const nextShaka = (nextAudio === playerA) ? shakaPlayerA : shakaPlayerB;
             const prevShaka = (prevAudio === playerA) ? shakaPlayerA : shakaPlayerB;
 
-            // MISE A JOUR ETAT RADIO (Correction Bug isFetchingRadio)
+            // MISE A JOUR UI IMMEDIATE
+            currentIndex = index; currentTrackId = nextTrack.id;
+            updateInterfaceInfo(nextTrack);
             if (nextTrack.isRadio) { 
-                document.getElementById('radioBadge').style.display = 'block'; 
-                isRadioActive = true; 
+                document.getElementById('radioBadge').style.display = 'block'; isRadioActive = true; 
             } else { 
-                document.getElementById('radioBadge').style.display = 'none'; 
-                isRadioActive = false; 
+                document.getElementById('radioBadge').style.display = 'none'; isRadioActive = false; 
             }
-            
             if (typeof broadcastTrackChange === 'function') broadcastTrackChange(nextTrack);
             resetLyricsState();
+            updateActiveCard();
+            updateLikeButtonState();
 
             // RESOLUTION PREALABLE POUR SUBSONIC (Pour récupérer l'image et la bonne source)
             if (nextTrack.source === 'subsonic') {
                 showToast("Mise à jour des métadonnées...");
                 try {
                     const res = await fetch(`${API_BASE}/resolve_metadata?title=${encodeURIComponent(nextTrack.title)}&artist=${encodeURIComponent(nextTrack.performer ? nextTrack.performer.name : nextTrack.artist)}`);
+                    
+                    // CHECK CONCURRENCY
+                    if (thisLoadId !== currentLoadId) return;
+
                     if(res.ok) {
                         const newMeta = await res.json();
-                        // On met à jour l'objet track actuel avec les nouvelles infos
                         nextTrack.id = newMeta.id;
                         nextTrack.source = newMeta.source;
                         if(newMeta.album && newMeta.album.image) nextTrack.album.image = newMeta.album.image;
                         if(newMeta.duration) nextTrack.duration = newMeta.duration;
-                        // On sauvegarde l'image spécifique si présente
                         if(newMeta.img) nextTrack.img = newMeta.img;
-                        
-                        // Mise à jour visuelle immédiate
                         updateInterfaceInfo(nextTrack);
                     }
                 } catch(e) { console.error("Resolve error", e); }
@@ -897,17 +904,18 @@
                     await nextShaka.unload(); 
                     
                     const res = await fetch(`${API_BASE}/tidal_manifest/${nextTrack.id}`);
+                    
+                    // CHECK CONCURRENCY BEFORE APPLYING
+                    if (thisLoadId !== currentLoadId) return;
+
                     const manifestData = await res.json();
                     
                     if (manifestData.mimeType === 'application/dash+xml') {
-                        // CAS 24-BIT / DASH (Hi-Res)
                         const dashUri = 'data:application/dash+xml;base64,' + manifestData.manifest;
                         await nextShaka.load(dashUri);
                         console.log("✅ Loaded DASH manifest for Tidal Hi-Res");
                     } 
                     else if (manifestData.url) {
-                        // CAS 16-BIT / FILE (Lossless)
-                        // On utilise le lecteur HTML5 natif en bypassant Shaka
                         nextAudio.src = manifestData.url;
                         console.log("✅ Loaded Direct URL for Tidal Lossless (16-bit)");
                     } 
@@ -921,7 +929,6 @@
                 }
             } else {
                 // Standard Track (URL directe)
-                // Important: Unload Shaka to detach MediaSource and allow src attribute
                 await nextShaka.unload();
                 
                 let url = '';
@@ -931,12 +938,15 @@
                 }
                 else url = `${API_BASE}/stream/${nextTrack.id}`;
                 
+                // CHECK CONCURRENCY
+                if (thisLoadId !== currentLoadId) return;
+
                 nextAudio.src = url;
             }
 
-            currentIndex = index; currentTrackId = nextTrack.id;
-            updateInterfaceInfo(nextTrack);
-            
+            // FINAL CHECK BEFORE PLAYING
+            if (thisLoadId !== currentLoadId) return;
+
             if(nextTrack.source !== 'yt_lazy' && nextTrack.source !== 'spotify_lazy' && nextTrack.source !== 'deezer' && nextTrack.source !== 'subsonic') safePushState({}, "", `/?track=${nextTrack.id}&source=${nextTrack.source}`);
             
             // Force disable crossfade if direct audio
@@ -944,14 +954,12 @@
             
             activeAudio = nextAudio; 
             
-            setupMediaSession(nextTrack); fetchLyrics(nextTrack, nextTrack.performer ? nextTrack.performer.name : 'Artiste'); updateActiveCard();
-            updateLikeButtonState();
+            setupMediaSession(nextTrack); fetchLyrics(nextTrack, nextTrack.performer ? nextTrack.performer.name : 'Artiste'); 
+            
             setTimeout(() => { if(isPlaying && currentTrackId === nextTrack.id) saveTrackToHistory(nextTrack); }, 10000);
             
             // RADIO TRIGGER LOGIC (Improved)
-            // Si on est à la fin de la playlist, on lance la radio quelque soit le mode
             if (index === tracks.length - 1) { 
-                // On attend un tout petit peu pour ne pas bloquer l'UI
                 setTimeout(() => {
                     if (!isFetchingRadio) triggerRadio(true);
                 }, 500);
@@ -982,9 +990,14 @@
                 crossfadeTimeout = null;
             }
 
+            // Safety cleanup: Ensure prevAudio is paused if fade duration is 0
+            // OR if we are interrupting a fade
             if (duration === 0) {
-                prevAudio.pause();
-                prevAudio.currentTime = 0;
+                try {
+                    prevAudio.pause();
+                    prevAudio.currentTime = 0;
+                } catch(e) {}
+                
                 xfadeParam.cancelScheduledValues(currentTime);
                 xfadeParam.setValueAtTime(targetValue, currentTime);
                 return;
@@ -998,8 +1011,10 @@
             xfadeParam.linearRampToValueAtTime(targetValue, currentTime + duration);
 
             crossfadeTimeout = setTimeout(() => {
-                prevAudio.pause();
-                prevAudio.currentTime = 0;
+                try {
+                    prevAudio.pause();
+                    prevAudio.currentTime = 0;
+                } catch(e) {}
                 isFading = false;
                 crossfadeTimeout = null;
             }, duration * 1000); 
