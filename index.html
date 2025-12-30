@@ -877,10 +877,8 @@
             updateLikeButtonState();
 
             // --- NOUVELLE LOGIQUE DE RÉSOLUTION UNIFIÉE ---
-            // On résout systématiquement les sources "floues" avant de tenter la lecture
-            const lazySources = ['subsonic', 'yt_lazy', 'spotify_lazy', 'deezer', 'tidal', 'tidal_old'];
-            
-            if (lazySources.includes(nextTrack.source)) {
+            // On résout systématiquement TOUT ce qui n'est pas déjà Qobuz ou Tidal Direct
+            if (nextTrack.source !== 'qobuz' && nextTrack.source !== 'tidal_hund') {
                 // TOAST SUPPRIMÉ
                 try {
                     const artist = nextTrack.performer ? nextTrack.performer.name : (nextTrack.artist ? nextTrack.artist.name : 'Inconnu');
@@ -945,8 +943,8 @@
                 await nextShaka.unload();
                 
                 let url = '';
-                // Fallback ultime : si la source est toujours "lazy" après la tentative de résolution, on tente quand même le vieux resolve_stream
-                if(lazySources.includes(nextTrack.source)) {
+                // Fallback ultime : si la source n'est toujours pas Qobuz ou Tidal après résolution, on utilise le resolveur stream
+                if(nextTrack.source !== 'qobuz' && nextTrack.source !== 'tidal_hund') {
                     const artist = nextTrack.performer ? nextTrack.performer.name : 'Inconnu';
                     url = `${API_BASE}/resolve_stream?title=${encodeURIComponent(nextTrack.title)}&artist=${encodeURIComponent(artist)}`;
                 }
