@@ -878,9 +878,7 @@
 
             // --- NOUVELLE LOGIQUE DE RÉSOLUTION UNIFIÉE ---
             // On résout systématiquement TOUT ce qui n'est pas déjà Qobuz ou Tidal Direct
-            const lazySources = ['subsonic', 'yt_lazy', 'spotify_lazy', 'deezer', 'tidal', 'tidal_old'];
-            
-            if (lazySources.includes(nextTrack.source)) {
+            if (nextTrack.source !== 'qobuz' && nextTrack.source !== 'tidal_hund') {
                 // TOAST SUPPRIMÉ
                 try {
                     const artist = nextTrack.performer ? nextTrack.performer.name : (nextTrack.artist ? nextTrack.artist.name : 'Inconnu');
@@ -892,9 +890,6 @@
                     if(res.ok) {
                         const newMeta = await res.json();
                         console.log("✅ Résolution réussie:", newMeta.source);
-                        
-                        // Sauvegarde de l'ancien ID (Subsonic) pour la recherche DB
-                        const oldId = currentTrackId; 
                         
                         // Mise à jour des infos critiques pour la lecture
                         nextTrack.id = newMeta.id;
@@ -1522,15 +1517,32 @@
             if (!user) { history = []; return; }
 
             try {
+                // On récupère un peu plus de données pour gérer la déduplication
                 const { data, error } = await supabaseClient
                     .from('history')
                     .select('track_data')
                     .eq('user_id', user.id)
                     .order('played_at', { ascending: false })
-                    .limit(50);
+                    .limit(100);
 
                 if (data) {
-                    history = data.map(item => ({ ...item.track_data, fromSearch: false, isRadio: false }));
+                    const seenIds = new Set();
+                    history = [];
+                    
+                    data.forEach(item => {
+                        // Protection contre données corrompues
+                        if (!item.track_data || !item.track_data.id) return;
+                        
+                        const id = String(item.track_data.id);
+                        // On déduplique pour n'afficher que la dernière écoute de chaque titre
+                        if (!seenIds.has(id)) {
+                            seenIds.add(id);
+                            history.push({ ...item.track_data, fromSearch: false, isRadio: false });
+                        }
+                    });
+                    
+                    // On garde les 50 derniers uniques
+                    history = history.slice(0, 50);
                 } else {
                     history = [];
                 }
