@@ -878,7 +878,9 @@
 
             // --- NOUVELLE LOGIQUE DE RÉSOLUTION UNIFIÉE ---
             // On résout systématiquement TOUT ce qui n'est pas déjà Qobuz ou Tidal Direct
-            if (nextTrack.source !== 'qobuz' && nextTrack.source !== 'tidal_hund') {
+            const lazySources = ['subsonic', 'yt_lazy', 'spotify_lazy', 'deezer', 'tidal', 'tidal_old'];
+            
+            if (lazySources.includes(nextTrack.source)) {
                 // TOAST SUPPRIMÉ
                 try {
                     const artist = nextTrack.performer ? nextTrack.performer.name : (nextTrack.artist ? nextTrack.artist.name : 'Inconnu');
@@ -891,6 +893,9 @@
                         const newMeta = await res.json();
                         console.log("✅ Résolution réussie:", newMeta.source);
                         
+                        // Sauvegarde de l'ancien ID (Subsonic) pour la recherche DB
+                        const oldId = currentTrackId; 
+                        
                         // Mise à jour des infos critiques pour la lecture
                         nextTrack.id = newMeta.id;
                         nextTrack.source = newMeta.source; // Deviendra 'tidal_hund' ou 'qobuz'
@@ -898,8 +903,8 @@
                         // Mise à jour métadonnées secondaires si dispos
                         if(newMeta.duration && (!nextTrack.duration || nextTrack.duration === 0)) nextTrack.duration = newMeta.duration;
                         
-                        // On ne met PLUS à jour l'image ni le titre pour garder l'aspect visuel de la playlist
-                        // updateInterfaceInfo(nextTrack); 
+                        // SAUVEGARDE EN BASE POUR CORRIGER LES FAVORIS
+                        updateFavoriteIfNeeded(oldId, newMeta);
                     } else {
                         console.warn("❌ Echec résolution métadonnées");
                     }
@@ -984,6 +989,37 @@
             }
             
             if(document.getElementById('queuePanel').classList.contains('active')) renderQueueList();
+        }
+        
+        // --- MISE A JOUR DES FAVORIS (CORRECTION PERMANENTE) ---
+        async function updateFavoriteIfNeeded(oldId, newMeta) {
+            if (!supabaseClient) return;
+            
+            // 1. Mise à jour variable locale (pour l'UI immédiate si on réaffiche la liste)
+            const localIdx = favorites.findIndex(f => String(f.id) === String(oldId));
+            if (localIdx !== -1) {
+                favorites[localIdx] = { ...newMeta, fromSearch: false };
+                console.log("UI Favoris mise à jour localement");
+            }
+
+            // 2. Mise à jour Supabase
+            const { data: { user } } = await supabaseClient.auth.getUser();
+            if (!user) return;
+
+            // On cherche l'entrée correspondante
+            const { data, error } = await supabaseClient
+                .from('favorites')
+                .update({ 
+                    track_id: String(newMeta.id), // On met à jour l'ID de référence
+                    track_data: newMeta           // On sauvegarde les métadonnées complètes (avec image)
+                })
+                .eq('user_id', user.id)
+                .eq('track_id', String(oldId))
+                .select();
+                
+            if (data && data.length > 0) {
+                console.log(`✅ Favori mis à jour en base : ${oldId} -> ${newMeta.id}`);
+            }
         }
 
         function startCrossfade(prevAudio, nextAudio, enableFade) { 
