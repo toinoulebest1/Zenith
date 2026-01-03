@@ -624,12 +624,12 @@ def sync_qobuz_search(query, limit=25, type='track'):
     if not client: return []
     try:
         if type == 'track':
-            r = client.api_call("track/search", query=query, limit=limit)
+            r = client.api_call("track/search", query=query, limit=1)
             items = r.get('tracks', {}).get('items', [])
             for t in items: t['source'] = 'qobuz'; fix_qobuz_title(t)
             return items
         elif type == 'album':
-            r = client.api_call("album/search", query=query, limit=limit)
+            r = client.api_call("album/search", query=query, limit=1)
             items = r.get('albums', {}).get('items', [])
             for a in items: a['source'] = 'qobuz'
             return items
@@ -817,104 +817,85 @@ def sync_resolve_track(title, artist):
             
     return None
 
-# --- CHOSIC RADIO LOGIC (REMPLACEMENT YOUTUBE) ---
-
-def recuperer_nom_artiste(track):
-    """Extrait le nom de l'artiste depuis le format Chosic/Spotify"""
-    art = track.get('artist')
-    if isinstance(art, dict): return art.get('name', 'Inconnu')
-    if isinstance(art, str) and art: return art
-    
-    arts_list = track.get('artists')
-    if isinstance(arts_list, list) and len(arts_list) > 0:
-        first = arts_list[0]
-        if isinstance(first, dict): return first.get('name', 'Inconnu')
-        return str(first)
-    return "Artiste Inconnu"
+# --- YOUTUBE MUSIC RADIO LOGIC ---
 
 def sync_get_radio_queue(title, artist):
     """
-    Radio basée sur Chosic API (Playlist Generator).
-    Retourne des résultats tagués 'spotify_lazy' pour que le frontend
-    les résolve via le resolveur interne (Qobuz/Tidal) au moment de la lecture.
+    Radio basée sur YTMusic (YouTube Music) pour remplacer Chosic.
+    Retourne des résultats tagués 'yt_lazy' (avec resolution implicite).
     """
-    logger.info(f"[Radio Chosic] Recherche pour : {title} - {artist}")
+    query = f"{title} {artist}"
+    logger.info(f"[Radio YTMusic] Recherche pour : {query}")
     
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0',
-        'app': 'playlist_generator',
-        'X-Requested-With': 'XMLHttpRequest',
-        'Referer': 'https://www.chosic.com/playlist-generator/',
-        'Cookie': "pll_language=en; r_34874064=1766964698%7C1f3f97bb0aac03d5%7C7641cb741178463b39344194056e2964620e973ab7b589e0f996a97aa31fd318",
-    }
-    
+    results_data = []
+
     try:
-        session = requests.Session()
-        query_encoded = urllib.parse.quote(f"{title} {artist}")
-        
-        # 1. Recherche du morceau "Seed"
-        search_url = f"https://www.chosic.com/api/tools/search?q={query_encoded}&type=track&limit=5"
-        resp = session.get(search_url, headers=headers, timeout=10)
-        
-        tracks = resp.json().get('tracks', {}).get('items', [])
-        if not tracks:
-            logger.warning("[Radio Chosic] Aucun seed trouvé.")
+        # 1. Recherche rapide
+        search_results = yt.search(query, filter='songs', limit=1)
+
+        if not search_results:
+            logger.warning("[Radio YTMusic] Musique non trouvée pour le seed.")
             return []
+
+        target_song = search_results[0]
+        temp_video_id = target_song.get('videoId')
+
+        # 2. Récupération du contexte "Related"
+        watch_playlist = yt.get_watch_playlist(videoId=temp_video_id)
+        related_id = watch_playlist.get('related')
+
+        if not related_id:
+            logger.warning("[Radio YTMusic] Pas de contenu 'related' trouvé.")
+            return []
+
+        # 3. Récupération des données brutes
+        related_content = yt.get_song_related(related_id)
+
+        # 4. Traitement et nettoyage
+        for section in related_content:
+            if 'contents' not in section: continue
             
-        # Sélection du meilleur match
-        best_match = None
-        highest_score = 0
-        target_str = f"{title} {artist}".lower()
-        
-        for t in tracks:
-            t_name = t.get('name', '')
-            t_artist = recuperer_nom_artiste(t)
-            curr_str = f"{t_name} {t_artist}".lower()
-            
-            score = difflib.SequenceMatcher(None, target_str, curr_str).ratio()
-            if score > highest_score:
-                highest_score = score
-                best_match = t
-        
-        if not best_match: best_match = tracks[0] # Fallback
-        
-        seed_id = best_match['id']
-        logger.info(f"[Radio Chosic] Seed sélectionné : {best_match.get('name')} (ID: {seed_id})")
-        
-        # 2. Récupération des recommandations
-        rec_url = f"https://www.chosic.com/api/tools/recommendations?seed_tracks={seed_id}&limit=25&target_popularity=70"
-        rec_resp = session.get(rec_url, headers=headers, timeout=10)
-        rec_data = rec_resp.json().get('tracks', [])
-        
-        final_queue = []
-        for t in rec_data:
-            # On ignore le titre original s'il est présent
-            if t.get('name', '').lower() == title.lower(): continue
-            
-            art_name = recuperer_nom_artiste(t)
-            
-            # Extraction image
-            img_url = "https://placehold.co/300x300/222/666?text=Music"
-            alb = t.get('album', {})
-            if isinstance(alb, dict):
-                img_url = alb.get('image_large') or (alb.get('images', [{}])[0].get('url')) or img_url
-                
-            final_queue.append({
-                "id": t['id'], # ID Spotify
-                "title": t.get('name', 'Titre Inconnu'),
-                "performer": { "name": art_name },
-                "album": { "title": alb.get('name', 'Album'), "image": { "large": img_url } },
-                "img": img_url,
-                "duration": int(t.get('duration_ms', 0)) // 1000,
-                "source": "spotify_lazy", # Le frontend saura qu'il doit résoudre ce titre
-                "isRadio": True
-            })
-            
-        logger.info(f"[Radio Chosic] {len(final_queue)} titres trouvés.")
-        return final_queue
+            for track in section['contents']:
+                # Filtre strict : Doit être une chanson avec un album valide et un ID
+                if (
+                    'videoId' in track 
+                    and 'album' in track 
+                    and track['album'] 
+                    and 'thumbnails' in track
+                ):
+                    # On ignore le titre original (seed) pour éviter la répétition immédiate
+                    if track.get('title', '').lower() == title.lower(): continue
+
+                    # Transformation de l'image en HD (2000x2000)
+                    raw_url = track['thumbnails'][-1]['url']
+                    hd_image_url = re.sub(r'w\d+-h\d+(-l\d+)?', 'w2000-h2000-l90', raw_url)
+                    
+                    artist_name = track['artists'][0]['name'] if track.get('artists') else "Inconnu"
+
+                    # Construction de l'objet compatible Zenith
+                    # On garde 'spotify_lazy' car le frontend le gère bien avec resolve_metadata
+                    # Ou on peut utiliser 'yt_lazy' mais cela dépend du frontend. 
+                    # Pour être sûr que la résolution Qobuz/Tidal se lance, on garde 'spotify_lazy'
+                    # car 'yt_lazy' est parfois traité comme flux direct youtube.
+                    
+                    song_obj = {
+                        "id": track['videoId'],
+                        "title": track['title'],
+                        "performer": { "name": artist_name },
+                        "album": { "title": track['album']['name'], "image": { "large": hd_image_url } },
+                        "img": hd_image_url,
+                        "duration": 0, # YT Related ne donne pas toujours la durée, pas grave
+                        "source": "spotify_lazy", # Force la résolution Qobuz/Tidal côté client
+                        "isRadio": True
+                    }
+                    
+                    results_data.append(song_obj)
+
+        logger.info(f"[Radio YTMusic] {len(results_data)} titres trouvés.")
+        return results_data
 
     except Exception as e:
-        logger.error(f"[Radio Chosic] Erreur : {e}")
+        logger.error(f"[Radio YTMusic] Erreur : {e}")
         return []
 
 class TranslationRequest(BaseModel):
