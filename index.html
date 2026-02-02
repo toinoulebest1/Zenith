@@ -1497,22 +1497,43 @@
 
         function updateLikeButtonState() { const t = tracks[currentIndex]; if(!t) return; const idx = favorites.findIndex(f => String(f.id) === String(t.id)); const btn = document.getElementById('btnLike'); if(idx !== -1) { btn.innerHTML = '<i class="fas fa-heart"></i>'; btn.style.color = 'var(--secondary)'; } else { btn.innerHTML = '<i class="far fa-heart"></i>'; btn.style.color = 'var(--text-dim)'; } }
         
+        function getTrackSignature(t) {
+            if (!t) return "";
+            const artist = t.performer ? t.performer.name : (t.artist ? t.artist.name : '');
+            return cleanString(t.title) + "|" + cleanString(artist);
+        }
+
         async function saveTrackToHistory(track) {
             if (!supabaseClient) return;
             const { data: { user } } = await supabaseClient.auth.getUser();
             if (!user) return;
 
-            // DEDUPLICATION CLIENT-SIDE (Short Interval / Consecutive)
-            // On regarde si le dernier titre de l'historique est le même
-            if (history.length > 0 && String(history[0].id) === String(track.id)) {
-                console.log("History: Skipping duplicate save (consecutive)");
-                return;
+            const currentSig = getTrackSignature(track);
+
+            // DEDUPLICATION 1 : Eviter sauvegardes consécutives immédiates
+            if (history.length > 0) {
+                const lastSig = getTrackSignature(history[0]);
+                if (currentSig === lastSig) {
+                    console.log("History: Skipping consecutive duplicate");
+                    return;
+                }
+            }
+
+            // DEDUPLICATION 2 : Nettoyage proactif des anciennes occurrences
+            // On cherche si ce titre existe déjà dans l'historique chargé pour le supprimer de la DB
+            // afin qu'il remonte proprement en haut sans créer de doublon
+            const existingEntry = history.find(h => getTrackSignature(h) === currentSig);
+            if (existingEntry && existingEntry.history_db_id) {
+                try {
+                    await supabaseClient.from('history').delete().eq('id', existingEntry.history_db_id);
+                    console.log("History: Removed old entry to move to top");
+                } catch(e) { console.warn("Failed to delete old history item", e); }
             }
 
             const cleanTrack = { ...track, isRadio: false };
 
             try {
-                // Appel de la fonction SQL optimisée pour gérer les doublons côté serveur
+                // Insertion standard
                 const { error } = await supabaseClient.rpc('add_track_to_history', {
                     p_user_id: user.id,
                     p_track_id: String(track.id),
@@ -1520,8 +1541,6 @@
                 });
 
                 if (error) throw error;
-                
-                // Rechargement local pour mise à jour UI
                 await loadUserHistory();
 
             } catch (e) { console.error("Erreur historique:", e); }
@@ -1533,31 +1552,36 @@
             if (!user) { history = []; return; }
 
             try {
-                // On récupère un peu plus de données pour gérer la déduplication
+                // On récupère aussi l'ID de la ligne ('id') pour pouvoir supprimer plus tard
                 const { data, error } = await supabaseClient
                     .from('history')
-                    .select('track_data')
+                    .select('id, track_data, played_at')
                     .eq('user_id', user.id)
                     .order('played_at', { ascending: false })
                     .limit(100);
 
                 if (data) {
-                    const seenIds = new Set();
+                    const seenSigs = new Set();
                     history = [];
                     
                     data.forEach(item => {
-                        // Protection contre données corrompues
-                        if (!item.track_data || !item.track_data.id) return;
+                        if (!item.track_data) return;
                         
-                        const id = String(item.track_data.id);
-                        // On déduplique pour n'afficher que la dernière écoute de chaque titre
-                        if (!seenIds.has(id)) {
-                            seenIds.add(id);
-                            history.push({ ...item.track_data, fromSearch: false, isRadio: false });
+                        // Déduplication basée sur le nom/artiste (normalisé) et non l'ID
+                        const sig = getTrackSignature(item.track_data);
+                        
+                        if (!seenSigs.has(sig)) {
+                            seenSigs.add(sig);
+                            // On injecte l'ID de la DB pour pouvoir le supprimer plus tard si besoin
+                            history.push({ 
+                                ...item.track_data, 
+                                fromSearch: false, 
+                                isRadio: false,
+                                history_db_id: item.id // ID technique de la ligne history
+                            });
                         }
                     });
                     
-                    // On garde les 50 derniers uniques
                     history = history.slice(0, 50);
                 } else {
                     history = [];
