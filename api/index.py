@@ -822,7 +822,7 @@ def sync_resolve_track(title, artist):
 def sync_get_radio_queue(title, artist):
     """
     Radio basée sur YTMusic (YouTube Music) pour remplacer Chosic.
-    Retourne des résultats tagués 'yt_lazy' (avec resolution implicite).
+    Utilise l'Automix (RDAMVM) pour une radio officielle.
     """
     query = f"{title} {artist}"
     logger.info(f"[Radio YTMusic] Recherche pour : {query}")
@@ -830,7 +830,7 @@ def sync_get_radio_queue(title, artist):
     results_data = []
 
     try:
-        # 1. Recherche rapide
+        # 1. Recherche rapide du seed
         search_results = yt.search(query, filter='songs', limit=1)
 
         if not search_results:
@@ -838,58 +838,68 @@ def sync_get_radio_queue(title, artist):
             return []
 
         target_song = search_results[0]
-        temp_video_id = target_song.get('videoId')
+        video_id = target_song.get('videoId')
+        logger.info(f"[Radio YTMusic] Seed ID: {video_id}. Loading Automix...")
 
-        # 2. Récupération du contexte "Related"
-        watch_playlist = yt.get_watch_playlist(videoId=temp_video_id)
-        related_id = watch_playlist.get('related')
+        # 2. Récupération de la playlist Automix (Radio)
+        # RDAMVM + video_id génère la radio infinie officielle
+        try:
+            playlist_data = yt.get_watch_playlist(videoId=video_id, playlistId=f"RDAMVM{video_id}", limit=25)
+        except Exception as e:
+            logger.warning(f"[Radio YTMusic] RDAMVM failed ({e}), trying default watch.")
+            playlist_data = yt.get_watch_playlist(videoId=video_id, limit=25)
 
-        if not related_id:
-            logger.warning("[Radio YTMusic] Pas de contenu 'related' trouvé.")
-            return []
+        tracks = playlist_data.get('tracks', [])
 
-        # 3. Récupération des données brutes
-        related_content = yt.get_song_related(related_id)
-
-        # 4. Traitement et nettoyage
-        for section in related_content:
-            if 'contents' not in section: continue
+        # 3. Traitement et nettoyage
+        for track in tracks:
+            # On ignore le titre seed pour éviter la répétition immédiate
+            if track.get('videoId') == video_id:
+                continue
             
-            for track in section['contents']:
-                # Filtre strict : Doit être une chanson avec un album valide et un ID
-                if (
-                    'videoId' in track 
-                    and 'album' in track 
-                    and track['album'] 
-                    and 'thumbnails' in track
-                ):
-                    # On ignore le titre original (seed) pour éviter la répétition immédiate
-                    if track.get('title', '').lower() == title.lower(): continue
+            if track.get('videoId'):
+                # Extraction Image (Logique spécifique fournie)
+                thumbnails = track.get('thumbnails') or track.get('thumbnail')
+                image_url = 'https://placehold.co/300x300/1a1a1a/666666?text=Music'
+                
+                # Si c'est un dictionnaire qui contient une liste
+                if isinstance(thumbnails, dict):
+                    thumbnails = thumbnails.get('thumbnails', [])
+                
+                # Maintenant qu'on est sûr d'avoir une liste, on prend le dernier élément
+                if thumbnails and isinstance(thumbnails, list):
+                    raw_url = thumbnails[-1]['url']
+                    
+                    # Forçage du format Google Carré HD (544x544)
+                    if "googleusercontent" in raw_url:
+                        base_url = raw_url.split('=')[0]
+                        image_url = f"{base_url}=w544-h544-l90-rj"
+                    else:
+                        image_url = re.sub(r'w\d+-h\d+(-l\d+)?', 'w1200-h1200-l90', raw_url)
 
-                    # Transformation de l'image en HD (2000x2000)
-                    raw_url = track['thumbnails'][-1]['url']
-                    hd_image_url = re.sub(r'w\d+-h\d+(-l\d+)?', 'w2000-h2000-l90', raw_url)
-                    
-                    artist_name = track['artists'][0]['name'] if track.get('artists') else "Inconnu"
+                # Extraction Artiste
+                artist_name = "Inconnu"
+                if track.get('artists'):
+                    artist_name = ", ".join([a['name'] for a in track['artists']])
 
-                    # Construction de l'objet compatible Zenith
-                    # On garde 'spotify_lazy' car le frontend le gère bien avec resolve_metadata
-                    # Ou on peut utiliser 'yt_lazy' mais cela dépend du frontend. 
-                    # Pour être sûr que la résolution Qobuz/Tidal se lance, on garde 'spotify_lazy'
-                    # car 'yt_lazy' est parfois traité comme flux direct youtube.
-                    
-                    song_obj = {
-                        "id": track['videoId'],
-                        "title": track['title'],
-                        "performer": { "name": artist_name },
-                        "album": { "title": track['album']['name'], "image": { "large": hd_image_url } },
-                        "img": hd_image_url,
-                        "duration": 0, # YT Related ne donne pas toujours la durée, pas grave
-                        "source": "spotify_lazy", # Force la résolution Qobuz/Tidal côté client
-                        "isRadio": True
-                    }
-                    
-                    results_data.append(song_obj)
+                # Extraction Album
+                album_title = "Unknown"
+                if track.get('album'):
+                    album_title = track['album']['name'] if isinstance(track['album'], dict) else str(track['album'])
+
+                # Construction de l'objet compatible Zenith
+                song_obj = {
+                    "id": track['videoId'],
+                    "title": track['title'],
+                    "performer": { "name": artist_name },
+                    "album": { "title": album_title, "image": { "large": image_url } },
+                    "img": image_url,
+                    "duration": parse_duration(track.get('length')), 
+                    "source": "spotify_lazy", # Force la résolution Qobuz/Tidal côté client
+                    "isRadio": True
+                }
+                
+                results_data.append(song_obj)
 
         logger.info(f"[Radio YTMusic] {len(results_data)} titres trouvés.")
         return results_data
