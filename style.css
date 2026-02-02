@@ -281,10 +281,15 @@ body.zen-active.zen-idle { cursor: none; }
 
 /* TRANSLATE BUTTON */
 .lyrics-header-actions {
-    position: absolute;
-    top: 20px;
-    right: 20px;
+    position: sticky;
+    top: 10px;
+    display: flex;
+    justify-content: flex-end;
+    padding-right: 10px;
     z-index: 100;
+    pointer-events: none;
+    height: 0;
+    overflow: visible;
 }
 .translate-btn {
     background: rgba(255,255,255,0.1);
@@ -300,6 +305,7 @@ body.zen-active.zen-idle { cursor: none; }
     display: flex;
     align-items: center;
     gap: 8px;
+    pointer-events: auto;
 }
 .translate-btn:hover {
     background: rgba(255,255,255,0.2);
