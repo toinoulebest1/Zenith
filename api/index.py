@@ -880,7 +880,8 @@ def sync_get_radio_queue(title, artist):
                 # Extraction Artiste
                 artist_name = "Inconnu"
                 if track.get('artists'):
-                    artist_name = ", ".join([a['name'] for a in track['artists']])
+                    # Ne prendre que le premier artiste (artiste principal)
+                    artist_name = track['artists'][0]['name']
 
                 # Extraction Album
                 album_title = "Unknown"
