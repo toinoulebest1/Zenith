@@ -303,8 +303,8 @@ def sync_search_tidal(query, limit=50):
                     },
                     'duration': t.get('duration', 0),
                     'maximum_bit_depth': bit_depth,
-                    # IMPORTANT: On garde 'tidal_hund' pour que le frontend sache appeler /tidal_manifest
-                    'source': 'tidal_hund' 
+                    'source': 'tidal_hund',
+                    'date': t.get('streamStartDate') # Extraction Date
                 }
                 results.append(track)
             except Exception as e:
@@ -344,7 +344,8 @@ def sync_search_tidal_albums(query, limit=15):
                     'title': a['title'],
                     'artist': {'name': (a.get('artist') or {}).get('name', 'Inconnu')},
                     'image': {'large': tidal_uuid_to_url(a.get('cover'))},
-                    'source': 'tidal_hund'
+                    'source': 'tidal_hund',
+                    'date': a.get('releaseDate') # Extraction Date
                 })
             except: continue
         return results
@@ -552,7 +553,8 @@ def sync_search_deezer(query, limit=25):
                     'album': {'title': t.get('album', {}).get('title'), 'image': {'large': cover}},
                     'duration': t.get('duration', 0),
                     'source': 'deezer',
-                    'maximum_bit_depth': 16
+                    'maximum_bit_depth': 16,
+                    'date': t.get('album', {}).get('release_date') # Extraction Date
                 })
         return results
     except Exception as e: return []
@@ -572,7 +574,8 @@ def sync_search_deezer_albums(query, limit=15):
                     'title': a.get('title'),
                     'artist': {'name': a.get('artist', {}).get('name', 'Inconnu')},
                     'image': {'large': cover},
-                    'source': 'deezer'
+                    'source': 'deezer',
+                    'date': a.get('release_date') # Extraction Date
                 })
         return results
     except Exception as e: return []
@@ -626,12 +629,17 @@ def sync_qobuz_search(query, limit=25, type='track'):
         if type == 'track':
             r = client.api_call("track/search", query=query, limit=1)
             items = r.get('tracks', {}).get('items', [])
-            for t in items: t['source'] = 'qobuz'; fix_qobuz_title(t)
+            for t in items: 
+                t['source'] = 'qobuz'
+                fix_qobuz_title(t)
+                t['date'] = t.get('released_at') # Extraction Date
             return items
         elif type == 'album':
             r = client.api_call("album/search", query=query, limit=1)
             items = r.get('albums', {}).get('items', [])
-            for a in items: a['source'] = 'qobuz'
+            for a in items: 
+                a['source'] = 'qobuz'
+                a['date'] = a.get('released_at') # Extraction Date
             return items
     except: return []
 

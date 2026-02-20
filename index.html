@@ -160,6 +160,13 @@
                     <option value="playlist">Playlists</option> 
                     <option value="artist">Artistes</option>
                 </select>
+                <!-- MENU DE TRI AJOUTÉ ICI -->
+                <select id="searchSort" class="search-select" onchange="applySearchSort()">
+                    <option value="relevance">Pertinence</option>
+                    <option value="date_desc">Récents</option>
+                    <option value="date_asc">Anciens</option>
+                    <option value="alpha_asc">A-Z</option>
+                </select>
                 <input type="text" id="searchInput" class="search-input" placeholder="Rechercher...">
                 <button class="search-btn" id="btnSearch" onclick="performSearch()">GO</button>
             </div>
@@ -394,6 +401,7 @@
         let tracks = [];
         let currentIndex = 0;
         let currentGridItems = [];
+        let lastSearchResults = []; // NEW: Pour stocker les résultats et les trier
 
         // LECTEURS AUDIO HTML5 (Source)
         const playerA = new Audio(); playerA.id = "playerA"; playerA.preload = "auto"; playerA.crossOrigin = "anonymous"; playerA.volume = 1;
@@ -1899,8 +1907,49 @@
                 if(d.artists) d.artists.forEach(a=>results.push({...a,type:'artist'}));
             } catch(e) { console.error(e); }
             
-            const finalResults = results.map(r => ({...r, fromSearch: true}));
-            renderGrid(finalResults, true); 
+            // Stockage pour le tri
+            lastSearchResults = results.map(r => ({...r, fromSearch: true}));
+            
+            // Application du tri actuel avant affichage
+            applySearchSort(); 
+        }
+
+        // --- NOUVELLE FONCTION DE TRI ---
+        function applySearchSort() {
+            const criteria = document.getElementById('searchSort').value;
+            if (!lastSearchResults || lastSearchResults.length === 0) return;
+
+            let sorted = [...lastSearchResults];
+
+            // Helper pour extraire une valeur de date
+            const getDate = (item) => {
+                if (item.date) return new Date(item.date).getTime();
+                if (item.release_date_original) return new Date(item.release_date_original).getTime();
+                // Si pas de date, on met 0 (très vieux)
+                return 0;
+            };
+
+            const getName = (item) => (item.title || item.name || '').toLowerCase();
+
+            if (criteria === 'date_desc') {
+                // Plus récent d'abord
+                sorted.sort((a, b) => getDate(b) - getDate(a));
+            } else if (criteria === 'date_asc') {
+                // Plus ancien d'abord (on filtre les 0 pour les mettre à la fin quand même)
+                sorted.sort((a, b) => {
+                    const da = getDate(a);
+                    const db = getDate(b);
+                    if (da === 0) return 1;
+                    if (db === 0) return -1;
+                    return da - db;
+                });
+            } else if (criteria === 'alpha_asc') {
+                // A-Z
+                sorted.sort((a, b) => getName(a).localeCompare(getName(b)));
+            }
+            // 'relevance' = pas de tri (on garde l'ordre de l'API)
+
+            renderGrid(sorted, true);
         }
 
         function openExternalPlaylist(playlist) {
@@ -2018,6 +2067,14 @@
                 else if (isArt) { subtitle = 'Artiste'; }
                 else { subtitle = isAlb ? (it.artist ? it.artist.name : 'Artiste') : (it.performer ? it.performer.name : 'Artiste'); }
                 
+                // Affichage de la date pour le debug ou pour l'utilisateur
+                if (it.date || it.release_date_original) {
+                    const dateStr = it.date || it.release_date_original;
+                    // On affiche juste l'année si possible
+                    const year = dateStr.substring(0, 4);
+                    // subtitle += ` • ${year}`; // Optionnel : Décommenter pour afficher l'année
+                }
+
                 let votesHTML = ''; if (it.like_count) { votesHTML = `<div class="vote-count"><i class="fas fa-heart"></i> ${it.like_count}</div>`; }
                 d.innerHTML=`${rankBadgeHTML}<div class="badges-container">${b}</div>${mediaElement}<h3>${it.name||it.title}</h3><p>${subtitle}</p>${votesHTML}`; 
                 d.onclick=()=>{ 
