@@ -386,6 +386,7 @@
     <script src="party.js"></script>
     <script src="tv.js"></script>
     <script src="bluetooth.js"></script>
+    <script src="dashboard.js"></script>
     
     <script>
         if ('serviceWorker' in navigator) {
@@ -447,7 +448,8 @@
         let magicEnabled = true; 
         
         let favorites = [];
-        let history = []; 
+        // Correction de la variable history qui était locale
+        window.userHistory = [];
 
         let navStack = [];
 
@@ -785,7 +787,7 @@
                 
                 el.className = itemClass;
                 
-                let img = t.img || (t.album ? t.album.image.large : null) || 'https://placehold.co/40x40/222/666?text=M';
+                let img = t.img || (t.album ? t.album.image.large : null) || 'https://placehold.co/400x400/222/666?text=M';
                 if (img && img.includes('_300')) {
                      img = img.replace('_300', '_600');
                 }
@@ -1519,8 +1521,8 @@
             const currentSig = getTrackSignature(track);
 
             // DEDUPLICATION 1 : Eviter sauvegardes consécutives immédiates
-            if (history.length > 0) {
-                const lastSig = getTrackSignature(history[0]);
+            if (window.userHistory.length > 0) {
+                const lastSig = getTrackSignature(window.userHistory[0]);
                 if (currentSig === lastSig) {
                     console.log("History: Skipping consecutive duplicate");
                     return;
@@ -1530,7 +1532,7 @@
             // DEDUPLICATION 2 : Nettoyage proactif des anciennes occurrences
             // On cherche si ce titre existe déjà dans l'historique chargé pour le supprimer de la DB
             // afin qu'il remonte proprement en haut sans créer de doublon
-            const existingEntry = history.find(h => getTrackSignature(h) === currentSig);
+            const existingEntry = window.userHistory.find(h => getTrackSignature(h) === currentSig);
             if (existingEntry && existingEntry.history_db_id) {
                 try {
                     await supabaseClient.from('history').delete().eq('id', existingEntry.history_db_id);
@@ -1555,9 +1557,9 @@
         }
 
         window.loadUserHistory = async function() {
-            if (!supabaseClient) { history = []; return; }
+            if (!supabaseClient) { window.userHistory = []; return; }
             const { data: { user } } = await supabaseClient.auth.getUser();
-            if (!user) { history = []; return; }
+            if (!user) { window.userHistory = []; return; }
 
             try {
                 // On récupère aussi l'ID de la ligne ('id') pour pouvoir supprimer plus tard
@@ -1570,7 +1572,7 @@
 
                 if (data) {
                     const seenSigs = new Set();
-                    history = [];
+                    window.userHistory = [];
                     
                     data.forEach(item => {
                         if (!item.track_data) return;
@@ -1581,7 +1583,7 @@
                         if (!seenSigs.has(sig)) {
                             seenSigs.add(sig);
                             // On injecte l'ID de la DB pour pouvoir le supprimer plus tard si besoin
-                            history.push({ 
+                            window.userHistory.push({ 
                                 ...item.track_data, 
                                 fromSearch: false, 
                                 isRadio: false,
@@ -1590,13 +1592,13 @@
                         }
                     });
                     
-                    history = history.slice(0, 50);
+                    window.userHistory = window.userHistory.slice(0, 50);
                 } else {
-                    history = [];
+                    window.userHistory = [];
                 }
             } catch (e) {
                 console.error("Erreur chargement historique:", e);
-                history = [];
+                window.userHistory = [];
             }
         };
 
@@ -1632,7 +1634,9 @@
             showTracks(); 
             isRadioActive = false; 
             document.getElementById('radioBadge').style.display = 'none'; 
-            document.getElementById('trackGrid').innerHTML=`<div style="grid-column: 1/-1; text-align: center; padding: 60px 20px; color: #ccc;"><h2 style="font-size: 2rem; color: var(--primary); margin-bottom: 20px; text-shadow: 0 0 30px rgba(0, 210, 255, 0.3);">Bienvenue sur Zenith Ultimate</h2><p style="font-size: 1.1rem; line-height: 1.6; max-width: 600px; margin: 0 auto; color: #aaa;">L'expérience audio haute résolution ultime. Profitez d'une qualité sonore cristalline, d'effets spatiaux immersifs et d'une bibliothèque musicale infinie.</p><div style="margin-top: 40px; display: flex; flex-wrap: wrap; justify-content: center; gap: 30px; font-size: 0.9rem;"><div style="display:flex; flex-direction:column; align-items:center; gap:10px;"><div style="width:50px; height:50px; background:rgba(255,255,255,0.05); border-radius:50%; display:flex; align-items:center; justify-content:center;"><i class="fas fa-wave-square" style="color:var(--primary); font-size:20px;"></i></div><span>Audio Hi-Res</span></div><div style="display:flex; flex-direction:column; align-items:center; gap:10px;"><div style="width:50px; height:50px; background:rgba(255,255,255,0.05); border-radius:50%; display:flex; align-items:center; justify-content:center;"><i class="fas fa-globe-americas" style="color:var(--primary); font-size:20px;"></i></div><span>Audio Spatial 8D</span></div><div style="display:flex; flex-direction:column; align-items:center; gap:10px;"><div style="width:50px; height:50px; background:rgba(255,255,255,0.05); border-radius:50%; display:flex; align-items:center; justify-content:center;"><i class="fas fa-microphone-alt" style="color:var(--primary); font-size:20px;"></i></div><span>Paroles Synchro</span></div><div style="display:flex; flex-direction:column; align-items:center; gap:10px;"><div style="width:50px; height:50px; background:rgba(255,255,255,0.05); border-radius:50%; display:flex; align-items:center; justify-content:center;"><i class="fas fa-magic" style="color:var(--primary); font-size:20px;"></i></div><span>Thèmes Magiques</span></div></div><div style="margin-top: 50px;"><p style="font-size: 14px; opacity: 0.6;">Utilisez la barre de recherche pour commencer votre voyage sonore.</p></div></div>`; 
+            
+            // Appel au nouveau Dashboard
+            Dashboard.render();
         }
         async function showWeeklyTop() { 
             resetNavStack(); 
@@ -1871,7 +1875,7 @@
             resetNavStack();
             showTracks();
             document.getElementById('searchBarContainer').style.display='none';
-            renderGrid([...history], true, "Votre historique est vide.<br>Écoutez des titres pour les retrouver ici !<br>Nous gardons vos 50 dernières écoutes.");
+            renderGrid([...window.userHistory], true, "Votre historique est vide.<br>Écoutez des titres pour les retrouver ici !<br>Nous gardons vos 50 dernières écoutes.");
             document.getElementById('viewTitle').innerText="Historique des 50 dernières chansons 🕒";
         }
         function showPlaylists(){ 
