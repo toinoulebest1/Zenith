@@ -55,7 +55,7 @@ USER_ID = '7610812'
 TOKEN = 'wTJvd-7fc8haH3zdRrZYqcULUQ1wA6wJBLNmDkn38JaMrfRtHlaGpSVLHN0205rSQ23psXhJrnQNrRmEiGS-zw' 
 APP_ID = '798273057'
 
-TIDAL_HUND_BASE = "https://tidal-api.binimum.org"
+TIDAL_HUND_BASE = "https://api.monochrome.tf"
 
 # Credentials de secours (HARDCODED FALLBACK)
 # Utilisés si os.getenv ne trouve rien ET que token.json est absent/illisible
