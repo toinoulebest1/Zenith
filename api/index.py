@@ -51,8 +51,8 @@ except ImportError:
     FUZZ_AVAILABLE = False
 
 # --- CONFIGURATION ---
-USER_ID = '7610812'
-TOKEN = 'wTJvd-7fc8haH3zdRrZYqcULUQ1wA6wJBLNmDkn38JaMrfRtHlaGpSVLHN0205rSQ23psXhJrnQNrRmEiGS-zw' 
+USER_ID = '11354776'
+TOKEN = '1Lnngw6Jk_wucqZTuhtfFCqZVRpE30Fb7W8_YvGdDF4r09jUz9nlcY713EYlgOAJBN_JIijcuiuNmggtBDZbTg' 
 APP_ID = '798273057'
 
 TIDAL_HUND_BASE = "https://api.monochrome.tf"
