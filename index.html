@@ -1665,28 +1665,37 @@
 
         function cleanString(s) { return s ? s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/gi,'').trim() : ""; }
         function updateActiveCard() { 
-            document.querySelectorAll('.track-card').forEach(el => { 
-                el.classList.remove('active-track'); 
+            // 1. Reset all active marks
+            document.querySelectorAll('.track-card, .track-row').forEach(el => { 
+                el.classList.remove('active-track', 'active-row'); 
                 if(el.querySelector('.playing-indicator')) el.querySelector('.playing-indicator').remove(); 
             }); 
-            document.querySelectorAll('.track-row').forEach(el => {
-                el.classList.remove('active-row');
-            });
 
-            if(!currentTrackId) return; 
+            const currentTrack = tracks[currentIndex];
+            if(!currentTrackId || !currentTrack) return; 
             
-            const activeCards = document.querySelectorAll(`.track-card[data-id="${currentTrackId}"]`); 
-            activeCards.forEach(active => { 
-                active.classList.add('active-track'); 
-                const ind = document.createElement('div'); 
-                ind.className = 'playing-indicator'; 
-                ind.innerHTML = '<i class="fas fa-volume-up"></i>'; 
-                active.appendChild(ind); 
-            }); 
+            // Signature unique (Titre|Artiste) pour identifier la même chanson
+            // même si l'ID a changé (fallback) ou si vient d'une plateforme différente
+            const currentSig = getTrackSignature(currentTrack);
 
-            const activeRows = document.querySelectorAll(`.track-row[data-id="${currentTrackId}"]`);
-            activeRows.forEach(active => {
-                active.classList.add('active-row');
+            // 2. Recherche et marquage des éléments correspondants (par ID ou Signature)
+            document.querySelectorAll('.track-card, .track-row').forEach(el => {
+                const elId = el.dataset.id;
+                const elSig = el.dataset.sig;
+                
+                if (elId === String(currentTrackId) || (elSig && elSig === currentSig)) {
+                    if (el.classList.contains('track-card')) {
+                        el.classList.add('active-track');
+                        if (!el.querySelector('.playing-indicator')) {
+                            const ind = document.createElement('div'); 
+                            ind.className = 'playing-indicator'; 
+                            ind.innerHTML = '<i class="fas fa-volume-up"></i>'; 
+                            el.appendChild(ind); 
+                        }
+                    } else if (el.classList.contains('track-row')) {
+                        el.classList.add('active-row');
+                    }
+                }
             });
         }
         function goHome(p=true){ 
@@ -2057,7 +2066,9 @@
                     g.innerHTML = ''; 
                     details.tracks.forEach((it) => {
                         const displayImg = it.img || it.album.image.large || 'https://placehold.co/300x300/1a1a1a/666666?text=Music'; 
-                        const div = document.createElement('div'); div.className = 'track-card'; div.dataset.id = it.id;
+                        const div = document.createElement('div'); div.className = 'track-card'; 
+                        div.dataset.id = it.id;
+                        div.dataset.sig = getTrackSignature(it);
                         div.innerHTML = `<div class="badges-container"></div><img src="${displayImg}" loading="lazy" decoding="async"><h3>${it.title}</h3><p>${it.performer.name}</p>`;
                         div.onclick = () => { 
                             // Important : on propage la source pour que loadTrack sache comment résoudre
@@ -2113,7 +2124,9 @@
                     mediaElement = `<img src="${u}" loading="lazy" decoding="async">`; 
                 } 
                 
-                const d=document.createElement('div'); d.className='track-card'; if(isArt) d.classList.add('artist-card'); d.dataset.id=it.id; 
+                const d=document.createElement('div'); d.className='track-card'; if(isArt) d.classList.add('artist-card'); 
+                d.dataset.id=it.id; 
+                if(!isAlb && !isPl && !isArt) d.dataset.sig = getTrackSignature(it);
                 let b = ''; let rankBadgeHTML = ''; 
                 if(isAlb) b='<div class="type-badge badge-album">ALBUM</div>'; 
                 else if(isPl) b='<div class="type-badge badge-hires" style="background:#ff0055">PLAYLIST</div>'; 
