@@ -57,13 +57,15 @@ APP_ID = '798273057'
 
 TIDAL_HUND_BASE = "https://api.monochrome.tf"
 
-# Credentials de secours (HARDCODED FALLBACK)
-# Utilisés si os.getenv ne trouve rien ET que token.json est absent/illisible
+# Credentials de secours (HARDCODED FALLBACK) - TIDAL PAUSED
 FALLBACK_TIDAL_CREDENTIALS = {
     "client_ID": "fX2JxdmntZWK0ixT",
     "client_secret": "1Nn9AfDAjxrgJFJbKNWLeAyKGVGmINuXPPLHVXAvxAg=",
     "refresh_token": "eyJraWQiOiJoUzFKYTdVMCIsImFsZyI6IkVTNTEyIn0.eyJ0eXBlIjoibzJfcmVmcmVzaCIsInVpZCI6MTg4NjEwMjE4LCJzY29wZSI6Indfc3ViIHJfdXNyIHdfdXNyIiwiY2lkIjoxMzMxOSwic1ZlciI6MCwiZ1ZlciI6MCwiaXNzIjoiaHR0cHM6Ly9hdXRoLnRpZGFsLmNvbS92MSJ9.Abink5EqzLxeKQKuEEjo_ydkkehy_wtBFNR_1i4Hy7K8-5rgdsGYSicdCKC02MGHbTWpDsdgyvv-abN2yMGk4Af-AC4BpnQc3s3VBQ3ocp3zVpI5jlW8GpG3JHQsO0uiYYvyxDouKx_71EJHnItne2yWGhGuaobirACxrrqsffcgq8bi"
 }
+
+# --- AMAZON MUSIC API ---
+AMAZON_MUSIC_API_BASE = "https://t2tunes.site/api/amazon-music"
 
 # --- INIT FASTAPI ---
 app = FastAPI(title="Zenith API", docs_url=None, redoc_url=None)
@@ -255,247 +257,380 @@ def tidal_uuid_to_url(uuid):
 
 def sync_search_tidal(query, limit=50):
     """
-    Recherche via l'API Officielle Tidal (plus fiable)
-    Mais on taggue la source 'tidal_hund' pour utiliser le proxy audio plus tard.
+    DISABLED: Tidal search is paused. Returns empty list.
+    Original code kept below for re-activation.
     """
-    token = tidal_auth.get_token()
-    if not token:
-        logger.error("[Tidal Search] Pas de token disponible. Vérifiez REFRESH_TOKEN ou token.json.")
-        return []
+    return []
+    # --- ORIGINAL TIDAL SEARCH CODE (PAUSED) ---
+    # token = tidal_auth.get_token()
+    # if not token:
+    #     logger.error("[Tidal Search] Pas de token disponible. Vérifiez REFRESH_TOKEN ou token.json.")
+    #     return []
 
-    logger.info(f"[Tidal Search] Query: {query}")
+    # logger.info(f"[Tidal Search] Query: {query}")
+    # try:
+    #     url = "https://api.tidal.com/v1/search/tracks"
+    #     params = {
+    #         "query": query,
+    #         "limit": limit,
+    #         "offset": 0,
+    #         "countryCode": "US"
+    #     }
+    #     headers = {"Authorization": f"Bearer {token}"}
+        
+    #     res = requests.get(url, headers=headers, params=params, timeout=10)
+    #     logger.info(f"[Tidal Search] Status: {res.status_code}")
+        
+    #     if res.status_code != 200:
+    #         logger.error(f"[Tidal Search] Error Body: {res.text}")
+    #         return []
+
+    #     data = res.json()
+    #     items = data.get('items', [])
+    #     results = []
+        
+    #     for t in items:
+    #         try:
+    #             # Détection HiRes / 24 bits via les tags officiels
+    #             bit_depth = 16
+    #             tags = t.get('mediaMetadata', {}).get('tags', [])
+    #             if "HIRES_LOSSLESS" in tags or "MQA" in tags:
+    #                 bit_depth = 24
+                
+    #             track = {
+    #                 'id': str(t['id']),
+    #                 'title': t['title'],
+    #                 'performer': {'name': (t.get('artist') or {}).get('name', 'Inconnu')},
+    #                 'album': {
+    #                     'title': (t.get('album') or {}).get('title'),
+    #                     'image': {'large': tidal_uuid_to_url((t.get('album') or {}).get('cover'))}
+    #                 },
+    #                 'duration': t.get('duration', 0),
+    #                 'maximum_bit_depth': bit_depth,
+    #                 'source': 'tidal_hund',
+    #                 'date': t.get('streamStartDate') # Extraction Date
+    #             }
+    #             results.append(track)
+    #         except Exception as e:
+    #             logger.error(f"[Tidal Search] Parse Error: {e}")
+    #             continue
+                
+    #     logger.info(f"[Tidal Search] Found {len(results)} items")
+    #     return results
+
+    # except Exception as e:
+    #     logger.error(f"[Tidal Search] Exception: {e}")
+    #     return []
+
+def sync_search_tidal_albums(query, limit=15):
+    """DISABLED: Tidal album search is paused."""
+    return []
+
+def sync_get_tidal_album(album_id):
+    """DISABLED: Tidal album details is paused."""
+    return None
+
+def get_tidal_stream_manifest(track_id):
+    """DISABLED: Tidal stream manifest is paused."""
+    return None
+
+# --- AMAZON MUSIC SEARCH & STREAM ---
+
+def _amazon_timestamp_to_date(ts):
+    """Convertit un timestamp Unix (secondes) en date ISO string."""
+    if not ts:
+        return None
     try:
-        url = "https://api.tidal.com/v1/search/tracks"
+        from datetime import datetime, timezone
+        return datetime.fromtimestamp(int(ts), tz=timezone.utc).strftime('%Y-%m-%d')
+    except:
+        return None
+
+def sync_search_amazon(query, limit=50):
+    """
+    Recherche via l'API Amazon Music (remplace Tidal).
+    """
+    logger.info(f"[Amazon Search] Query: {query}")
+    try:
+        url = f"{AMAZON_MUSIC_API_BASE}/search"
         params = {
             "query": query,
-            "limit": limit,
-            "offset": 0,
-            "countryCode": "US"
+            "types": "track",
+            "country": "FR"
         }
-        headers = {"Authorization": f"Bearer {token}"}
-        
-        res = requests.get(url, headers=headers, params=params, timeout=10)
-        logger.info(f"[Tidal Search] Status: {res.status_code}")
+        res = requests.get(url, params=params, timeout=15)
+        logger.info(f"[Amazon Search] Status: {res.status_code}")
         
         if res.status_code != 200:
-            logger.error(f"[Tidal Search] Error Body: {res.text}")
+            logger.error(f"[Amazon Search] Error Body: {res.text}")
             return []
 
         data = res.json()
-        items = data.get('items', [])
+        results_blocks = data.get('results', [])
         results = []
         
-        for t in items:
-            try:
-                # Détection Hi-Res / 24 bits via les tags officiels
-                bit_depth = 16
-                tags = t.get('mediaMetadata', {}).get('tags', [])
-                if "HIRES_LOSSLESS" in tags or "MQA" in tags:
-                    bit_depth = 24
+        for block in results_blocks:
+            hits = block.get('hits', [])
+            for hit in hits:
+                doc = hit.get('document', {})
+                doc_type = doc.get('__type', '')
                 
-                track = {
-                    'id': str(t['id']),
-                    'title': t['title'],
-                    'performer': {'name': (t.get('artist') or {}).get('name', 'Inconnu')},
-                    'album': {
-                        'title': (t.get('album') or {}).get('title'),
-                        'image': {'large': tidal_uuid_to_url((t.get('album') or {}).get('cover'))}
-                    },
-                    'duration': t.get('duration', 0),
-                    'maximum_bit_depth': bit_depth,
-                    'source': 'tidal_hund',
-                    'date': t.get('streamStartDate') # Extraction Date
-                }
-                results.append(track)
-            except Exception as e:
-                logger.error(f"[Tidal Search] Parse Error: {e}")
-                continue
-                
-        logger.info(f"[Tidal Search] Found {len(results)} items")
+                if 'CatalogTrack' not in doc_type:
+                    continue
+                    
+                try:
+                    # Extract cover image
+                    art_url = ''
+                    art_original = doc.get('artOriginal', {})
+                    if art_original:
+                        art_url = art_original.get('artUrl') or art_original.get('URL', '')
+                    
+                    if not art_url:
+                        art_url = 'https://placehold.co/300x300/1a1a1a/666666?text=Amazon'
+                    
+                    track = {
+                        'id': doc.get('asin', ''),
+                        'title': doc.get('title', 'Titre Inconnu'),
+                        'performer': {'name': doc.get('artistName', 'Inconnu')},
+                        'album': {
+                            'title': doc.get('albumName', ''),
+                            'image': {'large': art_url}
+                        },
+                        'duration': doc.get('duration', 0),
+                        'maximum_bit_depth': 16,
+                        'source': 'amazon_music',
+                        'date': _amazon_timestamp_to_date(doc.get('originalReleaseDate')),
+                        'artist_asin': doc.get('artistAsin', ''),
+                        'album_asin': doc.get('albumAsin', '')
+                    }
+                    results.append(track)
+                    
+                    if len(results) >= limit:
+                        break
+                except Exception as e:
+                    logger.error(f"[Amazon Search] Parse Error: {e}")
+                    continue
+            
+            if len(results) >= limit:
+                break
+                    
+        logger.info(f"[Amazon Search] Found {len(results)} items")
         return results
 
     except Exception as e:
-        logger.error(f"[Tidal Search] Exception: {e}")
+        logger.error(f"[Amazon Search] Exception: {e}")
         return []
 
-def sync_search_tidal_albums(query, limit=15):
-    token = tidal_auth.get_token()
-    if not token: return []
-
+def sync_search_amazon_albums(query, limit=15):
+    """
+    Recherche d'albums via l'API Amazon Music.
+    """
+    logger.info(f"[Amazon Album Search] Query: {query}")
     try:
-        url = "https://api.tidal.com/v1/search/albums"
+        url = f"{AMAZON_MUSIC_API_BASE}/search"
         params = {
             "query": query,
-            "limit": limit,
-            "offset": 0,
-            "countryCode": "US"
+            "types": "album",
+            "country": "FR"
         }
-        headers = {"Authorization": f"Bearer {token}"}
+        res = requests.get(url, params=params, timeout=15)
         
-        res = requests.get(url, headers=headers, params=params, timeout=10)
+        if res.status_code != 200:
+            return []
+
         data = res.json()
-        items = data.get('items', [])
-        
+        results_blocks = data.get('results', [])
         results = []
-        for a in items:
-            try:
-                results.append({
-                    'id': str(a['id']),
-                    'title': a['title'],
-                    'artist': {'name': (a.get('artist') or {}).get('name', 'Inconnu')},
-                    'image': {'large': tidal_uuid_to_url(a.get('cover'))},
-                    'source': 'tidal_hund',
-                    'date': a.get('releaseDate') # Extraction Date
-                })
-            except: continue
+        
+        for block in results_blocks:
+            hits = block.get('hits', [])
+            for hit in hits:
+                doc = hit.get('document', {})
+                doc_type = doc.get('__type', '')
+                
+                if 'CatalogAlbum' not in doc_type and 'Album' not in doc_type:
+                    # Also accept tracks and extract album info
+                    if 'CatalogTrack' in doc_type and doc.get('albumAsin'):
+                        art_url = ''
+                        art_original = doc.get('artOriginal', {})
+                        if art_original:
+                            art_url = art_original.get('artUrl') or art_original.get('URL', '')
+                    
+                        album_entry = {
+                            'id': doc.get('albumAsin', ''),
+                            'title': doc.get('albumName', doc.get('title', '')),
+                            'artist': {'name': doc.get('artistName', 'Inconnu')},
+                            'image': {'large': art_url or 'https://placehold.co/300x300/1a1a1a/666666?text=Amazon'},
+                            'source': 'amazon_music',
+                            'date': _amazon_timestamp_to_date(doc.get('originalReleaseDate'))
+                        }
+                        # Avoid duplicate albums
+                        if not any(a['id'] == album_entry['id'] for a in results):
+                            results.append(album_entry)
+                    continue
+                    
+                try:
+                    art_url = ''
+                    art_original = doc.get('artOriginal', {})
+                    if art_original:
+                        art_url = art_original.get('artUrl') or art_original.get('URL', '')
+                    
+                    results.append({
+                        'id': doc.get('asin', ''),
+                        'title': doc.get('title', doc.get('albumName', '')),
+                        'artist': {'name': doc.get('artistName', 'Inconnu')},
+                        'image': {'large': art_url or 'https://placehold.co/300x300/1a1a1a/666666?text=Amazon'},
+                        'source': 'amazon_music',
+                        'date': _amazon_timestamp_to_date(doc.get('originalReleaseDate'))
+                    })
+                    
+                    if len(results) >= limit:
+                        break
+                except Exception as e:
+                    logger.error(f"[Amazon Album Search] Parse Error: {e}")
+                    continue
+            
+            if len(results) >= limit:
+                break
+        
         return results
+
     except Exception as e:
-        logger.error(f"[Tidal Album Search] Error: {e}")
+        logger.error(f"[Amazon Album Search] Error: {e}")
         return []
 
-def sync_get_tidal_album(album_id):
+def sync_get_amazon_album(album_asin):
     """
-    Récupère les détails d'un album Tidal (métadonnées + pistes)
-    Version Sécurisée : gère les pistes imbriquées dans 'item'
+    Récupère les détails d'un album Amazon Music via recherche.
     """
-    token = tidal_auth.get_token()
-    if not token: return None
-    
-    headers = {"Authorization": f"Bearer {token}"}
-    
-    # 1. Metadata
+    logger.info(f"[Amazon Album] Fetching album: {album_asin}")
     try:
-        r_meta = requests.get(f"https://api.tidal.com/v1/albums/{album_id}", params={"countryCode": "US"}, headers=headers, timeout=10)
-        meta = r_meta.json()
-        if 'error' in meta: return None
-    except: return None
-
-    # 2. Tracks
-    try:
-        # Le endpoint /items retourne souvent : { "items": [ { "item": { ...track... }, "type": "track" } ] }
-        r_tracks = requests.get(f"https://api.tidal.com/v1/albums/{album_id}/items", params={"limit": 100, "offset": 0, "countryCode": "US"}, headers=headers, timeout=10)
-        data_tracks = r_tracks.json()
-        items = data_tracks.get('items', [])
-    except: items = []
-
-    formatted_tracks = []
-    cover_url = tidal_uuid_to_url(meta.get('cover'))
-    
-    for t in items:
-        if not t: continue
-        try:
-            # CORRECTION : On déballe l'objet si nécessaire
-            # Si 'item' existe, c'est que l'info est dedans (structure wrapper)
-            # Sinon on utilise t directement (structure plate)
-            actual_track = t.get('item') or t
-            
-            # Vérification basique
-            if not actual_track or 'id' not in actual_track:
-                continue
-
-            # Detect HiRes
-            bit_depth = 16
-            tags = (actual_track.get('mediaMetadata') or {}).get('tags', [])
-            if "HIRES_LOSSLESS" in tags or "MQA" in tags:
-                bit_depth = 24
-                
-            formatted_tracks.append({
-                'id': str(actual_track['id']),
-                'title': actual_track.get('title', 'Titre Inconnu'),
-                'duration': actual_track.get('duration', 0),
-                'track_number': actual_track.get('trackNumber'),
-                'performer': {'name': (actual_track.get('artist') or {}).get('name', 'Inconnu')},
-                'album': {'title': meta.get('title'), 'image': {'large': cover_url}},
-                'source': 'tidal_hund', # Important pour la lecture
-                'maximum_bit_depth': bit_depth
-            })
-        except Exception as e:
-            logger.error(f"[Tidal Album] Parse track error: {e}")
-            continue
-
-    return {
-        'id': str(meta.get('id')),
-        'title': meta.get('title'),
-        'artist': {'name': (meta.get('artist') or {}).get('name', 'Inconnu')},
-        'image': {'large': cover_url},
-        'source': 'tidal_hund',
-        'tracks': {'items': formatted_tracks}
-    }
-
-def get_tidal_stream_manifest(track_id):
-    """
-    Récupère le manifeste audio pour Shaka Player (DASH) OU l'URL directe (BTS/16-bit).
-    """
-    # Ajout d'un User-Agent pour éviter le blocage 403
-    request_headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    }
-
-    # 1. Tentative HI_RES (pour Dash)
-    logger.info(f"[Tidal Audio] 🎵 Requesting manifest for ID: {track_id} (Quality: HI_RES_LOSSLESS)")
-    try:
-        url = f"{TIDAL_HUND_BASE}/track/?id={track_id}&quality=HI_RES_LOSSLESS"
-        res = requests.get(url, headers=request_headers, timeout=15)
+        # Search for the album to get tracks
+        url = f"{AMAZON_MUSIC_API_BASE}/search"
+        params = {
+            "query": album_asin,
+            "types": "track,album",
+            "country": "FR"
+        }
+        res = requests.get(url, params=params, timeout=15)
         
-        # Si erreur 401/403/etc, on retente en LOSSLESS standard
         if res.status_code != 200:
-            logger.error(f"[Tidal Audio] ❌ Error {res.status_code} for HI_RES. Retrying LOSSLESS...")
-            url_fallback = f"{TIDAL_HUND_BASE}/track/?id={track_id}&quality=LOSSLESS"
-            res = requests.get(url_fallback, headers=request_headers, timeout=15)
-            
-            if res.status_code != 200:
-                logger.error(f"[Tidal Audio] ❌ Fallback to LOSSLESS also failed.")
-                return None
+            return None
+
+        data = res.json()
+        results_blocks = data.get('results', [])
+        
+        album_title = ""
+        album_artist = ""
+        album_cover = ""
+        formatted_tracks = []
+        
+        for block in results_blocks:
+            hits = block.get('hits', [])
+            for hit in hits:
+                doc = hit.get('document', {})
+                
+                if doc.get('albumAsin') == album_asin or doc.get('asin') == album_asin:
+                    if not album_title:
+                        album_title = doc.get('albumName', doc.get('title', ''))
+                        album_artist = doc.get('artistName', 'Inconnu')
+                        art_original = doc.get('artOriginal', {})
+                        if art_original:
+                            album_cover = art_original.get('artUrl') or art_original.get('URL', '')
+                    
+                    if 'CatalogTrack' in doc.get('__type', ''):
+                        art_url = ''
+                        art_original = doc.get('artOriginal', {})
+                        if art_original:
+                            art_url = art_original.get('artUrl') or art_original.get('URL', '')
+                        
+                        formatted_tracks.append({
+                            'id': doc.get('asin', ''),
+                            'title': doc.get('title', 'Titre Inconnu'),
+                            'duration': doc.get('duration', 0),
+                            'track_number': doc.get('trackNum'),
+                            'performer': {'name': doc.get('artistName', 'Inconnu')},
+                            'album': {
+                                'title': album_title,
+                                'image': {'large': art_url or album_cover}
+                            },
+                            'source': 'amazon_music',
+                            'maximum_bit_depth': 16
+                        })
+        
+        if not album_title:
+            return None
+        
+        return {
+            'id': album_asin,
+            'title': album_title,
+            'artist': {'name': album_artist},
+            'image': {'large': album_cover or 'https://placehold.co/300x300/1a1a1a/666666?text=Amazon'},
+            'source': 'amazon_music',
+            'tracks': {'items': formatted_tracks}
+        }
+
+    except Exception as e:
+        logger.error(f"[Amazon Album] Error: {e}")
+        return None
+
+def get_amazon_stream_url(asin):
+    """
+    Récupère l'URL de stream Amazon Music via l'API t2tunes.
+    """
+    logger.info(f"[Amazon Stream] Fetching stream for ASIN: {asin}")
+    try:
+        url = f"{AMAZON_MUSIC_API_BASE}/media-from-asin"
+        params = {
+            "asin": asin,
+            "country": "FR",
+            "codec": "flac"
+        }
+        res = requests.get(url, params=params, timeout=15)
+        
+        if res.status_code != 200:
+            logger.error(f"[Amazon Stream] Error {res.status_code}: {res.text}")
+            return None
 
         data = res.json()
         
-        if 'data' not in data:
-             logger.warning(f"[Tidal Audio] ⚠️ 'data' field missing.")
-             return None
-             
-        track_data = data['data']
-        mime = track_data.get('manifestMimeType')
-        
-        # CAS 1: DASH (24-bit / Hi-Res) -> Utilise Shaka Player
-        if mime == 'application/dash+xml':
-            logger.info(f"[Tidal Audio] ✅ DASH Manifest received (24-bit/Hi-Res).")
-            return {
-                "manifest": track_data['manifest'],
-                "mimeType": "application/dash+xml",
-                "bitDepth": track_data.get('bitDepth', 24),
-                "sampleRate": track_data.get('sampleRate', 44100)
-            }
-            
-        # CAS 2: BTS (16-bit / Lossless) -> Fichier direct -> Lecteur natif
-        elif mime == 'application/vnd.tidal.bts':
-            logger.info(f"[Tidal Audio] ✅ BTS Manifest received (16-bit/File). Decoding...")
-            try:
-                # Le manifeste BTS est un JSON encodé en base64
-                decoded_json = json.loads(base64.b64decode(track_data['manifest']).decode('utf-8'))
-                
-                # Il contient une liste 'urls', on prend la première
-                if 'urls' in decoded_json and len(decoded_json['urls']) > 0:
-                    audio_url = decoded_json['urls'][0]
-                    logger.info(f"[Tidal Audio] -> Direct URL extracted.")
-                    return {
-                        "url": audio_url,
-                        "mimeType": "audio/flac", # ou mp4 selon le codec indiqué dans le json
-                        "bitDepth": 16,
-                        "sampleRate": 44100
-                    }
-                else:
-                    logger.error("[Tidal Audio] BTS Manifest decoded but no 'urls' found.")
-                    return None
-            except Exception as e:
-                logger.error(f"[Tidal Audio] Error decoding BTS manifest: {e}")
-                return None
-                
-        else:
-            logger.warning(f"[Tidal Audio] ⚠️ Unexpected MIME type: {mime}")
+        if not data or not isinstance(data, list) or len(data) == 0:
+            logger.error("[Amazon Stream] Empty response")
             return None
+        
+        track_data = data[0]
+        
+        if not track_data.get('stremeable', False):
+            logger.warning(f"[Amazon Stream] Track {asin} is not streamable")
+            return None
+        
+        stream_info = track_data.get('streamInfo', {})
+        stream_url = stream_info.get('streamUrl')
+        
+        if not stream_url:
+            logger.error("[Amazon Stream] No stream URL found")
+            return None
+        
+        # Build cover URL from template
+        cover_url = ''
+        template = track_data.get('templateCoverUrl', '')
+        if template:
+            cover_url = template.replace('{size}', '600').replace('{jpegQuality}', '85').replace('{format}', 'jpg')
+        
+        tags = track_data.get('tags', {})
+        
+        return {
+            "url": stream_url,
+            "format": stream_info.get('format', 'flac'),
+            "codec": stream_info.get('codec', 'flac'),
+            "sampleRate": stream_info.get('sampleRate', 44100),
+            "cover": cover_url,
+            "tags": tags,
+            "decryptionKey": track_data.get('decryptionKey')
+        }
 
     except Exception as e:
-        logger.error(f"[Tidal Audio] 💥 CRITICAL EXCEPTION: {e}")
+        logger.error(f"[Amazon Stream] Exception: {e}")
         return None
 
 # --- FONCTIONS SYNCHRONES (WRAPPED) ---
@@ -749,7 +884,8 @@ def sync_search_artist_full(name):
                 found_artist = candidate
                 break
             score = 0
-            if FUZZ_AVAILABLE: score = fuzz.ratio(target_clean, cand_clean)
+            if FUZZ_AVAILABLE:
+                score = fuzz.ratio(target_clean, cand_clean)
             else:
                 if target_clean in cand_clean or cand_clean in target_clean:
                     len_diff = abs(len(target_clean) - len(cand_clean))
@@ -767,7 +903,7 @@ def sync_search_artist_full(name):
 
 def sync_resolve_track(title, artist):
     """
-    Recherche le titre sur Qobuz ou Tidal et retourne l'objet COMPLET (avec image)
+    Recherche le titre sur Qobuz ou Amazon Music et retourne l'objet COMPLET (avec image)
     au lieu de juste l'ID.
     """
     target_artist = clean_string(artist)
@@ -799,9 +935,9 @@ def sync_resolve_track(title, artist):
                         return rec
         except: pass
     
-    # 2. Fallback Tidal
-    tidal_res = sync_search_tidal(f"{title} {artist}", limit=5)
-    for t in tidal_res:
+    # 2. Fallback Amazon Music (remplace Tidal)
+    amazon_res = sync_search_amazon(f"{title} {artist}", limit=5)
+    for t in amazon_res:
         t_artist = clean_string(t['performer']['name'])
         t_title = clean_string(t['title'])
         
@@ -812,15 +948,14 @@ def sync_resolve_track(title, artist):
         elif target_artist in t_artist or t_artist in target_artist: match_artist = True
         
         if match_artist:
-            # Vérification Titre (nouveau)
+            # Vérification Titre
             match_title = False
             if FUZZ_AVAILABLE:
                 if fuzz.ratio(target_title, t_title) > 60: match_title = True
             elif target_title in t_title or t_title in target_title: match_title = True
             
             if match_title:
-                # On conserve tidal_hund car c'est ce que frontend attend pour streamer
-                t['source'] = 'tidal_hund'
+                t['source'] = 'amazon_music'
                 return t
             
     return None
@@ -947,27 +1082,26 @@ async def search_tracks(q: str, type: str = 'all'):
     tasks = []
     if type in ['track', 'all']:
         tasks.append(run_in_threadpool(sync_qobuz_search, q, 50, 'track'))
-        tasks.append(run_in_threadpool(sync_search_tidal, q, 50))
+        tasks.append(run_in_threadpool(sync_search_amazon, q, 50))
     if type in ['album', 'all']:
         tasks.append(run_in_threadpool(sync_qobuz_search, q, 15, 'album'))
-        tasks.append(run_in_threadpool(sync_search_tidal_albums, q, 15))
+        tasks.append(run_in_threadpool(sync_search_amazon_albums, q, 15))
         tasks.append(run_in_threadpool(sync_search_deezer_albums, q, 15))
     if type in ['artist', 'all']:
         tasks.append(run_in_threadpool(sync_search_deezer_artists, q, 15))
 
     finished = await asyncio.gather(*tasks, return_exceptions=True)
     idx = 0
-    qobuz_tracks = []; tidal_tracks = []; deezer_tracks = []
-    qobuz_albums = []; tidal_albums = []; deezer_albums = []
+    qobuz_tracks = []; amazon_tracks = []; deezer_tracks = []
+    qobuz_albums = []; amazon_albums = []; deezer_albums = []
     deezer_artists = []
 
     if type in ['track', 'all']:
         r1 = finished[idx]; idx += 1; qobuz_tracks = r1 if isinstance(r1, list) else []
-        r2 = finished[idx]; idx += 1; tidal_tracks = r2 if isinstance(r2, list) else []
-        # Pas de Deezer pour les tracks
+        r2 = finished[idx]; idx += 1; amazon_tracks = r2 if isinstance(r2, list) else []
     if type in ['album', 'all']:
         r4 = finished[idx]; idx += 1; qobuz_albums = r4 if isinstance(r4, list) else []
-        r5 = finished[idx]; idx += 1; tidal_albums = r5 if isinstance(r5, list) else []
+        r5 = finished[idx]; idx += 1; amazon_albums = r5 if isinstance(r5, list) else []
         r6 = finished[idx]; idx += 1; deezer_albums = r6 if isinstance(r6, list) else []
     if type in ['artist', 'all']:
         r7 = finished[idx]; idx += 1; deezer_artists = r7 if isinstance(r7, list) else []
@@ -983,25 +1117,22 @@ async def search_tracks(q: str, type: str = 'all'):
     sigs = set()
     
     def get_dedup_sig(track):
-        # 1. Nettoyage Titre (suppression parenthèses, version, etc.)
         t = track.get('title', '').lower()
-        t = re.sub(r'\s*[\(\[].*?[\)\]]', '', t) # Enlève (...) et [...]
-        t = re.sub(r'\s*-\s*.*', '', t) # Enlève tout après un tiret (ex: - Remaster)
+        t = re.sub(r'\s*[\(\[].*?[\)\]]', '', t)
+        t = re.sub(r'\s*-\s*.*', '', t)
         t = clean_string(t)
         
-        # 2. Nettoyage Artiste
         p = track.get('performer', {}).get('name', '')
         if not p: p = track.get('artist', {}).get('name', '')
         p = clean_string(p)
         
         return f"{t}|{p}"
 
-    # Enregistrement des signatures Qobuz
     for t in qobuz_tracks:
         sigs.add(get_dedup_sig(t))
     
-    # Insertion Tidal (si pas de doublon)
-    for t in tidal_tracks:
+    # Insertion Amazon Music (si pas de doublon)
+    for t in amazon_tracks:
         s = get_dedup_sig(t)
         if s not in sigs: 
             combined_tracks.append(t)
@@ -1021,8 +1152,8 @@ async def search_tracks(q: str, type: str = 'all'):
         s = f"{clean_string(a['title'])}{clean_string(a.get('artist',{}).get('name'))}"
         album_sigs.add(s)
 
-    # Insertion Tidal Albums
-    for a in tidal_albums:
+    # Insertion Amazon Music Albums
+    for a in amazon_albums:
         s = f"{clean_string(a['title'])}{clean_string(a.get('artist',{}).get('name'))}"
         if s not in album_sigs: combined_albums.append(a); album_sigs.add(s)
         
@@ -1109,8 +1240,8 @@ async def get_deezer_playlist_details_route(id: str):
                 final_tracks.append({
                     'id': str(t.get('id')),
                     'title': t.get('title'),
-                    'performer': {'name': t.get('artist', {}).get('name', 'Inconnu')},
-                    'album': {'title': t.get('album', {}).get('title'), 'image': {'large': t.get('album', {}).get('cover_xl') or art}},
+                    'performer': {'name': t.get('artist', {}).get('name', data.get('artist', {}).get('name'))},
+                    'album': {'title': data.get('title'), 'image': {'large': data.get('cover_xl') or data.get('cover_big')}},
                     'duration': t.get('duration', 0),
                     'source': 'deezer',
                     'maximum_bit_depth': 16,
@@ -1124,10 +1255,10 @@ async def get_deezer_playlist_details_route(id: str):
 
 @app.get('/resolve_stream')
 async def resolve_and_stream(title: str, artist: str):
-    # Conserve la logique de redirection pour les sources 'lazy' classiques
     match = await run_in_threadpool(sync_resolve_track, title, artist)
     if match:
         rid = match['id']
+        if match['source'] == 'amazon_music': return RedirectResponse(f"/amazon_stream/{rid}")
         if match['source'] == 'tidal_hund': return RedirectResponse(f"/tidal_manifest/{rid}")
         return RedirectResponse(f"/stream/{rid}")
     raise HTTPException(404, "Track not found")
@@ -1144,9 +1275,7 @@ async def resolve_metadata_route(title: str, artist: str):
 
 @app.get('/track')
 async def get_track_info(id: str, source: str = None):
-    if source == 'tidal_hund':
-        # Pas d'info track spécifique implémentée pour l'instant hors search
-        # On renvoie une erreur pour forcer le client à utiliser les données qu'il a déjà
+    if source == 'tidal_hund' or source == 'amazon_music':
         raise HTTPException(404)
     elif client:
         try:
@@ -1158,7 +1287,10 @@ async def get_track_info(id: str, source: str = None):
 
 @app.get('/album')
 async def get_album(id: str, source: str = None):
-    if source == 'tidal_hund':
+    if source == 'amazon_music':
+        res = await run_in_threadpool(sync_get_amazon_album, id)
+        if res: return JSONResponse(res)
+    elif source == 'tidal_hund':
         res = await run_in_threadpool(sync_get_tidal_album, id)
         if res: return JSONResponse(res)
     elif source == 'deezer':
@@ -1221,12 +1353,26 @@ async def stream_track(track_id: str):
     if url: return RedirectResponse(url)
     raise HTTPException(404, "URL not found")
 
+@app.get('/amazon_stream/{asin}')
+async def get_amazon_stream_route(asin: str):
+    """Endpoint pour récupérer l'URL de stream Amazon Music."""
+    stream_data = await run_in_threadpool(get_amazon_stream_url, asin)
+    if stream_data and stream_data.get('url'):
+        return RedirectResponse(stream_data['url'])
+    raise HTTPException(404, "Amazon Music stream not found")
+
+@app.get('/amazon_stream_info/{asin}')
+async def get_amazon_stream_info_route(asin: str):
+    """Endpoint pour récupérer les infos complètes du stream Amazon Music (URL + metadata)."""
+    stream_data = await run_in_threadpool(get_amazon_stream_url, asin)
+    if stream_data:
+        return JSONResponse(stream_data)
+    raise HTTPException(404, "Amazon Music stream not found")
+
 @app.get('/tidal_manifest/{track_id}')
 async def get_tidal_manifest_route(track_id: str):
-    manifest_data = await run_in_threadpool(get_tidal_stream_manifest, track_id)
-    if manifest_data:
-        return JSONResponse(manifest_data)
-    raise HTTPException(404, "Tidal manifest not found")
+    # DISABLED: Tidal streaming is paused
+    raise HTTPException(404, "Tidal streaming is currently disabled")
 
 @app.get('/lyrics')
 async def get_lyrics(artist: str, title: str, album: str = None, duration: str = None):

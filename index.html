@@ -891,8 +891,8 @@
             updateLikeButtonState();
 
             // --- NOUVELLE LOGIQUE DE RÉSOLUTION UNIFIÉE ---
-            // On résout systématiquement TOUT ce qui n'est pas déjà Qobuz ou Tidal Direct
-            if (nextTrack.source !== 'qobuz' && nextTrack.source !== 'tidal_hund') {
+            // On résout systématiquement TOUT ce qui n'est pas déjà Qobuz, Tidal Direct ou Amazon Music
+            if (nextTrack.source !== 'qobuz' && nextTrack.source !== 'tidal_hund' && nextTrack.source !== 'amazon_music') {
                 // TOAST SUPPRIMÉ
                 try {
                     const artist = nextTrack.performer ? nextTrack.performer.name : (nextTrack.artist ? nextTrack.artist.name : 'Inconnu');
@@ -907,7 +907,7 @@
                         
                         // Mise à jour des infos critiques pour la lecture
                         nextTrack.id = newMeta.id;
-                        nextTrack.source = newMeta.source; // Deviendra 'tidal_hund' ou 'qobuz'
+                        nextTrack.source = newMeta.source; // Deviendra 'amazon_music' ou 'qobuz'
                         
                         // Mise à jour métadonnées secondaires si dispos
                         if(newMeta.duration && (!nextTrack.duration || nextTrack.duration === 0)) nextTrack.duration = newMeta.duration;
@@ -922,15 +922,32 @@
                 }
             }
 
-            // Gestion Source TIDAL
-            if (nextTrack.source === 'tidal_hund') {
+            // Gestion Source AMAZON MUSIC
+            if (nextTrack.source === 'amazon_music') {
                 try {
-                    // Detach prev shaka if it was running
-                    await nextShaka.unload(); 
+                    await nextShaka.unload();
+                    
+                    // Amazon Music: on utilise le endpoint de stream direct
+                    const streamUrl = `${API_BASE}/amazon_stream/${nextTrack.id}`;
+                    
+                    // CHECK CONCURRENCY BEFORE APPLYING
+                    if (thisLoadId !== currentLoadId) return;
+
+                    nextAudio.src = streamUrl;
+                    console.log("✅ Loaded Amazon Music stream for:", nextTrack.title);
+                } catch (e) {
+                    console.error("Amazon Music Load Error", e);
+                    showToast("Erreur lecture Amazon Music");
+                    return;
+                }
+            }
+            // Gestion Source TIDAL (DISABLED)
+            else if (nextTrack.source === 'tidal_hund') {
+                try {
+                    await nextShaka.unload();
                     
                     const res = await fetch(`${API_BASE}/tidal_manifest/${nextTrack.id}`);
                     
-                    // CHECK CONCURRENCY BEFORE APPLYING
                     if (thisLoadId !== currentLoadId) return;
 
                     const manifestData = await res.json();
@@ -939,11 +956,11 @@
                         const dashUri = 'data:application/dash+xml;base64,' + manifestData.manifest;
                         await nextShaka.load(dashUri);
                         console.log("✅ Loaded DASH manifest for Tidal Hi-Res");
-                    } 
+                    }
                     else if (manifestData.url) {
                         nextAudio.src = manifestData.url;
                         console.log("✅ Loaded Direct URL for Tidal Lossless (16-bit)");
-                    } 
+                    }
                     else {
                         throw new Error("No valid manifest or URL");
                     }
@@ -957,8 +974,8 @@
                 await nextShaka.unload();
                 
                 let url = '';
-                // Fallback ultime : si la source n'est toujours pas Qobuz ou Tidal après résolution, on utilise le resolveur stream
-                if(nextTrack.source !== 'qobuz' && nextTrack.source !== 'tidal_hund') {
+                // Fallback ultime : si la source n'est toujours pas Qobuz, Tidal ou Amazon après résolution, on utilise le resolveur stream
+                if(nextTrack.source !== 'qobuz' && nextTrack.source !== 'tidal_hund' && nextTrack.source !== 'amazon_music') {
                     const artist = nextTrack.performer ? nextTrack.performer.name : 'Inconnu';
                     url = `${API_BASE}/resolve_stream?title=${encodeURIComponent(nextTrack.title)}&artist=${encodeURIComponent(artist)}`;
                 }
@@ -975,7 +992,7 @@
             // FINAL CHECK BEFORE PLAYING
             if (thisLoadId !== currentLoadId) return;
 
-            if(nextTrack.source !== 'yt_lazy' && nextTrack.source !== 'spotify_lazy' && nextTrack.source !== 'deezer' && nextTrack.source !== 'subsonic') safePushState({}, "", `/?track=${nextTrack.id}&source=${nextTrack.source}`);
+            if(nextTrack.source !== 'yt_lazy' && nextTrack.source !== 'spotify_lazy' && nextTrack.source !== 'deezer' && nextTrack.source !== 'subsonic' && nextTrack.source !== 'amazon_music') safePushState({}, "", `/?track=${nextTrack.id}&source=${nextTrack.source}`);
             
             // Force disable crossfade if direct audio
             startCrossfade(prevAudio, nextAudio, useCrossfade && !userSettings.directAudio); 
@@ -1266,6 +1283,7 @@
                 else if (bgImg.includes('600x600')) bgImg = bgImg.replace('600x600', '200x200'); // Deezer fallback
                 else if (bgImg.includes('w1200-h1200')) bgImg = bgImg.replace('w1200-h1200', 'w200-h200'); // YouTube
                 else if (bgImg.includes('resources.tidal.com')) bgImg = bgImg.replace('640x640', '320x320'); // Tidal
+                // Amazon Music images are already optimized, no resize needed
             }
 
             let artistName = t.performer ? t.performer.name : 'Artiste';
