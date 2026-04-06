@@ -922,19 +922,36 @@
                 }
             }
 
-            // Gestion Source AMAZON MUSIC
+            // Gestion Source AMAZON MUSIC (ClearKey encrypted stream via Shaka Player)
             if (nextTrack.source === 'amazon_music') {
                 try {
                     await nextShaka.unload();
                     
-                    // Amazon Music: on utilise le endpoint de stream direct
-                    const streamUrl = `${API_BASE}/amazon_stream/${nextTrack.id}`;
+                    // 1. Fetch stream info (URL + decryption key)
+                    const infoRes = await fetch(`${API_BASE}/amazon_stream_info/${nextTrack.id}`);
                     
-                    // CHECK CONCURRENCY BEFORE APPLYING
                     if (thisLoadId !== currentLoadId) return;
-
-                    nextAudio.src = streamUrl;
-                    console.log("✅ Loaded Amazon Music stream for:", nextTrack.title);
+                    
+                    if (!infoRes.ok) throw new Error("Stream info not found");
+                    const streamData = await infoRes.json();
+                    
+                    if (!streamData.url) throw new Error("No stream URL");
+                    
+                    // 2. Configure ClearKey DRM if decryption key is available
+                    if (streamData.decryptionKey && streamData.kid) {
+                        nextShaka.configure({
+                            drm: {
+                                clearKeys: {
+                                    [streamData.kid]: streamData.decryptionKey
+                                }
+                            }
+                        });
+                        console.log("🔑 ClearKey configured for Amazon Music (KID:", streamData.kid.substring(0, 8) + "...)");
+                    }
+                    
+                    // 3. Load the encrypted stream via Shaka Player
+                    await nextShaka.load(streamData.url);
+                    console.log("✅ Loaded Amazon Music encrypted stream for:", nextTrack.title, "(" + (streamData.codec || "flac") + ", " + (streamData.sampleRate || 44100) + "Hz)");
                 } catch (e) {
                     console.error("Amazon Music Load Error", e);
                     showToast("Erreur lecture Amazon Music");

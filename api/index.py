@@ -626,6 +626,7 @@ def get_amazon_stream_url(asin):
             "sampleRate": stream_info.get('sampleRate', 44100),
             "cover": cover_url,
             "tags": tags,
+            "kid": stream_info.get('kid'),
             "decryptionKey": track_data.get('decryptionKey')
         }
 
