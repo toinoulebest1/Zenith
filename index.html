@@ -580,10 +580,17 @@
                 shakaPlayerA = new shaka.Player(playerA);
                 shakaPlayerB = new shaka.Player(playerB);
                 
-                // Gestion d'erreurs basique
-                const onError = (e) => console.error('Shaka Error', e);
-                shakaPlayerA.addEventListener('error', onError);
-                shakaPlayerB.addEventListener('error', onError);
+                // Gestion d'erreurs avec fallback automatique
+                const onShakaError = (e) => {
+                    console.error('Shaka Error', e);
+                    // On ne déclenche le fallback que si c'est le lecteur actif
+                    const errorAudio = (shakaPlayerA === e.target) ? playerA : playerB;
+                    if (errorAudio === activeAudio) {
+                        handlePlaybackError(currentIndex);
+                    }
+                };
+                shakaPlayerA.addEventListener('error', onShakaError);
+                shakaPlayerB.addEventListener('error', onShakaError);
                 console.log("✅ Shaka Player Ready");
             } else {
                 console.error('Browser not supported for Shaka Player');
@@ -1006,7 +1013,7 @@
         async function updateFavoriteIfNeeded(oldId, newMeta) {
             if (!supabaseClient) return;
             
-            // 1. Mise à jour variable locale (pour l'UI immédiate si on réaffiche la liste)
+            // 1. Mise à jour variable locale
             const localIdx = favorites.findIndex(f => String(f.id) === String(oldId));
             if (localIdx !== -1) {
                 favorites[localIdx] = { ...newMeta, fromSearch: false };
@@ -1017,12 +1024,11 @@
             const { data: { user } } = await supabaseClient.auth.getUser();
             if (!user) return;
 
-            // On cherche l'entrée correspondante
             const { data, error } = await supabaseClient
                 .from('favorites')
                 .update({ 
-                    track_id: String(newMeta.id), // On met à jour l'ID de référence
-                    track_data: newMeta           // On sauvegarde les métadonnées complètes (avec image)
+                    track_id: String(newMeta.id), 
+                    track_data: newMeta           
                 })
                 .eq('user_id', user.id)
                 .eq('track_id', String(oldId))
@@ -1031,6 +1037,72 @@
             if (data && data.length > 0) {
                 console.log(`✅ Favori mis à jour en base : ${oldId} -> ${newMeta.id}`);
             }
+        }
+
+        // --- GESTION DU FALLBACK AUTO (EN CAS D'ERREUR) ---
+        let fallbackRetries = {}; 
+
+        async function handlePlaybackError(index) {
+            const track = tracks[index];
+            if (!track) return;
+
+            // Éviter les boucles infinies
+            if (fallbackRetries[index] && fallbackRetries[index] >= 1) {
+                console.warn("Échec définitif du fallback pour ce titre.");
+                showToast(`❌ Titre indisponible : ${track.title}`);
+                document.getElementById('playIcon').className = 'fas fa-exclamation-triangle';
+                
+                if (tracks.length > 1 && currentIndex < tracks.length - 1) {
+                    setTimeout(() => {
+                        if (currentIndex === index) loadTrack(currentIndex + 1, true, false); 
+                    }, 2000);
+                }
+                return;
+            }
+
+            fallbackRetries[index] = (fallbackRetries[index] || 0) + 1;
+            showToast("Source corrompue, recherche d'un fallback... 🔍");
+            
+            const success = await attemptTrackFallback(index);
+            if (!success) {
+                // Si pas de fallback, on passe au suivant
+                if (tracks.length > 1 && currentIndex < tracks.length - 1) {
+                    setTimeout(() => {
+                        if (currentIndex === index) loadTrack(currentIndex + 1, true, false); 
+                    }, 2000);
+                } else {
+                    document.getElementById('playIcon').className = 'fas fa-exclamation-triangle';
+                }
+            }
+        }
+
+        async function attemptTrackFallback(index) {
+            const track = tracks[index];
+            const artistName = track.performer ? track.performer.name : (track.artist ? track.artist.name : 'Inconnu');
+            const oldId = track.id;
+
+            try {
+                // On utilise l'API de résolution (Backend)
+                const res = await fetch(`${API_BASE}/resolve_metadata?title=${encodeURIComponent(track.title)}&artist=${encodeURIComponent(artistName)}`);
+                if (res.ok) {
+                    const newMeta = await res.json();
+                    console.log("✅ Fallback trouvé :", newMeta.source, newMeta.id);
+                    
+                    // Mise à jour de l'objet de la file d'attente
+                    tracks[index] = { ...track, ...newMeta };
+                    
+                    // Mise à jour permanente dans les favoris Supabase
+                    await updateFavoriteIfNeeded(oldId, newMeta);
+                    
+                    // Nouvelle tentative de lecture
+                    showToast("Source réparée, reprise... ✨");
+                    loadTrack(index, true, false); 
+                    return true;
+                }
+            } catch (e) {
+                console.error("Fallback Resolution Error:", e);
+            }
+            return false;
         }
 
         function startCrossfade(prevAudio, nextAudio, enableFade) { 
@@ -1132,24 +1204,8 @@
             
             audioObj.onerror = () => {
                 if (audioObj === activeAudio && audioObj.src) {
-                    console.error("Erreur Audio:", audioObj.error);
-                    const t = tracks[currentIndex];
-                    if (t && (t.source === 'spotify_lazy' || t.source === 'yt_lazy')) {
-                        showToast(`⚠️ Titre introuvable : ${t.title}`);
-                    } else {
-                        // Pour Shaka Player, les erreurs sont gérées par son event listener
-                        if (t && t.source !== 'tidal_hund') showToast("Erreur lors de la lecture audio ❌");
-                    }
-                    
-                    document.getElementById('playIcon').className = 'fas fa-exclamation-triangle';
-                    
-                    if (tracks.length > 1 && currentIndex < tracks.length - 1) {
-                        setTimeout(() => {
-                            if (activeAudio === audioObj && audioObj.error) {
-                                loadTrack(currentIndex + 1, true, false); 
-                            }
-                        }, 2000);
-                    }
+                    console.error("Erreur Audio HTML5:", audioObj.error);
+                    handlePlaybackError(currentIndex);
                 }
             };
         }
