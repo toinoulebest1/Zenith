@@ -937,16 +937,26 @@
                     
                     if (!streamData.url) throw new Error("No stream URL");
                     
+                    // Helper: Convert hex string to base64url (required by Shaka ClearKey)
+                    function hexToBase64Url(hex) {
+                        const bytes = new Uint8Array(hex.match(/.{1,2}/g).map(b => parseInt(b, 16)));
+                        let binary = '';
+                        for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+                        return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+                    }
+                    
                     // 2. Configure ClearKey DRM if decryption key is available
                     if (streamData.decryptionKey && streamData.kid) {
+                        const kidB64 = hexToBase64Url(streamData.kid);
+                        const keyB64 = hexToBase64Url(streamData.decryptionKey);
                         nextShaka.configure({
                             drm: {
                                 clearKeys: {
-                                    [streamData.kid]: streamData.decryptionKey
+                                    [kidB64]: keyB64
                                 }
                             }
                         });
-                        console.log("🔑 ClearKey configured for Amazon Music (KID:", streamData.kid.substring(0, 8) + "...)");
+                        console.log("🔑 ClearKey configured for Amazon Music (KID:", streamData.kid.substring(0, 8) + "...) [base64url]");
                     }
                     
                     // 3. Load the encrypted stream via Shaka Player
