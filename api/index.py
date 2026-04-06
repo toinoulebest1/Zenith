@@ -39,14 +39,11 @@ import unicodedata
 from ytmusicapi import YTMusic
 from deep_translator import GoogleTranslator
 from io import BytesIO
+import struct
 from struct import pack, unpack
-import subprocess
-import tempfile
-import shutil
 
-# AES + pymp4 for CENC decryption (Amazon Music) - imported after logger init below
+# AES for CENC decryption (Amazon Music) - imported after logger init below
 CRYPTO_AVAILABLE = False
-PYMP4_AVAILABLE = False
 
 # --- PATCH GLOBAL CONNEXIONS ---
 requests.adapters.DEFAULT_POOLSIZE = 100
@@ -90,36 +87,13 @@ app.add_middleware(
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ZenithAPI")
 
-# Deferred import of Crypto + pymp4 + ffmpeg (needs logger)
+# Deferred import of Crypto (needs logger)
 try:
     from Crypto.Cipher import AES
+    from Crypto.Util import Counter as CryptoCounter
     CRYPTO_AVAILABLE = True
 except Exception as e:
     logger.warning(f"pycryptodome not available: {e}")
-
-try:
-    from pymp4.parser import Box
-    PYMP4_AVAILABLE = True
-    logger.info("[pymp4] Loaded successfully")
-except Exception as e:
-    logger.warning(f"pymp4 not available: {e}")
-
-# Resolve ffmpeg binary path
-FFMPEG_BIN = None
-try:
-    import static_ffmpeg
-    static_ffmpeg.add_paths()
-    FFMPEG_BIN = shutil.which("ffmpeg")
-    if FFMPEG_BIN:
-        logger.info(f"[FFmpeg] Found static-ffmpeg at: {FFMPEG_BIN}")
-except Exception:
-    pass
-if not FFMPEG_BIN:
-    FFMPEG_BIN = shutil.which("ffmpeg")
-    if FFMPEG_BIN:
-        logger.info(f"[FFmpeg] Found system ffmpeg at: {FFMPEG_BIN}")
-    else:
-        logger.warning("[FFmpeg] No ffmpeg binary found - Amazon Music remux unavailable")
 
 lyrics_engine = LyricsSearcher()
 yt = YTMusic()
@@ -1396,206 +1370,350 @@ async def stream_track(track_id: str):
 
 @app.get('/amazon_stream/{asin}')
 async def get_amazon_stream_route(asin: str):
-    """Endpoint pour décrypter et streamer Amazon Music (CENC AES-CTR) via pymp4 + ffmpeg remux."""
+    """Endpoint pour décrypter et streamer Amazon Music via byte-level CENC AES-CTR."""
     stream_data = await run_in_threadpool(get_amazon_stream_url, asin)
     if not stream_data or not stream_data.get('url'):
         raise HTTPException(404, "Amazon Music stream not found")
     
     decryption_key_hex = stream_data.get('decryptionKey')
-    kid_hex = stream_data.get('kid')
     stream_url = stream_data['url']
     
-    # If no decryption key, just redirect to the raw URL
+    # If no decryption key or no crypto, just redirect to the raw URL
     if not decryption_key_hex or not CRYPTO_AVAILABLE:
         return RedirectResponse(stream_url)
     
-    def _decrypt_and_remux():
-        """Download, decrypt CENC with pymp4, then remux with ffmpeg for browser compatibility."""
+    def _decrypt_cenc_inplace():
+        """
+        Pure byte-level CENC AES-CTR decryption.
+        - Parses MP4 boxes manually (no pymp4)
+        - Decrypts mdat samples in-place using trun/senc from moof
+        - Patches enca->mp4a / encv->avc1 in stsd and removes sinf boxes
+        - Returns a valid, decrypted MP4 that browsers can play directly
+        """
         try:
-            from Crypto.Util import Counter
-            from collections import deque
-            
             # Download the encrypted file
             resp = requests.get(stream_url, timeout=60)
             if resp.status_code != 200:
                 logger.error(f"[Amazon Decrypt] Download failed: {resp.status_code}")
                 return None
             
+            data = bytearray(resp.content)
             key = bytes.fromhex(decryption_key_hex)
-            input_data = resp.content
-            logger.info(f"[Amazon Decrypt] Downloaded {len(input_data)} bytes, key={decryption_key_hex[:8]}...")
+            logger.info(f"[Amazon Decrypt] Downloaded {len(data)} bytes, key={decryption_key_hex[:8]}...")
             
-            if not PYMP4_AVAILABLE:
-                logger.error("[Amazon Decrypt] pymp4 not available, cannot decrypt")
+            # === MP4 Box Parsing Helpers ===
+            def read_u16(buf, off):
+                return struct.unpack_from(">H", buf, off)[0]
+            
+            def read_u32(buf, off):
+                return struct.unpack_from(">I", buf, off)[0]
+            
+            def read_u64(buf, off):
+                return struct.unpack_from(">Q", buf, off)[0]
+            
+            def get_box_info(buf, off):
+                """Returns (box_type, header_size, total_size) for box at offset."""
+                if off + 8 > len(buf):
+                    return None, 0, 0
+                size = read_u32(buf, off)
+                box_type = bytes(buf[off+4:off+8])
+                header_size = 8
+                if size == 1:
+                    if off + 16 > len(buf):
+                        return None, 0, 0
+                    size = read_u64(buf, off + 8)
+                    header_size = 16
+                elif size == 0:
+                    size = len(buf) - off
+                return box_type, header_size, size
+            
+            def iter_boxes(buf, start, end):
+                """Iterate top-level boxes in buf[start:end], yielding (type, hdr_size, total_size, offset)."""
+                off = start
+                while off + 8 <= end:
+                    box_type, hdr, total = get_box_info(buf, off)
+                    if box_type is None or total < 8:
+                        break
+                    yield box_type, hdr, total, off
+                    off += total
+            
+            def find_box(buf, start, end, target_type):
+                """Find first child box of target_type, return (offset, hdr_size, total_size) or None."""
+                for btype, hdr, total, off in iter_boxes(buf, start, end):
+                    if btype == target_type:
+                        return off, hdr, total
                 return None
             
-            # === STEP 1: Decrypt CENC with pymp4 ===
-            output = BytesIO()
-            reader = BytesIO(input_data)
+            def find_box_deep(buf, start, end, target_type):
+                """Recursively find a box type inside container boxes."""
+                containers = {b'moov', b'trak', b'mdia', b'minf', b'stbl', b'moof', b'traf', b'edts', b'udta', b'sinf', b'schi'}
+                for btype, hdr, total, off in iter_boxes(buf, start, end):
+                    if btype == target_type:
+                        return off, hdr, total
+                    if btype in containers:
+                        result = find_box_deep(buf, off + hdr, off + total, target_type)
+                        if result:
+                            return result
+                return None
             
-            senc_queue = deque()
-            trun_queue = deque()
+            def parse_fullbox_header(buf, off):
+                """Parse FullBox: returns (version, flags, data_offset)."""
+                version = buf[off]
+                flags = (buf[off+1] << 16) | (buf[off+2] << 8) | buf[off+3]
+                return version, flags, off + 4
             
-            def find_boxes(box, box_type):
-                """Recursively find boxes of a given type."""
-                found = []
-                if hasattr(box, 'type') and box.type == box_type:
-                    found.append(box)
-                if hasattr(box, 'children'):
-                    for child in box.children:
-                        found.extend(find_boxes(child, box_type))
-                for attr_name in ['boxes', 'entries']:
-                    if hasattr(box, attr_name):
-                        items = getattr(box, attr_name)
-                        if isinstance(items, list):
-                            for item in items:
-                                if hasattr(item, 'type'):
-                                    found.extend(find_boxes(item, box_type))
-                return found
-            
-            def fix_enc_stsd(box):
-                """Restore original format from frma boxes (enc* -> original codec)."""
-                frma_boxes = find_boxes(box, b'frma')
-                if frma_boxes:
-                    original_format = frma_boxes[0].original_format
-                    stsd_boxes = find_boxes(box, b'stsd')
-                    for stsd in stsd_boxes:
-                        if hasattr(stsd, 'entries'):
-                            for entry in stsd.entries:
-                                if hasattr(entry, 'format') and b'enc' in entry.format:
-                                    entry.format = original_format
-            
-            while reader.tell() < len(input_data):
-                try:
-                    box = Box.parse_stream(reader)
-                except Exception as e:
-                    logger.warning(f"[Amazon Decrypt] Box parse error at {reader.tell()}: {e}")
-                    break
+            def parse_trun(buf, box_off, box_hdr, box_total):
+                """Parse trun box, return list of sample_sizes."""
+                body_start = box_off + box_hdr
+                version, flags, off = parse_fullbox_header(buf, body_start)
+                sample_count = read_u32(buf, off); off += 4
                 
-                fix_enc_stsd(box)
+                # data_offset (signed i32)
+                data_offset = None
+                if flags & 0x000001:
+                    data_offset = struct.unpack_from(">i", buf, off)[0]; off += 4
+                # first_sample_flags
+                if flags & 0x000004:
+                    off += 4
                 
-                if box.type == b'moof':
-                    senc_list = find_boxes(box, b'senc')
-                    trun_list = find_boxes(box, b'trun')
-                    senc_queue.extend(senc_list)
-                    trun_queue.extend(trun_list)
-                    output.write(Box.build(box))
-                    
-                elif box.type == b'mdat':
-                    if not senc_queue or not trun_queue:
-                        output.write(Box.build(box))
+                sample_sizes = []
+                for _ in range(sample_count):
+                    if flags & 0x000100:  # sample_duration
+                        off += 4
+                    sz = 0
+                    if flags & 0x000200:  # sample_size
+                        sz = read_u32(buf, off); off += 4
+                    sample_sizes.append(sz)
+                    if flags & 0x000400:  # sample_flags
+                        off += 4
+                    if flags & 0x000800:  # sample_composition_time_offset
+                        off += 4
+                
+                return sample_sizes, data_offset
+            
+            def parse_senc(buf, box_off, box_hdr, box_total):
+                """Parse senc box, return list of (iv_bytes, subsample_list_or_None)."""
+                body_start = box_off + box_hdr
+                version, flags, off = parse_fullbox_header(buf, body_start)
+                sample_count = read_u32(buf, off); off += 4
+                has_subsamples = bool(flags & 0x02)
+                
+                # Determine IV size: try 8 bytes (most common for CENC)
+                iv_size = 8
+                
+                samples = []
+                for _ in range(sample_count):
+                    if off + iv_size > len(buf):
+                        break
+                    iv = bytes(buf[off:off+iv_size]); off += iv_size
+                    subs = None
+                    if has_subsamples:
+                        sub_count = read_u16(buf, off); off += 2
+                        subs = []
+                        for _ in range(sub_count):
+                            clear = read_u16(buf, off); off += 2
+                            encrypted = read_u32(buf, off); off += 4
+                            subs.append((clear, encrypted))
+                    samples.append((iv, subs))
+                
+                return samples
+            
+            def parse_tfhd(buf, box_off, box_hdr, box_total):
+                """Parse tfhd, return default_sample_size (or 0)."""
+                body_start = box_off + box_hdr
+                version, flags, off = parse_fullbox_header(buf, body_start)
+                off += 4  # track_id
+                if flags & 0x000001:  # base_data_offset
+                    off += 8
+                if flags & 0x000002:  # sample_description_index
+                    off += 4
+                default_sample_duration = 0
+                if flags & 0x000008:  # default_sample_duration
+                    default_sample_duration = read_u32(buf, off); off += 4
+                default_sample_size = 0
+                if flags & 0x000010:  # default_sample_size
+                    default_sample_size = read_u32(buf, off); off += 4
+                return default_sample_size
+            
+            def make_cipher(key_bytes, iv_8bytes):
+                """Create AES-CTR cipher with 8-byte IV (CENC standard: IV || counter64)."""
+                ctr = CryptoCounter.new(64, prefix=iv_8bytes, initial_value=0)
+                return AES.new(key_bytes, AES.MODE_CTR, counter=ctr)
+            
+            # === STEP 1: Patch stsd boxes (enca->mp4a, encv->avc1) and remove sinf ===
+            def patch_encrypted_stsd(buf):
+                """Find and patch encrypted sample entries in stsd boxes throughout the file."""
+                # Find moov -> trak -> mdia -> minf -> stbl -> stsd
+                moov = find_box(buf, 0, len(buf), b'moov')
+                if not moov:
+                    return
+                moov_off, moov_hdr, moov_total = moov
+                moov_body_start = moov_off + moov_hdr
+                moov_body_end = moov_off + moov_total
+                
+                for trak_type, trak_hdr, trak_total, trak_off in iter_boxes(buf, moov_body_start, moov_body_end):
+                    if trak_type != b'trak':
                         continue
+                    stsd_info = find_box_deep(buf, trak_off + trak_hdr, trak_off + trak_total, b'stsd')
+                    if not stsd_info:
+                        continue
+                    stsd_off, stsd_hdr, stsd_total = stsd_info
+                    # stsd is a FullBox with entry_count
+                    stsd_body = stsd_off + stsd_hdr + 4  # skip version+flags
+                    entry_count = read_u32(buf, stsd_body); stsd_body += 4
                     
-                    senc = senc_queue.popleft()
-                    trun = trun_queue.popleft()
-                    
-                    clear_data = b''
-                    mdat_reader = BytesIO(box.data)
-                    
-                    sample_enc_info = senc.sample_encryption_info if hasattr(senc, 'sample_encryption_info') else []
-                    sample_info_list = trun.sample_info if hasattr(trun, 'sample_info') else []
-                    
-                    for sample_enc, sample_info in zip(sample_enc_info, sample_info_list):
-                        iv = sample_enc.iv if hasattr(sample_enc, 'iv') else b'\x00' * 8
-                        ctr = Counter.new(64, prefix=iv, initial_value=0)
-                        cipher = AES.new(key, AES.MODE_CTR, counter=ctr)
+                    # Iterate sample entries
+                    entry_off = stsd_body
+                    for _ in range(entry_count):
+                        if entry_off + 8 > stsd_off + stsd_total:
+                            break
+                        entry_type, entry_hdr_sz, entry_total = get_box_info(buf, entry_off)
+                        if entry_type is None:
+                            break
                         
-                        sample_size = sample_info.sample_size if hasattr(sample_info, 'sample_size') else 0
+                        entry_type_str = entry_type.decode('latin-1', errors='replace')
                         
-                        subsample_info = []
-                        if hasattr(sample_enc, 'subsample_encryption_info'):
-                            subsample_info = sample_enc.subsample_encryption_info or []
+                        if entry_type_str.startswith('enc'):
+                            # Find sinf -> frma inside this entry to get original format
+                            entry_body_start = entry_off + entry_hdr_sz
+                            entry_body_end = entry_off + entry_total
+                            
+                            # For audio entries (enca), skip 28 bytes of AudioSampleEntry fields
+                            # For video entries (encv), skip 78 bytes of VisualSampleEntry fields
+                            if entry_type == b'enca':
+                                search_start = entry_off + entry_hdr_sz + 28
+                            elif entry_type == b'encv':
+                                search_start = entry_off + entry_hdr_sz + 78
+                            else:
+                                search_start = entry_body_start + 8
+                            
+                            sinf_info = find_box(buf, search_start, entry_body_end, b'sinf')
+                            original_format = b'mp4a'  # default
+                            
+                            if sinf_info:
+                                sinf_off, sinf_hdr, sinf_total = sinf_info
+                                frma_info = find_box(buf, sinf_off + sinf_hdr, sinf_off + sinf_total, b'frma')
+                                if frma_info:
+                                    frma_off, frma_hdr, frma_total = frma_info
+                                    # frma is a FullBox-like: after header, 4 bytes = original format
+                                    original_format = bytes(buf[frma_off + frma_hdr:frma_off + frma_hdr + 4])
+                                
+                                # Zero out the sinf box (replace with free box)
+                                buf[sinf_off+4:sinf_off+8] = b'free'
+                                # Zero out sinf contents
+                                for i in range(sinf_off + 8, sinf_off + sinf_total):
+                                    if i < len(buf):
+                                        buf[i] = 0
+                            
+                            # Patch the entry type from enc* to original format
+                            logger.info(f"[Amazon Decrypt] Patching {entry_type} -> {original_format} at offset {entry_off}")
+                            buf[entry_off+4:entry_off+8] = original_format[:4]
                         
-                        if not subsample_info:
-                            cipher_bytes = mdat_reader.read(sample_size)
-                            clear_data += cipher.decrypt(cipher_bytes)
-                        else:
-                            for sub in subsample_info:
-                                clear_bytes_count = sub.clear_bytes if hasattr(sub, 'clear_bytes') else 0
-                                cipher_bytes_count = sub.cipher_bytes if hasattr(sub, 'cipher_bytes') else 0
-                                if clear_bytes_count:
-                                    clear_data += mdat_reader.read(clear_bytes_count)
-                                if cipher_bytes_count:
-                                    enc_chunk = mdat_reader.read(cipher_bytes_count)
-                                    clear_data += cipher.decrypt(enc_chunk)
+                        entry_off += entry_total
+            
+            # Apply stsd patches
+            patch_encrypted_stsd(data)
+            
+            # === STEP 2: Decrypt mdat samples in-place ===
+            decrypted_samples = 0
+            
+            for moof_type, moof_hdr, moof_total, moof_off in iter_boxes(data, 0, len(data)):
+                if moof_type != b'moof':
+                    continue
+                
+                moof_body_start = moof_off + moof_hdr
+                moof_body_end = moof_off + moof_total
+                
+                # Find traf inside moof
+                traf_info = find_box(data, moof_body_start, moof_body_end, b'traf')
+                if not traf_info:
+                    continue
+                traf_off, traf_hdr, traf_total = traf_info
+                traf_body_start = traf_off + traf_hdr
+                traf_body_end = traf_off + traf_total
+                
+                # Parse tfhd for default sample size
+                tfhd_info = find_box(data, traf_body_start, traf_body_end, b'tfhd')
+                default_sample_size = 0
+                if tfhd_info:
+                    default_sample_size = parse_tfhd(data, *tfhd_info)
+                
+                # Parse trun
+                trun_info = find_box(data, traf_body_start, traf_body_end, b'trun')
+                if not trun_info:
+                    continue
+                sample_sizes, data_offset = parse_trun(data, *trun_info)
+                
+                # Fill in default sample sizes if trun didn't have them
+                if default_sample_size:
+                    sample_sizes = [s if s else default_sample_size for s in sample_sizes]
+                
+                # Parse senc
+                senc_info = find_box(data, traf_body_start, traf_body_end, b'senc')
+                if not senc_info:
+                    continue
+                senc_samples = parse_senc(data, *senc_info)
+                
+                if len(senc_samples) != len(sample_sizes):
+                    logger.warning(f"[Amazon Decrypt] Sample count mismatch: trun={len(sample_sizes)} senc={len(senc_samples)}")
+                    continue
+                
+                # Find the mdat that follows this moof
+                mdat_off = moof_off + moof_total
+                if mdat_off + 8 > len(data):
+                    continue
+                mdat_type, mdat_hdr, mdat_total = get_box_info(data, mdat_off)
+                if mdat_type != b'mdat':
+                    continue
+                
+                mdat_data_start = mdat_off + mdat_hdr
+                
+                # Decrypt each sample
+                sample_pos = mdat_data_start
+                for i, (sample_size) in enumerate(sample_sizes):
+                    if i >= len(senc_samples):
+                        break
+                    iv, subs = senc_samples[i]
                     
-                    box.data = clear_data
-                    output.write(Box.build(box))
-                    logger.info(f"[Amazon Decrypt] Decrypted mdat: {len(clear_data)} bytes")
+                    if not subs:
+                        # Full-sample encryption
+                        if sample_size > 0 and sample_pos + sample_size <= len(data):
+                            cipher = make_cipher(key, iv)
+                            encrypted_chunk = bytes(data[sample_pos:sample_pos + sample_size])
+                            decrypted_chunk = cipher.decrypt(encrypted_chunk)
+                            data[sample_pos:sample_pos + sample_size] = decrypted_chunk
+                            decrypted_samples += 1
+                    else:
+                        # Subsample encryption
+                        offset_in_sample = 0
+                        cipher = make_cipher(key, iv)
+                        for clear_bytes, enc_bytes in subs:
+                            offset_in_sample += clear_bytes  # skip clear bytes
+                            if enc_bytes > 0:
+                                abs_pos = sample_pos + offset_in_sample
+                                if abs_pos + enc_bytes <= len(data):
+                                    encrypted_chunk = bytes(data[abs_pos:abs_pos + enc_bytes])
+                                    decrypted_chunk = cipher.decrypt(encrypted_chunk)
+                                    data[abs_pos:abs_pos + enc_bytes] = decrypted_chunk
+                                offset_in_sample += enc_bytes
+                        decrypted_samples += 1
                     
-                else:
-                    output.write(Box.build(box))
+                    sample_pos += sample_size
             
-            decrypted_data = output.getvalue()
-            logger.info(f"[Amazon Decrypt] Decrypted total: {len(decrypted_data)} bytes")
-            
-            # === STEP 2: Remux with ffmpeg to fix container ===
-            if not FFMPEG_BIN:
-                logger.warning("[Amazon Decrypt] No ffmpeg, returning raw decrypted data")
-                return decrypted_data
-            
-            tmp_in = None
-            tmp_out = None
-            try:
-                # Write decrypted data to temp file
-                tmp_in = tempfile.NamedTemporaryFile(suffix='.mp4', delete=False)
-                tmp_in.write(decrypted_data)
-                tmp_in.close()
-                
-                tmp_out = tempfile.NamedTemporaryFile(suffix='.m4a', delete=False)
-                tmp_out.close()
-                
-                # Remux: copy audio stream into a clean M4A container
-                cmd = [
-                    FFMPEG_BIN,
-                    '-y',                    # overwrite
-                    '-i', tmp_in.name,       # input: decrypted fragmented MP4
-                    '-c', 'copy',            # no re-encoding, just remux
-                    '-movflags', '+faststart', # moov atom at start for streaming
-                    tmp_out.name             # output: clean M4A
-                ]
-                
-                result = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    timeout=30
-                )
-                
-                if result.returncode != 0:
-                    stderr = result.stderr.decode('utf-8', errors='replace')
-                    logger.error(f"[Amazon FFmpeg] Remux failed (code {result.returncode}): {stderr[-500:]}")
-                    # Return raw decrypted data as fallback
-                    return decrypted_data
-                
-                # Read remuxed output
-                with open(tmp_out.name, 'rb') as f:
-                    remuxed_data = f.read()
-                
-                logger.info(f"[Amazon FFmpeg] Remuxed: {len(decrypted_data)} -> {len(remuxed_data)} bytes")
-                return remuxed_data
-                
-            finally:
-                # Cleanup temp files
-                if tmp_in:
-                    try: os.unlink(tmp_in.name)
-                    except: pass
-                if tmp_out:
-                    try: os.unlink(tmp_out.name)
-                    except: pass
+            logger.info(f"[Amazon Decrypt] Decrypted {decrypted_samples} samples, output {len(data)} bytes")
+            return bytes(data)
             
         except Exception as e:
             logger.error(f"[Amazon Decrypt] Error: {e}", exc_info=True)
             return None
     
-    decrypted = await run_in_threadpool(_decrypt_and_remux)
+    decrypted = await run_in_threadpool(_decrypt_cenc_inplace)
     if not decrypted:
         return RedirectResponse(stream_url)
     
-    content_type = 'audio/mp4'
-    
     return Response(
         content=decrypted,
-        media_type=content_type,
+        media_type='audio/mp4',
         headers={
             'Content-Length': str(len(decrypted)),
             'Accept-Ranges': 'bytes',
