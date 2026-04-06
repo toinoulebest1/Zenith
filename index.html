@@ -570,7 +570,18 @@
 
         const originalLoadProfile = window.loadProfile; window.loadProfile = async function() { if(originalLoadProfile) await originalLoadProfile(); const { data: { user } } = await supabaseClient.auth.getUser(); if(!user) return; if (window.loadUserPlaylists) window.loadUserPlaylists(); if (window.loadUserHistory) await window.loadUserHistory(); const { data, error } = await supabaseClient.from('profiles').select('settings').eq('id', user.id).single(); if (data && data.settings) { userSettings = { ...userSettings, ...data.settings }; applySettings(userSettings); localStorage.setItem('zenith_pref_limiter', userSettings.limiter); localStorage.setItem('zenith_pref_crossfade', userSettings.crossfade); localStorage.setItem('zenith_pref_magic', userSettings.magic); localStorage.setItem('zenith_pref_eco', userSettings.eco); localStorage.setItem('zenith_pref_directAudio', userSettings.directAudio); } };
         function showProfileSettings() { document.getElementById('trackView').style.display = 'none'; document.getElementById('artistView').style.display = 'none'; document.getElementById('lyricsView').style.display = 'none'; document.getElementById('blindTestView').style.display = 'none'; document.getElementById('allPlaylistsView').style.display = 'none'; document.getElementById('playlistView').style.display = 'none'; document.getElementById('searchBarContainer').style.display = 'none'; document.getElementById('profileView').style.display = 'block'; window.loadProfile(); }
-        window.loadUserFavorites = async function() { if(!supabaseClient) return; const { data: { user } } = await supabaseClient.auth.getUser(); if(!user) return; const { data, error } = await supabaseClient.from('favorites').select('*'); if(data) { favorites = data.map(f => ({...f.track_data, fromSearch: false})); updateLikeButtonState(); } window.loadProfile(); };
+        window.loadUserFavorites = async function() { 
+            if(!supabaseClient) return; 
+            const { data: { user } } = await supabaseClient.auth.getUser(); 
+            if(!user) return; 
+            const { data, error } = await supabaseClient.from('favorites').select('*'); 
+            if(data) { 
+                // Stockage de l'ID UUID (clé primaire) pour des mises à jour précises plus tard
+                favorites = data.map(f => ({...f.track_data, db_row_id: f.id, fromSearch: false})); 
+                updateLikeButtonState(); 
+            } 
+            window.loadProfile(); 
+        };
         function safePushState(data, title, url) { try { if (window.history && window.history.pushState) { window.history.pushState(data, title, url); } } catch (e) { console.warn("History pushState blocked", e); } }
         
         // --- SHAKA PLAYER INIT ---
@@ -1019,16 +1030,22 @@
 
             console.log(`Correction de la base de données pour : ${oldId} -> ${newMeta.id}`);
             
-            // On écrase l'ID et TOUTES les métadonnées (Image, Titre corrigé, etc.)
-            const { data, error } = await supabaseClient
-                .from('favorites')
-                .update({ 
-                    track_id: String(newMeta.id), 
-                    track_data: { ...newMeta, fromSearch: false } 
-                })
-                .eq('user_id', user.id)
-                .eq('track_id', String(oldId))
-                .select();
+            // On privilégie la mise à jour par l'UUID 'db_row_id' s'il est présent
+            const targetId = newMeta.db_row_id;
+            let query = supabaseClient.from('favorites').update({ 
+                track_id: String(newMeta.id), 
+                track_data: { ...newMeta, fromSearch: false } 
+            }).eq('user_id', user.id);
+
+            if (targetId) {
+                query = query.eq('id', targetId);
+                console.log(`Ciblage par UUID : ${targetId}`);
+            } else {
+                query = query.eq('track_id', String(oldId));
+                console.log(`Ciblage par track_id : ${oldId}`);
+            }
+
+            const { data, error } = await query.select();
                 
             if (data && data.length > 0) {
                 console.log(`✅ Base de données à jour : ${newMeta.title} (${newMeta.source}) - ${data.length} favori(s) modifié(s)`);
@@ -1036,7 +1053,7 @@
                 // 2. Mise à jour de la variable locale pour le reste de la session
                 const localIdx = favorites.findIndex(f => String(f.id) === String(oldId));
                 if (localIdx !== -1) {
-                    favorites[localIdx] = { ...newMeta, fromSearch: false };
+                    favorites[localIdx] = { ...newMeta, db_row_id: data[0].id, fromSearch: false };
                 }
 
                 // 3. Si l'utilisateur est sur la page des favoris, on rafraîchit l'affichage
@@ -1045,7 +1062,7 @@
                 }
             } else {
                 if (error) console.error("Erreur mise à jour favori:", error);
-                else console.warn(`⚠️ Supabase : Aucun favori trouvé avec l'ID ${oldId} pour cet utilisateur.`);
+                else console.warn(`⚠️ Supabase : Aucun favori trouvé avec l'identifiant ${targetId || oldId} pour cet utilisateur.`);
             }
         }
 
@@ -1563,13 +1580,26 @@
                     btn.innerHTML = '<i class="fas fa-heart"></i>'; 
                     btn.style.color = 'var(--secondary)'; 
                     showToast('Liké ❤️'); 
-                    try { await supabaseClient.from('favorites').insert({ user_id: user.id, track_id: String(t.id), track_data: t }); } catch(e) { console.error(e); } 
+                    try { 
+                        const { data: inserted, error } = await supabaseClient.from('favorites').insert({ user_id: user.id, track_id: String(t.id), track_data: t }).select(); 
+                        if (inserted && inserted[0]) {
+                            // On stocke le UUID retourné pour pouvoir mettre à jour précisément via fallback plus tard
+                            t.db_row_id = inserted[0].id;
+                        }
+                        if (error) throw error;
+                    } catch(e) { console.error(e); } 
                 } else { 
+                    const toDelete = favorites[idx];
                     favorites.splice(idx, 1); 
                     btn.innerHTML = '<i class="far fa-heart"></i>'; 
                     btn.style.color = 'var(--text-dim)'; 
                     showToast('Disliké 💔'); 
-                    try { await supabaseClient.from('favorites').delete().match({ user_id: user.id, track_id: String(t.id) }); } catch(e) { console.error(e); } 
+                    try { 
+                        let q = supabaseClient.from('favorites').delete().eq('user_id', user.id);
+                        if (toDelete.db_row_id) q = q.eq('id', toDelete.db_row_id);
+                        else q = q.eq('track_id', String(t.id));
+                        await q;
+                    } catch(e) { console.error(e); } 
                 } 
             } finally { 
                 btn.disabled = false; 
