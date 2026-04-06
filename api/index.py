@@ -41,13 +41,9 @@ from deep_translator import GoogleTranslator
 from io import BytesIO
 from struct import pack, unpack
 
-# AES for CENC decryption (Amazon Music)
-try:
-    from Crypto.Cipher import AES
-    CRYPTO_AVAILABLE = True
-except ImportError:
-    CRYPTO_AVAILABLE = False
-    logger.warning("pycryptodome not installed - Amazon Music decryption unavailable")
+# AES + pymp4 for CENC decryption (Amazon Music) - imported after logger init below
+CRYPTO_AVAILABLE = False
+PYMP4_AVAILABLE = False
 
 # --- PATCH GLOBAL CONNEXIONS ---
 requests.adapters.DEFAULT_POOLSIZE = 100
@@ -90,6 +86,24 @@ app.add_middleware(
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ZenithAPI")
+
+# Deferred import of Crypto + pymp4 (needs logger)
+try:
+    from Crypto.Cipher import AES
+    CRYPTO_AVAILABLE = True
+except ImportError:
+    logger.warning("pycryptodome not installed - Amazon Music decryption unavailable")
+
+try:
+    from pymp4.parser import Box
+    from pymp4 import BoxUtil
+    PYMP4_AVAILABLE = True
+except ImportError:
+    try:
+        from pymp4.parser import Box
+        PYMP4_AVAILABLE = True
+    except ImportError:
+        logger.warning("pymp4 not installed - Amazon Music decryption unavailable")
 
 lyrics_engine = LyricsSearcher()
 yt = YTMusic()
@@ -938,7 +952,7 @@ def sync_resolve_track(title, artist):
                         if fuzz.ratio(target_title, rec_title) > 60: match_title = True
                     elif target_title in rec_title or rec_title in target_title: match_title = True
                     
-                    if match_title: 
+                    if match_title:
                         rec['source'] = 'qobuz'
                         # S'assurer que l'image est bien formatée
                         if rec.get('album', {}).get('image', {}).get('large'):
@@ -1317,7 +1331,7 @@ async def get_album(id: str, source: str = None):
                     final_tracks.append({
                         'id': str(t.get('id')),
                         'title': t.get('title'),
-                        'duration': t.get('duration'),
+                        'duration': t.get('duration', 0),
                         'track_number': t.get('track_position'),
                         'performer': {'name': t.get('artist', {}).get('name', data.get('artist', {}).get('name'))},
                         'album': {'title': data.get('title'), 'image': {'large': data.get('cover_xl') or data.get('cover_big')}},
@@ -1366,7 +1380,7 @@ async def stream_track(track_id: str):
 
 @app.get('/amazon_stream/{asin}')
 async def get_amazon_stream_route(asin: str):
-    """Endpoint pour décrypter et streamer Amazon Music (CENC AES-CTR)."""
+    """Endpoint pour décrypter et streamer Amazon Music (CENC AES-CTR) via pymp4."""
     stream_data = await run_in_threadpool(get_amazon_stream_url, asin)
     if not stream_data or not stream_data.get('url'):
         raise HTTPException(404, "Amazon Music stream not found")
@@ -1376,67 +1390,148 @@ async def get_amazon_stream_route(asin: str):
     stream_url = stream_data['url']
     
     # If no decryption key, just redirect to the raw URL
-    if not decryption_key_hex or not kid_hex or not CRYPTO_AVAILABLE:
+    if not decryption_key_hex or not CRYPTO_AVAILABLE:
         return RedirectResponse(stream_url)
     
     def _decrypt_stream():
-        """Download and decrypt CENC-encrypted MP4 using AES-CTR."""
+        """Download and decrypt CENC-encrypted fragmented MP4 using pymp4 + AES-CTR."""
         try:
+            from Crypto.Util import Counter
+            from collections import deque
+            
             # Download the encrypted file
-            resp = requests.get(stream_url, timeout=30)
+            resp = requests.get(stream_url, timeout=60)
             if resp.status_code != 200:
+                logger.error(f"[Amazon Decrypt] Download failed: {resp.status_code}")
                 return None
             
-            encrypted_data = bytearray(resp.content)
             key = bytes.fromhex(decryption_key_hex)
+            input_data = resp.content
+            logger.info(f"[Amazon Decrypt] Downloaded {len(input_data)} bytes, key={decryption_key_hex[:8]}...")
             
-            # Parse MP4 boxes to find and decrypt 'mdat' samples
-            # CENC uses AES-CTR with IV derived from the sample info
-            # For simple CENC single-key, we decrypt the mdat box content
+            if not PYMP4_AVAILABLE:
+                logger.error("[Amazon Decrypt] pymp4 not available, cannot decrypt")
+                return None
             
-            pos = 0
-            data_len = len(encrypted_data)
+            # Use pymp4 to parse and decrypt the fragmented MP4
+            output = BytesIO()
+            reader = BytesIO(input_data)
             
-            while pos < data_len:
-                if pos + 8 > data_len:
+            senc_queue = deque()
+            trun_queue = deque()
+            
+            def find_boxes(box, box_type):
+                """Recursively find boxes of a given type."""
+                found = []
+                if hasattr(box, 'type') and box.type == box_type:
+                    found.append(box)
+                # Check children
+                if hasattr(box, 'children'):
+                    for child in box.children:
+                        found.extend(find_boxes(child, box_type))
+                # Some box structures use different attribute names
+                for attr_name in ['boxes', 'entries']:
+                    if hasattr(box, attr_name):
+                        items = getattr(box, attr_name)
+                        if isinstance(items, list):
+                            for item in items:
+                                if hasattr(item, 'type'):
+                                    found.extend(find_boxes(item, box_type))
+                return found
+            
+            def fix_enc_stsd(box):
+                """Restore original format from frma boxes (enc* -> original codec)."""
+                frma_boxes = find_boxes(box, b'frma')
+                if frma_boxes:
+                    original_format = frma_boxes[0].original_format
+                    stsd_boxes = find_boxes(box, b'stsd')
+                    for stsd in stsd_boxes:
+                        if hasattr(stsd, 'entries'):
+                            for entry in stsd.entries:
+                                if hasattr(entry, 'format') and b'enc' in entry.format:
+                                    entry.format = original_format
+            
+            # Parse all boxes
+            while reader.tell() < len(input_data):
+                try:
+                    box = Box.parse_stream(reader)
+                except Exception as e:
+                    logger.warning(f"[Amazon Decrypt] Box parse error at {reader.tell()}: {e}")
                     break
+                
+                # Fix encrypted stsd headers
+                fix_enc_stsd(box)
+                
+                if box.type == b'moof':
+                    # Collect senc and trun from this fragment
+                    senc_list = find_boxes(box, b'senc')
+                    trun_list = find_boxes(box, b'trun')
+                    senc_queue.extend(senc_list)
+                    trun_queue.extend(trun_list)
+                    output.write(Box.build(box))
                     
-                box_size = unpack('>I', encrypted_data[pos:pos+4])[0]
-                box_type = encrypted_data[pos+4:pos+8]
-                
-                if box_size == 0:
-                    break
-                if box_size == 1:
-                    if pos + 16 > data_len:
-                        break
-                    box_size = unpack('>Q', encrypted_data[pos+8:pos+16])[0]
-                
-                if box_size < 8 or pos + box_size > data_len:
-                    break
-                
-                # Decrypt the mdat (media data) box content
-                if box_type == b'mdat':
-                    header_size = 8 if unpack('>I', encrypted_data[pos:pos+4])[0] != 1 else 16
-                    mdat_start = pos + header_size
-                    mdat_end = pos + box_size
-                    mdat_content = bytes(encrypted_data[mdat_start:mdat_end])
+                elif box.type == b'mdat':
+                    if not senc_queue or not trun_queue:
+                        # No encryption info — write as-is
+                        output.write(Box.build(box))
+                        continue
                     
-                    # CENC AES-CTR: IV is typically the KID (first 8 bytes) + 8 zero bytes
-                    iv = bytes.fromhex(kid_hex)[:8] + b'\x00' * 8
+                    senc = senc_queue.popleft()
+                    trun = trun_queue.popleft()
                     
-                    cipher = AES.new(key, AES.MODE_CTR, 
-                                     nonce=b'', 
-                                     initial_value=iv)
-                    decrypted_mdat = cipher.decrypt(mdat_content)
-                    encrypted_data[mdat_start:mdat_end] = decrypted_mdat
-                    break
-                
-                pos += box_size
+                    # Decrypt sample by sample
+                    clear_data = b''
+                    mdat_reader = BytesIO(box.data)
+                    
+                    sample_enc_info = senc.sample_encryption_info if hasattr(senc, 'sample_encryption_info') else []
+                    sample_info_list = trun.sample_info if hasattr(trun, 'sample_info') else []
+                    
+                    for sample_enc, sample_info in zip(sample_enc_info, sample_info_list):
+                        # Get per-sample IV
+                        iv = sample_enc.iv if hasattr(sample_enc, 'iv') else b'\x00' * 8
+                        
+                        # Build AES-CTR cipher with correct IV
+                        # CENC: 8-byte IV as prefix, 64-bit counter starting at 0
+                        ctr = Counter.new(64, prefix=iv, initial_value=0)
+                        cipher = AES.new(key, AES.MODE_CTR, counter=ctr)
+                        
+                        sample_size = sample_info.sample_size if hasattr(sample_info, 'sample_size') else 0
+                        
+                        subsample_info = []
+                        if hasattr(sample_enc, 'subsample_encryption_info'):
+                            subsample_info = sample_enc.subsample_encryption_info or []
+                        
+                        if not subsample_info:
+                            # Entire sample is encrypted
+                            cipher_bytes = mdat_reader.read(sample_size)
+                            clear_data += cipher.decrypt(cipher_bytes)
+                        else:
+                            # Subsample encryption: clear/cipher pairs
+                            for sub in subsample_info:
+                                clear_bytes_count = sub.clear_bytes if hasattr(sub, 'clear_bytes') else 0
+                                cipher_bytes_count = sub.cipher_bytes if hasattr(sub, 'cipher_bytes') else 0
+                                
+                                if clear_bytes_count:
+                                    clear_data += mdat_reader.read(clear_bytes_count)
+                                if cipher_bytes_count:
+                                    enc_chunk = mdat_reader.read(cipher_bytes_count)
+                                    clear_data += cipher.decrypt(enc_chunk)
+                    
+                    # Replace mdat data with decrypted content
+                    box.data = clear_data
+                    output.write(Box.build(box))
+                    logger.info(f"[Amazon Decrypt] Decrypted mdat: {len(clear_data)} bytes")
+                    
+                else:
+                    # Write other boxes as-is
+                    output.write(Box.build(box))
             
-            return bytes(encrypted_data)
+            result = output.getvalue()
+            logger.info(f"[Amazon Decrypt] Output: {len(result)} bytes")
+            return result
             
         except Exception as e:
-            logger.error(f"[Amazon Decrypt] Error: {e}")
+            logger.error(f"[Amazon Decrypt] Error: {e}", exc_info=True)
             return None
     
     decrypted = await run_in_threadpool(_decrypt_stream)
@@ -1447,8 +1542,6 @@ async def get_amazon_stream_route(asin: str):
     # Determine content type
     codec = stream_data.get('codec', 'flac')
     content_type = 'audio/mp4'
-    if codec == 'flac':
-        content_type = 'audio/mp4'  # FLAC in MP4 container
     
     return Response(
         content=decrypted,
