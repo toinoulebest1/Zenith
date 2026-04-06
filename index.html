@@ -922,51 +922,11 @@
                 }
             }
 
-            // Gestion Source AMAZON MUSIC (ClearKey encrypted stream via Shaka Player)
+            // Gestion Source AMAZON MUSIC (server-side decryption, simple audio playback)
             if (nextTrack.source === 'amazon_music') {
-                try {
-                    await nextShaka.unload();
-                    
-                    // 1. Fetch stream info (URL + decryption key)
-                    const infoRes = await fetch(`${API_BASE}/amazon_stream_info/${nextTrack.id}`);
-                    
-                    if (thisLoadId !== currentLoadId) return;
-                    
-                    if (!infoRes.ok) throw new Error("Stream info not found");
-                    const streamData = await infoRes.json();
-                    
-                    if (!streamData.url) throw new Error("No stream URL");
-                    
-                    // Helper: Convert hex string to base64url (required by Shaka ClearKey)
-                    function hexToBase64Url(hex) {
-                        const bytes = new Uint8Array(hex.match(/.{1,2}/g).map(b => parseInt(b, 16)));
-                        let binary = '';
-                        for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-                        return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
-                    }
-                    
-                    // 2. Configure ClearKey DRM if decryption key is available
-                    if (streamData.decryptionKey && streamData.kid) {
-                        const kidB64 = hexToBase64Url(streamData.kid);
-                        const keyB64 = hexToBase64Url(streamData.decryptionKey);
-                        nextShaka.configure({
-                            drm: {
-                                clearKeys: {
-                                    [kidB64]: keyB64
-                                }
-                            }
-                        });
-                        console.log("🔑 ClearKey configured for Amazon Music (KID:", streamData.kid.substring(0, 8) + "...) [base64url]");
-                    }
-                    
-                    // 3. Load the encrypted stream via Shaka Player
-                    await nextShaka.load(streamData.url);
-                    console.log("✅ Loaded Amazon Music encrypted stream for:", nextTrack.title, "(" + (streamData.codec || "flac") + ", " + (streamData.sampleRate || 44100) + "Hz)");
-                } catch (e) {
-                    console.error("Amazon Music Load Error", e);
-                    showToast("Erreur lecture Amazon Music");
-                    return;
-                }
+                await nextShaka.unload();
+                nextAudio.src = `${API_BASE}/amazon_stream/${nextTrack.id}`;
+                console.log("✅ Loading Amazon Music (server-side decrypt) for:", nextTrack.title);
             }
             // Gestion Source TIDAL (DISABLED)
             else if (nextTrack.source === 'tidal_hund') {

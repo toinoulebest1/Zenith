@@ -7,3 +7,4 @@ rapidfuzz
 httpx
 python-dotenv
 pydantic
+pycryptodome

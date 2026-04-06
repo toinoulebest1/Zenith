@@ -38,6 +38,16 @@ import string
 import unicodedata 
 from ytmusicapi import YTMusic
 from deep_translator import GoogleTranslator
+from io import BytesIO
+from struct import pack, unpack
+
+# AES for CENC decryption (Amazon Music)
+try:
+    from Crypto.Cipher import AES
+    CRYPTO_AVAILABLE = True
+except ImportError:
+    CRYPTO_AVAILABLE = False
+    logger.warning("pycryptodome not installed - Amazon Music decryption unavailable")
 
 # --- PATCH GLOBAL CONNEXIONS ---
 requests.adapters.DEFAULT_POOLSIZE = 100
@@ -1356,11 +1366,99 @@ async def stream_track(track_id: str):
 
 @app.get('/amazon_stream/{asin}')
 async def get_amazon_stream_route(asin: str):
-    """Endpoint pour récupérer l'URL de stream Amazon Music."""
+    """Endpoint pour décrypter et streamer Amazon Music (CENC AES-CTR)."""
     stream_data = await run_in_threadpool(get_amazon_stream_url, asin)
-    if stream_data and stream_data.get('url'):
-        return RedirectResponse(stream_data['url'])
-    raise HTTPException(404, "Amazon Music stream not found")
+    if not stream_data or not stream_data.get('url'):
+        raise HTTPException(404, "Amazon Music stream not found")
+    
+    decryption_key_hex = stream_data.get('decryptionKey')
+    kid_hex = stream_data.get('kid')
+    stream_url = stream_data['url']
+    
+    # If no decryption key, just redirect to the raw URL
+    if not decryption_key_hex or not kid_hex or not CRYPTO_AVAILABLE:
+        return RedirectResponse(stream_url)
+    
+    def _decrypt_stream():
+        """Download and decrypt CENC-encrypted MP4 using AES-CTR."""
+        try:
+            # Download the encrypted file
+            resp = requests.get(stream_url, timeout=30)
+            if resp.status_code != 200:
+                return None
+            
+            encrypted_data = bytearray(resp.content)
+            key = bytes.fromhex(decryption_key_hex)
+            
+            # Parse MP4 boxes to find and decrypt 'mdat' samples
+            # CENC uses AES-CTR with IV derived from the sample info
+            # For simple CENC single-key, we decrypt the mdat box content
+            
+            pos = 0
+            data_len = len(encrypted_data)
+            
+            while pos < data_len:
+                if pos + 8 > data_len:
+                    break
+                    
+                box_size = unpack('>I', encrypted_data[pos:pos+4])[0]
+                box_type = encrypted_data[pos+4:pos+8]
+                
+                if box_size == 0:
+                    break
+                if box_size == 1:
+                    if pos + 16 > data_len:
+                        break
+                    box_size = unpack('>Q', encrypted_data[pos+8:pos+16])[0]
+                
+                if box_size < 8 or pos + box_size > data_len:
+                    break
+                
+                # Decrypt the mdat (media data) box content
+                if box_type == b'mdat':
+                    header_size = 8 if unpack('>I', encrypted_data[pos:pos+4])[0] != 1 else 16
+                    mdat_start = pos + header_size
+                    mdat_end = pos + box_size
+                    mdat_content = bytes(encrypted_data[mdat_start:mdat_end])
+                    
+                    # CENC AES-CTR: IV is typically the KID (first 8 bytes) + 8 zero bytes
+                    iv = bytes.fromhex(kid_hex)[:8] + b'\x00' * 8
+                    
+                    cipher = AES.new(key, AES.MODE_CTR, 
+                                     nonce=b'', 
+                                     initial_value=iv)
+                    decrypted_mdat = cipher.decrypt(mdat_content)
+                    encrypted_data[mdat_start:mdat_end] = decrypted_mdat
+                    break
+                
+                pos += box_size
+            
+            return bytes(encrypted_data)
+            
+        except Exception as e:
+            logger.error(f"[Amazon Decrypt] Error: {e}")
+            return None
+    
+    decrypted = await run_in_threadpool(_decrypt_stream)
+    if not decrypted:
+        # Fallback: redirect to raw URL
+        return RedirectResponse(stream_url)
+    
+    # Determine content type
+    codec = stream_data.get('codec', 'flac')
+    content_type = 'audio/mp4'
+    if codec == 'flac':
+        content_type = 'audio/mp4'  # FLAC in MP4 container
+    
+    return Response(
+        content=decrypted,
+        media_type=content_type,
+        headers={
+            'Content-Length': str(len(decrypted)),
+            'Accept-Ranges': 'bytes',
+            'Cache-Control': 'public, max-age=3600'
+        }
+    )
 
 @app.get('/amazon_stream_info/{asin}')
 async def get_amazon_stream_info_route(asin: str):
