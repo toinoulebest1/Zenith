@@ -1020,49 +1020,73 @@
             if(document.getElementById('queuePanel').classList.contains('active')) renderQueueList();
         }
         
-        // --- MISE A JOUR DES FAVORIS (CORRECTION PERMANENTE SUR SUPABASE) ---
+        // --- MISE A JOUR DES FAVORIS (CORRECTION PERMANENTE - DEEP SEARCH) ---
         async function updateFavoriteIfNeeded(oldId, newMeta) {
             if (!supabaseClient) return;
             
-            // 1. Mise à jour de Supabase en premier (C'est la priorité du USER)
             const { data: { user } } = await supabaseClient.auth.getUser();
             if (!user) return;
 
-            console.log(`Correction de la base de données pour : ${oldId} -> ${newMeta.id}`);
+            console.log(`Deep Search : Tentative de réparation pour ${oldId}...`);
             
-            // On privilégie la mise à jour par l'UUID 'db_row_id' s'il est présent
-            const targetId = newMeta.db_row_id;
-            let query = supabaseClient.from('favorites').update({ 
-                track_id: String(newMeta.id), 
-                track_data: { ...newMeta, fromSearch: false } 
-            }).eq('user_id', user.id);
+            // 1. Recherche de tous les UUIDs (db_row_id) correspondants dans nos favoris locaux
+            const currentSig = getTrackSignature(newMeta);
+            const matches = favorites.filter(f => 
+                String(f.id) === String(oldId) || 
+                getTrackSignature(f) === currentSig
+            );
 
-            if (targetId) {
-                query = query.eq('id', targetId);
-                console.log(`Ciblage par UUID : ${targetId}`);
+            let rowIdsToUpdate = matches.map(m => m.db_row_id).filter(id => id);
+
+            // 2. Si rien en local, on fait une recherche directe sur Supabase (Cas: lecture depuis Recherche/Dashboard)
+            if (rowIdsToUpdate.length === 0) {
+                console.log("Deep Search : Recherche sur Supabase (non présent en local)...");
+                const { data: found } = await supabaseClient
+                    .from('favorites')
+                    .select('id')
+                    .eq('user_id', user.id)
+                    .or(`track_id.eq.${oldId},track_data->>id.eq.${oldId}`);
+                
+                if (found && found.length > 0) {
+                    rowIdsToUpdate = found.map(f => f.id);
+                    console.log(`Deep Search : ${rowIdsToUpdate.length} ligne(s) trouvée(s) sur Supabase.`);
+                }
             } else {
-                query = query.eq('track_id', String(oldId));
-                console.log(`Ciblage par track_id : ${oldId}`);
+                console.log(`Deep Search : ${rowIdsToUpdate.length} ligne(s) identifiée(s) via favoris locaux.`);
             }
 
-            const { data, error } = await query.select();
-                
-            if (data && data.length > 0) {
-                console.log(`✅ Base de données à jour : ${newMeta.title} (${newMeta.source}) - ${data.length} favori(s) modifié(s)`);
-                
-                // 2. Mise à jour de la variable locale pour le reste de la session
-                const localIdx = favorites.findIndex(f => String(f.id) === String(oldId));
-                if (localIdx !== -1) {
-                    favorites[localIdx] = { ...newMeta, db_row_id: data[0].id, fromSearch: false };
+            // 3. Mise à jour de CHAQUE ligne trouvée
+            if (rowIdsToUpdate.length > 0) {
+                for (const urlUuid of rowIdsToUpdate) {
+                    const { data, error } = await supabaseClient
+                        .from('favorites')
+                        .update({ 
+                            track_id: String(newMeta.id), 
+                            track_data: { ...newMeta, db_row_id: urlUuid, fromSearch: false } 
+                        })
+                        .eq('id', urlUuid)
+                        .select();
+
+                    if (data && data.length > 0) {
+                        console.log(`✅ Supabase : Ligne ${urlUuid} mise à jour (${newMeta.title})`);
+                    } else if (error) {
+                        console.error(`❌ Erreur mise à jour ligne ${urlUuid}:`, error);
+                    }
                 }
 
-                // 3. Si l'utilisateur est sur la page des favoris, on rafraîchit l'affichage
+                // 4. Mise à jour de la variable locale
+                favorites.forEach((f, idx) => {
+                    if (String(f.id) === String(oldId) || getTrackSignature(f) === currentSig) {
+                        favorites[idx] = { ...newMeta, db_row_id: favorites[idx].db_row_id, fromSearch: false };
+                    }
+                });
+
+                // 5. Rafraîchissement UI si nécessaire
                 if (document.getElementById('viewTitle').innerText === "Mes Favoris ❤️") {
                     showFavorites();
                 }
             } else {
-                if (error) console.error("Erreur mise à jour favori:", error);
-                else console.warn(`⚠️ Supabase : Aucun favori trouvé avec l'identifiant ${targetId || oldId} pour cet utilisateur.`);
+                console.warn(`⚠️ Deep Search : Aucun favori n'a été trouvé pour ${oldId} (${newMeta.title}).`);
             }
         }
 
