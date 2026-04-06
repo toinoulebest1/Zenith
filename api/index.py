@@ -6,6 +6,7 @@ import time
 import json
 import base64 # Nécessaire pour décoder le manifeste Tidal 16-bit
 import difflib # Nécessaire pour le matching Chosic
+import subprocess # Nécessaire pour le transcodage FLAC
 
 # Configuration des chemins pour imports locaux
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -1711,11 +1712,33 @@ async def get_amazon_stream_route(asin: str):
     if not decrypted:
         return RedirectResponse(stream_url)
     
+    # --- TRANSCODAGE EN FLAC NATIF VIA FFMPEG ---
+    final_content = decrypted
+    media_type = 'audio/mp4' # Par défaut (MP4 Lossless)
+    
+    try:
+        # On remux / convertit le MP4 décrypté en flux FLAC pur
+        process = subprocess.Popen(
+            ['ffmpeg', '-i', 'pipe:0', '-f', 'flac', 'pipe:1'],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        out, err = process.communicate(input=decrypted)
+        if process.returncode == 0 and out:
+            final_content = out
+            media_type = 'audio/flac'
+            logger.info(f"[Amazon FLAC] Transcodage réussi : {len(decrypted)} -> {len(out)} bytes")
+        else:
+            logger.error(f"[Amazon FLAC] FFmpeg error: {err.decode()}")
+    except Exception as e:
+        logger.error(f"[Amazon FLAC] Transcoding exception: {e}")
+
     return Response(
-        content=decrypted,
-        media_type='audio/mp4',
+        content=final_content,
+        media_type=media_type,
         headers={
-            'Content-Length': str(len(decrypted)),
+            'Content-Length': str(len(final_content)),
             'Accept-Ranges': 'bytes',
             'Cache-Control': 'public, max-age=3600',
             'Access-Control-Allow-Origin': '*'
