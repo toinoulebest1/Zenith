@@ -960,7 +960,7 @@
                     }
                 } catch (e) {
                     console.error("Tidal Load Error", e);
-                    showToast("Erreur lecture Tidal");
+                    handlePlaybackError(index);
                     return;
                 }
             } else {
