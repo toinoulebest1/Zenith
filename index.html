@@ -1009,33 +1009,42 @@
             if(document.getElementById('queuePanel').classList.contains('active')) renderQueueList();
         }
         
-        // --- MISE A JOUR DES FAVORIS (CORRECTION PERMANENTE) ---
+        // --- MISE A JOUR DES FAVORIS (CORRECTION PERMANENTE SUR SUPABASE) ---
         async function updateFavoriteIfNeeded(oldId, newMeta) {
             if (!supabaseClient) return;
             
-            // 1. Mise à jour variable locale
-            const localIdx = favorites.findIndex(f => String(f.id) === String(oldId));
-            if (localIdx !== -1) {
-                favorites[localIdx] = { ...newMeta, fromSearch: false };
-                console.log("UI Favoris mise à jour localement");
-            }
-
-            // 2. Mise à jour Supabase
+            // 1. Mise à jour de Supabase en premier (C'est la priorité du USER)
             const { data: { user } } = await supabaseClient.auth.getUser();
             if (!user) return;
 
+            console.log(`Correction de la base de données pour : ${oldId} -> ${newMeta.id}`);
+            
+            // On écrase l'ID et TOUTES les métadonnées (Image, Titre corrigé, etc.)
             const { data, error } = await supabaseClient
                 .from('favorites')
                 .update({ 
                     track_id: String(newMeta.id), 
-                    track_data: newMeta           
+                    track_data: { ...newMeta, fromSearch: false } 
                 })
                 .eq('user_id', user.id)
                 .eq('track_id', String(oldId))
                 .select();
                 
             if (data && data.length > 0) {
-                console.log(`✅ Favori mis à jour en base : ${oldId} -> ${newMeta.id}`);
+                console.log(`✅ Base de données à jour : ${newMeta.title} (${newMeta.source})`);
+                
+                // 2. Mise à jour de la variable locale pour le reste de la session
+                const localIdx = favorites.findIndex(f => String(f.id) === String(oldId));
+                if (localIdx !== -1) {
+                    favorites[localIdx] = { ...newMeta, fromSearch: false };
+                }
+
+                // 3. Si l'utilisateur est sur la page des favoris, on rafraîchit l'affichage
+                if (document.getElementById('viewTitle').innerText === "Mes Favoris ❤️") {
+                    showFavorites();
+                }
+            } else if (error) {
+                console.error("Erreur mise à jour favori:", error);
             }
         }
 
