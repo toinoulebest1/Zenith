@@ -897,32 +897,32 @@
             updateActiveCard();
             updateLikeButtonState();
 
-            // --- NOUVELLE LOGIQUE DE RÉSOLUTION UNIFIÉE ---
-            // On résout systématiquement TOUT ce qui n'est pas déjà Qobuz, Tidal Direct ou Amazon Music
-            if (nextTrack.source !== 'qobuz' && nextTrack.source !== 'tidal_hund' && nextTrack.source !== 'amazon_music') {
-                // TOAST SUPPRIMÉ
+            // --- NOUVELLE LOGIQUE DE RÉSOLUTION UNIFIÉE (Réparation Proactive) ---
+            // On capture l'ID original pour la correction Supabase éventuelle
+            const oldId = nextTrack.id;
+
+            // On résout ce qui est marqué comme "lazy" ou ce qui vient de sources instables (Tidal)
+            // On exclut maintenant QUE Qobuz et Amazon Music qui sont fiables.
+            if (nextTrack.source !== 'qobuz' && nextTrack.source !== 'amazon_music') {
                 try {
                     const artist = nextTrack.performer ? nextTrack.performer.name : (nextTrack.artist ? nextTrack.artist.name : 'Inconnu');
                     const res = await fetch(`${API_BASE}/resolve_metadata?title=${encodeURIComponent(nextTrack.title)}&artist=${encodeURIComponent(artist)}`);
                     
-                    // CHECK CONCURRENCY
                     if (thisLoadId !== currentLoadId) return;
 
                     if(res.ok) {
                         const newMeta = await res.json();
-                        console.log("✅ Résolution réussie:", newMeta.source);
+                        console.log(`✅ Rémanence : Résolution réussie (${newMeta.source}) pour :`, nextTrack.title);
                         
-                        // Mise à jour des infos critiques pour la lecture
+                        // Mise à jour de l'objet local
                         nextTrack.id = newMeta.id;
-                        nextTrack.source = newMeta.source; // Deviendra 'amazon_music' ou 'qobuz'
-                        
-                        // Mise à jour métadonnées secondaires si dispos
+                        nextTrack.source = newMeta.source;
                         if(newMeta.duration && (!nextTrack.duration || nextTrack.duration === 0)) nextTrack.duration = newMeta.duration;
                         
-                        // SAUVEGARDE EN BASE POUR CORRIGER LES FAVORIS
+                        // CORRECTION SUPABASE : Si c'est un favori, on le répare en base avant même l'erreur
                         updateFavoriteIfNeeded(oldId, newMeta);
                     } else {
-                        console.warn("❌ Echec résolution métadonnées");
+                        console.warn("❌ Echec résolution métadonnées, tentative de lecture directe...");
                     }
                 } catch(e) { 
                     console.error("Resolve error", e); 
@@ -1031,7 +1031,7 @@
                 .select();
                 
             if (data && data.length > 0) {
-                console.log(`✅ Base de données à jour : ${newMeta.title} (${newMeta.source})`);
+                console.log(`✅ Base de données à jour : ${newMeta.title} (${newMeta.source}) - ${data.length} favori(s) modifié(s)`);
                 
                 // 2. Mise à jour de la variable locale pour le reste de la session
                 const localIdx = favorites.findIndex(f => String(f.id) === String(oldId));
@@ -1043,8 +1043,9 @@
                 if (document.getElementById('viewTitle').innerText === "Mes Favoris ❤️") {
                     showFavorites();
                 }
-            } else if (error) {
-                console.error("Erreur mise à jour favori:", error);
+            } else {
+                if (error) console.error("Erreur mise à jour favori:", error);
+                else console.warn(`⚠️ Supabase : Aucun favori trouvé avec l'ID ${oldId} pour cet utilisateur.`);
             }
         }
 
