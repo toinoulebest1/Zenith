@@ -40,6 +40,9 @@ from ytmusicapi import YTMusic
 from deep_translator import GoogleTranslator
 from io import BytesIO
 from struct import pack, unpack
+import subprocess
+import tempfile
+import shutil
 
 # AES + pymp4 for CENC decryption (Amazon Music) - imported after logger init below
 CRYPTO_AVAILABLE = False
@@ -104,6 +107,23 @@ except ImportError:
         PYMP4_AVAILABLE = True
     except ImportError:
         logger.warning("pymp4 not installed - Amazon Music decryption unavailable")
+
+# Resolve ffmpeg binary path (static-ffmpeg or system ffmpeg)
+FFMPEG_BIN = None
+try:
+    import static_ffmpeg
+    static_ffmpeg.add_paths()
+    FFMPEG_BIN = shutil.which("ffmpeg")
+    if FFMPEG_BIN:
+        logger.info(f"[FFmpeg] Found static-ffmpeg at: {FFMPEG_BIN}")
+except ImportError:
+    pass
+if not FFMPEG_BIN:
+    FFMPEG_BIN = shutil.which("ffmpeg")
+    if FFMPEG_BIN:
+        logger.info(f"[FFmpeg] Found system ffmpeg at: {FFMPEG_BIN}")
+    else:
+        logger.warning("[FFmpeg] No ffmpeg binary found - Amazon Music remux unavailable")
 
 lyrics_engine = LyricsSearcher()
 yt = YTMusic()
@@ -1380,7 +1400,7 @@ async def stream_track(track_id: str):
 
 @app.get('/amazon_stream/{asin}')
 async def get_amazon_stream_route(asin: str):
-    """Endpoint pour décrypter et streamer Amazon Music (CENC AES-CTR) via pymp4."""
+    """Endpoint pour décrypter et streamer Amazon Music (CENC AES-CTR) via pymp4 + ffmpeg remux."""
     stream_data = await run_in_threadpool(get_amazon_stream_url, asin)
     if not stream_data or not stream_data.get('url'):
         raise HTTPException(404, "Amazon Music stream not found")
@@ -1393,8 +1413,8 @@ async def get_amazon_stream_route(asin: str):
     if not decryption_key_hex or not CRYPTO_AVAILABLE:
         return RedirectResponse(stream_url)
     
-    def _decrypt_stream():
-        """Download and decrypt CENC-encrypted fragmented MP4 using pymp4 + AES-CTR."""
+    def _decrypt_and_remux():
+        """Download, decrypt CENC with pymp4, then remux with ffmpeg for browser compatibility."""
         try:
             from Crypto.Util import Counter
             from collections import deque
@@ -1413,7 +1433,7 @@ async def get_amazon_stream_route(asin: str):
                 logger.error("[Amazon Decrypt] pymp4 not available, cannot decrypt")
                 return None
             
-            # Use pymp4 to parse and decrypt the fragmented MP4
+            # === STEP 1: Decrypt CENC with pymp4 ===
             output = BytesIO()
             reader = BytesIO(input_data)
             
@@ -1425,11 +1445,9 @@ async def get_amazon_stream_route(asin: str):
                 found = []
                 if hasattr(box, 'type') and box.type == box_type:
                     found.append(box)
-                # Check children
                 if hasattr(box, 'children'):
                     for child in box.children:
                         found.extend(find_boxes(child, box_type))
-                # Some box structures use different attribute names
                 for attr_name in ['boxes', 'entries']:
                     if hasattr(box, attr_name):
                         items = getattr(box, attr_name)
@@ -1451,7 +1469,6 @@ async def get_amazon_stream_route(asin: str):
                                 if hasattr(entry, 'format') and b'enc' in entry.format:
                                     entry.format = original_format
             
-            # Parse all boxes
             while reader.tell() < len(input_data):
                 try:
                     box = Box.parse_stream(reader)
@@ -1459,11 +1476,9 @@ async def get_amazon_stream_route(asin: str):
                     logger.warning(f"[Amazon Decrypt] Box parse error at {reader.tell()}: {e}")
                     break
                 
-                # Fix encrypted stsd headers
                 fix_enc_stsd(box)
                 
                 if box.type == b'moof':
-                    # Collect senc and trun from this fragment
                     senc_list = find_boxes(box, b'senc')
                     trun_list = find_boxes(box, b'trun')
                     senc_queue.extend(senc_list)
@@ -1472,14 +1487,12 @@ async def get_amazon_stream_route(asin: str):
                     
                 elif box.type == b'mdat':
                     if not senc_queue or not trun_queue:
-                        # No encryption info — write as-is
                         output.write(Box.build(box))
                         continue
                     
                     senc = senc_queue.popleft()
                     trun = trun_queue.popleft()
                     
-                    # Decrypt sample by sample
                     clear_data = b''
                     mdat_reader = BytesIO(box.data)
                     
@@ -1487,11 +1500,7 @@ async def get_amazon_stream_route(asin: str):
                     sample_info_list = trun.sample_info if hasattr(trun, 'sample_info') else []
                     
                     for sample_enc, sample_info in zip(sample_enc_info, sample_info_list):
-                        # Get per-sample IV
                         iv = sample_enc.iv if hasattr(sample_enc, 'iv') else b'\x00' * 8
-                        
-                        # Build AES-CTR cipher with correct IV
-                        # CENC: 8-byte IV as prefix, 64-bit counter starting at 0
                         ctr = Counter.new(64, prefix=iv, initial_value=0)
                         cipher = AES.new(key, AES.MODE_CTR, counter=ctr)
                         
@@ -1502,45 +1511,90 @@ async def get_amazon_stream_route(asin: str):
                             subsample_info = sample_enc.subsample_encryption_info or []
                         
                         if not subsample_info:
-                            # Entire sample is encrypted
                             cipher_bytes = mdat_reader.read(sample_size)
                             clear_data += cipher.decrypt(cipher_bytes)
                         else:
-                            # Subsample encryption: clear/cipher pairs
                             for sub in subsample_info:
                                 clear_bytes_count = sub.clear_bytes if hasattr(sub, 'clear_bytes') else 0
                                 cipher_bytes_count = sub.cipher_bytes if hasattr(sub, 'cipher_bytes') else 0
-                                
                                 if clear_bytes_count:
                                     clear_data += mdat_reader.read(clear_bytes_count)
                                 if cipher_bytes_count:
                                     enc_chunk = mdat_reader.read(cipher_bytes_count)
                                     clear_data += cipher.decrypt(enc_chunk)
                     
-                    # Replace mdat data with decrypted content
                     box.data = clear_data
                     output.write(Box.build(box))
                     logger.info(f"[Amazon Decrypt] Decrypted mdat: {len(clear_data)} bytes")
                     
                 else:
-                    # Write other boxes as-is
                     output.write(Box.build(box))
             
-            result = output.getvalue()
-            logger.info(f"[Amazon Decrypt] Output: {len(result)} bytes")
-            return result
+            decrypted_data = output.getvalue()
+            logger.info(f"[Amazon Decrypt] Decrypted total: {len(decrypted_data)} bytes")
+            
+            # === STEP 2: Remux with ffmpeg to fix container ===
+            if not FFMPEG_BIN:
+                logger.warning("[Amazon Decrypt] No ffmpeg, returning raw decrypted data")
+                return decrypted_data
+            
+            tmp_in = None
+            tmp_out = None
+            try:
+                # Write decrypted data to temp file
+                tmp_in = tempfile.NamedTemporaryFile(suffix='.mp4', delete=False)
+                tmp_in.write(decrypted_data)
+                tmp_in.close()
+                
+                tmp_out = tempfile.NamedTemporaryFile(suffix='.m4a', delete=False)
+                tmp_out.close()
+                
+                # Remux: copy audio stream into a clean M4A container
+                cmd = [
+                    FFMPEG_BIN,
+                    '-y',                    # overwrite
+                    '-i', tmp_in.name,       # input: decrypted fragmented MP4
+                    '-c', 'copy',            # no re-encoding, just remux
+                    '-movflags', '+faststart', # moov atom at start for streaming
+                    tmp_out.name             # output: clean M4A
+                ]
+                
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    timeout=30
+                )
+                
+                if result.returncode != 0:
+                    stderr = result.stderr.decode('utf-8', errors='replace')
+                    logger.error(f"[Amazon FFmpeg] Remux failed (code {result.returncode}): {stderr[-500:]}")
+                    # Return raw decrypted data as fallback
+                    return decrypted_data
+                
+                # Read remuxed output
+                with open(tmp_out.name, 'rb') as f:
+                    remuxed_data = f.read()
+                
+                logger.info(f"[Amazon FFmpeg] Remuxed: {len(decrypted_data)} -> {len(remuxed_data)} bytes")
+                return remuxed_data
+                
+            finally:
+                # Cleanup temp files
+                if tmp_in:
+                    try: os.unlink(tmp_in.name)
+                    except: pass
+                if tmp_out:
+                    try: os.unlink(tmp_out.name)
+                    except: pass
             
         except Exception as e:
             logger.error(f"[Amazon Decrypt] Error: {e}", exc_info=True)
             return None
     
-    decrypted = await run_in_threadpool(_decrypt_stream)
+    decrypted = await run_in_threadpool(_decrypt_and_remux)
     if not decrypted:
-        # Fallback: redirect to raw URL
         return RedirectResponse(stream_url)
     
-    # Determine content type
-    codec = stream_data.get('codec', 'flac')
     content_type = 'audio/mp4'
     
     return Response(
