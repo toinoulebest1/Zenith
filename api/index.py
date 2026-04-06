@@ -90,25 +90,21 @@ app.add_middleware(
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ZenithAPI")
 
-# Deferred import of Crypto + pymp4 (needs logger)
+# Deferred import of Crypto + pymp4 + ffmpeg (needs logger)
 try:
     from Crypto.Cipher import AES
     CRYPTO_AVAILABLE = True
-except ImportError:
-    logger.warning("pycryptodome not installed - Amazon Music decryption unavailable")
+except Exception as e:
+    logger.warning(f"pycryptodome not available: {e}")
 
 try:
     from pymp4.parser import Box
-    from pymp4 import BoxUtil
     PYMP4_AVAILABLE = True
-except ImportError:
-    try:
-        from pymp4.parser import Box
-        PYMP4_AVAILABLE = True
-    except ImportError:
-        logger.warning("pymp4 not installed - Amazon Music decryption unavailable")
+    logger.info("[pymp4] Loaded successfully")
+except Exception as e:
+    logger.warning(f"pymp4 not available: {e}")
 
-# Resolve ffmpeg binary path (static-ffmpeg or system ffmpeg)
+# Resolve ffmpeg binary path
 FFMPEG_BIN = None
 try:
     import static_ffmpeg
@@ -116,7 +112,7 @@ try:
     FFMPEG_BIN = shutil.which("ffmpeg")
     if FFMPEG_BIN:
         logger.info(f"[FFmpeg] Found static-ffmpeg at: {FFMPEG_BIN}")
-except ImportError:
+except Exception:
     pass
 if not FFMPEG_BIN:
     FFMPEG_BIN = shutil.which("ffmpeg")
