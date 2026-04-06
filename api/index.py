@@ -1717,7 +1717,8 @@ async def get_amazon_stream_route(asin: str):
         headers={
             'Content-Length': str(len(decrypted)),
             'Accept-Ranges': 'bytes',
-            'Cache-Control': 'public, max-age=3600'
+            'Cache-Control': 'public, max-age=3600',
+            'Access-Control-Allow-Origin': '*'
         }
     )
 
