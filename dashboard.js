@@ -91,7 +91,7 @@ const Dashboard = {
             const artist = t.performer ? t.performer.name : (t.artist ? t.artist.name : 'Artiste');
             
             html += `
-                <div class="track-card dash-card" onclick="Dashboard.play('${t.id}')">
+                <div class="track-card dash-card" data-id="${t.id}" data-sig="${getTrackSignature(t)}" onclick="Dashboard.play('${t.id}')">
                     <img src="${img}" loading="lazy">
                     <h3 style="font-size: 14px; margin-top: 8px;">${t.title}</h3>
                     <p style="font-size: 12px; color: #888;">${artist}</p>

@@ -570,7 +570,18 @@
 
         const originalLoadProfile = window.loadProfile; window.loadProfile = async function() { if(originalLoadProfile) await originalLoadProfile(); const { data: { user } } = await supabaseClient.auth.getUser(); if(!user) return; if (window.loadUserPlaylists) window.loadUserPlaylists(); if (window.loadUserHistory) await window.loadUserHistory(); const { data, error } = await supabaseClient.from('profiles').select('settings').eq('id', user.id).single(); if (data && data.settings) { userSettings = { ...userSettings, ...data.settings }; applySettings(userSettings); localStorage.setItem('zenith_pref_limiter', userSettings.limiter); localStorage.setItem('zenith_pref_crossfade', userSettings.crossfade); localStorage.setItem('zenith_pref_magic', userSettings.magic); localStorage.setItem('zenith_pref_eco', userSettings.eco); localStorage.setItem('zenith_pref_directAudio', userSettings.directAudio); } };
         function showProfileSettings() { document.getElementById('trackView').style.display = 'none'; document.getElementById('artistView').style.display = 'none'; document.getElementById('lyricsView').style.display = 'none'; document.getElementById('blindTestView').style.display = 'none'; document.getElementById('allPlaylistsView').style.display = 'none'; document.getElementById('playlistView').style.display = 'none'; document.getElementById('searchBarContainer').style.display = 'none'; document.getElementById('profileView').style.display = 'block'; window.loadProfile(); }
-        window.loadUserFavorites = async function() { if(!supabaseClient) return; const { data: { user } } = await supabaseClient.auth.getUser(); if(!user) return; const { data, error } = await supabaseClient.from('favorites').select('*'); if(data) { favorites = data.map(f => ({...f.track_data, fromSearch: false})); updateLikeButtonState(); } window.loadProfile(); };
+        window.loadUserFavorites = async function() { 
+            if(!supabaseClient) return; 
+            const { data: { user } } = await supabaseClient.auth.getUser(); 
+            if(!user) return; 
+            const { data, error } = await supabaseClient.from('favorites').select('*'); 
+            if(data) { 
+                // Stockage de l'ID UUID (clé primaire) pour des mises à jour précises plus tard
+                favorites = data.map(f => ({...f.track_data, db_row_id: f.id, fromSearch: false})); 
+                updateLikeButtonState(); 
+            } 
+            window.loadProfile(); 
+        };
         function safePushState(data, title, url) { try { if (window.history && window.history.pushState) { window.history.pushState(data, title, url); } } catch (e) { console.warn("History pushState blocked", e); } }
         
         // --- SHAKA PLAYER INIT ---
@@ -580,10 +591,17 @@
                 shakaPlayerA = new shaka.Player(playerA);
                 shakaPlayerB = new shaka.Player(playerB);
                 
-                // Gestion d'erreurs basique
-                const onError = (e) => console.error('Shaka Error', e);
-                shakaPlayerA.addEventListener('error', onError);
-                shakaPlayerB.addEventListener('error', onError);
+                // Gestion d'erreurs avec fallback automatique
+                const onShakaError = (e) => {
+                    console.error('Shaka Error', e);
+                    // On ne déclenche le fallback que si c'est le lecteur actif
+                    const errorAudio = (shakaPlayerA === e.target) ? playerA : playerB;
+                    if (errorAudio === activeAudio) {
+                        handlePlaybackError(currentIndex);
+                    }
+                };
+                shakaPlayerA.addEventListener('error', onShakaError);
+                shakaPlayerB.addEventListener('error', onShakaError);
                 console.log("✅ Shaka Player Ready");
             } else {
                 console.error('Browser not supported for Shaka Player');
@@ -890,32 +908,32 @@
             updateActiveCard();
             updateLikeButtonState();
 
-            // --- NOUVELLE LOGIQUE DE RÉSOLUTION UNIFIÉE ---
-            // On résout systématiquement TOUT ce qui n'est pas déjà Qobuz, Tidal Direct ou Amazon Music
-            if (nextTrack.source !== 'qobuz' && nextTrack.source !== 'tidal_hund' && nextTrack.source !== 'amazon_music') {
-                // TOAST SUPPRIMÉ
+            // --- NOUVELLE LOGIQUE DE RÉSOLUTION UNIFIÉE (Réparation Proactive) ---
+            // On capture l'ID original pour la correction Supabase éventuelle
+            const oldId = nextTrack.id;
+
+            // On résout ce qui est marqué comme "lazy" ou ce qui vient de sources instables (Tidal)
+            // On exclut maintenant QUE Qobuz et Amazon Music qui sont fiables.
+            if (nextTrack.source !== 'qobuz' && nextTrack.source !== 'amazon_music') {
                 try {
                     const artist = nextTrack.performer ? nextTrack.performer.name : (nextTrack.artist ? nextTrack.artist.name : 'Inconnu');
                     const res = await fetch(`${API_BASE}/resolve_metadata?title=${encodeURIComponent(nextTrack.title)}&artist=${encodeURIComponent(artist)}`);
                     
-                    // CHECK CONCURRENCY
                     if (thisLoadId !== currentLoadId) return;
 
                     if(res.ok) {
                         const newMeta = await res.json();
-                        console.log("✅ Résolution réussie:", newMeta.source);
+                        console.log(`✅ Rémanence : Résolution réussie (${newMeta.source}) pour :`, nextTrack.title);
                         
-                        // Mise à jour des infos critiques pour la lecture
+                        // Mise à jour de l'objet local
                         nextTrack.id = newMeta.id;
-                        nextTrack.source = newMeta.source; // Deviendra 'amazon_music' ou 'qobuz'
-                        
-                        // Mise à jour métadonnées secondaires si dispos
+                        nextTrack.source = newMeta.source;
                         if(newMeta.duration && (!nextTrack.duration || nextTrack.duration === 0)) nextTrack.duration = newMeta.duration;
                         
-                        // SAUVEGARDE EN BASE POUR CORRIGER LES FAVORIS
+                        // CORRECTION SUPABASE : Si c'est un favori, on le répare en base avant même l'erreur
                         updateFavoriteIfNeeded(oldId, newMeta);
                     } else {
-                        console.warn("❌ Echec résolution métadonnées");
+                        console.warn("❌ Echec résolution métadonnées, tentative de lecture directe...");
                     }
                 } catch(e) { 
                     console.error("Resolve error", e); 
@@ -953,7 +971,7 @@
                     }
                 } catch (e) {
                     console.error("Tidal Load Error", e);
-                    showToast("Erreur lecture Tidal");
+                    handlePlaybackError(index);
                     return;
                 }
             } else {
@@ -1002,35 +1020,140 @@
             if(document.getElementById('queuePanel').classList.contains('active')) renderQueueList();
         }
         
-        // --- MISE A JOUR DES FAVORIS (CORRECTION PERMANENTE) ---
+        // --- MISE A JOUR DES FAVORIS (CORRECTION PERMANENTE - DEEP SEARCH) ---
         async function updateFavoriteIfNeeded(oldId, newMeta) {
             if (!supabaseClient) return;
             
-            // 1. Mise à jour variable locale (pour l'UI immédiate si on réaffiche la liste)
-            const localIdx = favorites.findIndex(f => String(f.id) === String(oldId));
-            if (localIdx !== -1) {
-                favorites[localIdx] = { ...newMeta, fromSearch: false };
-                console.log("UI Favoris mise à jour localement");
-            }
-
-            // 2. Mise à jour Supabase
             const { data: { user } } = await supabaseClient.auth.getUser();
             if (!user) return;
 
-            // On cherche l'entrée correspondante
-            const { data, error } = await supabaseClient
-                .from('favorites')
-                .update({ 
-                    track_id: String(newMeta.id), // On met à jour l'ID de référence
-                    track_data: newMeta           // On sauvegarde les métadonnées complètes (avec image)
-                })
-                .eq('user_id', user.id)
-                .eq('track_id', String(oldId))
-                .select();
+            console.log(`Deep Search : Tentative de réparation pour ${oldId}...`);
+            
+            // 1. Recherche de tous les UUIDs (db_row_id) correspondants dans nos favoris locaux
+            const currentSig = getTrackSignature(newMeta);
+            const matches = favorites.filter(f => 
+                String(f.id) === String(oldId) || 
+                getTrackSignature(f) === currentSig
+            );
+
+            let rowIdsToUpdate = matches.map(m => m.db_row_id).filter(id => id);
+
+            // 2. Si rien en local, on fait une recherche directe sur Supabase (Cas: lecture depuis Recherche/Dashboard)
+            if (rowIdsToUpdate.length === 0) {
+                console.log("Deep Search : Recherche sur Supabase (non présent en local)...");
+                const { data: found } = await supabaseClient
+                    .from('favorites')
+                    .select('id')
+                    .eq('user_id', user.id)
+                    .or(`track_id.eq.${oldId},track_data->>id.eq.${oldId}`);
                 
-            if (data && data.length > 0) {
-                console.log(`✅ Favori mis à jour en base : ${oldId} -> ${newMeta.id}`);
+                if (found && found.length > 0) {
+                    rowIdsToUpdate = found.map(f => f.id);
+                    console.log(`Deep Search : ${rowIdsToUpdate.length} ligne(s) trouvée(s) sur Supabase.`);
+                }
+            } else {
+                console.log(`Deep Search : ${rowIdsToUpdate.length} ligne(s) identifiée(s) via favoris locaux.`);
             }
+
+            // 3. Mise à jour de CHAQUE ligne trouvée
+            if (rowIdsToUpdate.length > 0) {
+                for (const urlUuid of rowIdsToUpdate) {
+                    const { data, error } = await supabaseClient
+                        .from('favorites')
+                        .update({ 
+                            track_id: String(newMeta.id), 
+                            track_data: { ...newMeta, db_row_id: urlUuid, fromSearch: false } 
+                        })
+                        .eq('id', urlUuid)
+                        .select();
+
+                    if (data && data.length > 0) {
+                        console.log(`✅ Supabase : Ligne ${urlUuid} mise à jour (${newMeta.title})`);
+                    } else if (error) {
+                        console.error(`❌ Erreur mise à jour ligne ${urlUuid}:`, error);
+                    }
+                }
+
+                // 4. Mise à jour de la variable locale
+                favorites.forEach((f, idx) => {
+                    if (String(f.id) === String(oldId) || getTrackSignature(f) === currentSig) {
+                        favorites[idx] = { ...newMeta, db_row_id: favorites[idx].db_row_id, fromSearch: false };
+                    }
+                });
+
+                // 5. Rafraîchissement UI si nécessaire
+                if (document.getElementById('viewTitle').innerText === "Mes Favoris ❤️") {
+                    showFavorites();
+                }
+            } else {
+                console.warn(`⚠️ Deep Search : Aucun favori n'a été trouvé pour ${oldId} (${newMeta.title}).`);
+            }
+        }
+
+        // --- GESTION DU FALLBACK AUTO (EN CAS D'ERREUR) ---
+        let fallbackRetries = {}; 
+
+        async function handlePlaybackError(index) {
+            const track = tracks[index];
+            if (!track) return;
+
+            // Éviter les boucles infinies
+            if (fallbackRetries[index] && fallbackRetries[index] >= 1) {
+                console.warn("Échec définitif du fallback pour ce titre.");
+                showToast(`❌ Titre indisponible : ${track.title}`);
+                document.getElementById('playIcon').className = 'fas fa-exclamation-triangle';
+                
+                if (tracks.length > 1 && currentIndex < tracks.length - 1) {
+                    setTimeout(() => {
+                        if (currentIndex === index) loadTrack(currentIndex + 1, true, false); 
+                    }, 2000);
+                }
+                return;
+            }
+
+            fallbackRetries[index] = (fallbackRetries[index] || 0) + 1;
+            showToast("Source corrompue, recherche d'un fallback... 🔍");
+            
+            const success = await attemptTrackFallback(index);
+            if (!success) {
+                // Si pas de fallback, on passe au suivant
+                if (tracks.length > 1 && currentIndex < tracks.length - 1) {
+                    setTimeout(() => {
+                        if (currentIndex === index) loadTrack(currentIndex + 1, true, false); 
+                    }, 2000);
+                } else {
+                    document.getElementById('playIcon').className = 'fas fa-exclamation-triangle';
+                }
+            }
+        }
+
+        async function attemptTrackFallback(index) {
+            const track = tracks[index];
+            const artistName = track.performer ? track.performer.name : (track.artist ? track.artist.name : 'Inconnu');
+            const oldId = track.id;
+
+            try {
+                // On utilise l'API de résolution (Backend)
+                const res = await fetch(`${API_BASE}/resolve_metadata?title=${encodeURIComponent(track.title)}&artist=${encodeURIComponent(artistName)}`);
+                if (res.ok) {
+                    const newMeta = await res.json();
+                    console.log("✅ Fallback trouvé :", newMeta.source, newMeta.id);
+                    
+                    // Mise à jour de l'objet de la file d'attente
+                    tracks[index] = { ...track, ...newMeta };
+                    
+                    // Mise à jour permanente dans les favoris Supabase
+                    await updateFavoriteIfNeeded(oldId, newMeta);
+                    
+                    // Nouvelle tentative de lecture
+                    showToast("Source réparée, reprise... ✨");
+                    loadTrack(index, true, false); 
+                    return true;
+                }
+            } catch (e) {
+                console.error("Fallback Resolution Error:", e);
+            }
+            return false;
         }
 
         function startCrossfade(prevAudio, nextAudio, enableFade) { 
@@ -1132,24 +1255,8 @@
             
             audioObj.onerror = () => {
                 if (audioObj === activeAudio && audioObj.src) {
-                    console.error("Erreur Audio:", audioObj.error);
-                    const t = tracks[currentIndex];
-                    if (t && (t.source === 'spotify_lazy' || t.source === 'yt_lazy')) {
-                        showToast(`⚠️ Titre introuvable : ${t.title}`);
-                    } else {
-                        // Pour Shaka Player, les erreurs sont gérées par son event listener
-                        if (t && t.source !== 'tidal_hund') showToast("Erreur lors de la lecture audio ❌");
-                    }
-                    
-                    document.getElementById('playIcon').className = 'fas fa-exclamation-triangle';
-                    
-                    if (tracks.length > 1 && currentIndex < tracks.length - 1) {
-                        setTimeout(() => {
-                            if (activeAudio === audioObj && audioObj.error) {
-                                loadTrack(currentIndex + 1, true, false); 
-                            }
-                        }, 2000);
-                    }
+                    console.error("Erreur Audio HTML5:", audioObj.error);
+                    handlePlaybackError(currentIndex);
                 }
             };
         }
@@ -1497,13 +1604,26 @@
                     btn.innerHTML = '<i class="fas fa-heart"></i>'; 
                     btn.style.color = 'var(--secondary)'; 
                     showToast('Liké ❤️'); 
-                    try { await supabaseClient.from('favorites').insert({ user_id: user.id, track_id: String(t.id), track_data: t }); } catch(e) { console.error(e); } 
+                    try { 
+                        const { data: inserted, error } = await supabaseClient.from('favorites').insert({ user_id: user.id, track_id: String(t.id), track_data: t }).select(); 
+                        if (inserted && inserted[0]) {
+                            // On stocke le UUID retourné pour pouvoir mettre à jour précisément via fallback plus tard
+                            t.db_row_id = inserted[0].id;
+                        }
+                        if (error) throw error;
+                    } catch(e) { console.error(e); } 
                 } else { 
+                    const toDelete = favorites[idx];
                     favorites.splice(idx, 1); 
                     btn.innerHTML = '<i class="far fa-heart"></i>'; 
                     btn.style.color = 'var(--text-dim)'; 
                     showToast('Disliké 💔'); 
-                    try { await supabaseClient.from('favorites').delete().match({ user_id: user.id, track_id: String(t.id) }); } catch(e) { console.error(e); } 
+                    try { 
+                        let q = supabaseClient.from('favorites').delete().eq('user_id', user.id);
+                        if (toDelete.db_row_id) q = q.eq('id', toDelete.db_row_id);
+                        else q = q.eq('track_id', String(t.id));
+                        await q;
+                    } catch(e) { console.error(e); } 
                 } 
             } finally { 
                 btn.disabled = false; 
@@ -1609,28 +1729,37 @@
 
         function cleanString(s) { return s ? s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/gi,'').trim() : ""; }
         function updateActiveCard() { 
-            document.querySelectorAll('.track-card').forEach(el => { 
-                el.classList.remove('active-track'); 
+            // 1. Reset all active marks
+            document.querySelectorAll('.track-card, .track-row').forEach(el => { 
+                el.classList.remove('active-track', 'active-row'); 
                 if(el.querySelector('.playing-indicator')) el.querySelector('.playing-indicator').remove(); 
             }); 
-            document.querySelectorAll('.track-row').forEach(el => {
-                el.classList.remove('active-row');
-            });
 
-            if(!currentTrackId) return; 
+            const currentTrack = tracks[currentIndex];
+            if(!currentTrackId || !currentTrack) return; 
             
-            const activeCards = document.querySelectorAll(`.track-card[data-id="${currentTrackId}"]`); 
-            activeCards.forEach(active => { 
-                active.classList.add('active-track'); 
-                const ind = document.createElement('div'); 
-                ind.className = 'playing-indicator'; 
-                ind.innerHTML = '<i class="fas fa-volume-up"></i>'; 
-                active.appendChild(ind); 
-            }); 
+            // Signature unique (Titre|Artiste) pour identifier la même chanson
+            // même si l'ID a changé (fallback) ou si vient d'une plateforme différente
+            const currentSig = getTrackSignature(currentTrack);
 
-            const activeRows = document.querySelectorAll(`.track-row[data-id="${currentTrackId}"]`);
-            activeRows.forEach(active => {
-                active.classList.add('active-row');
+            // 2. Recherche et marquage des éléments correspondants (par ID ou Signature)
+            document.querySelectorAll('.track-card, .track-row').forEach(el => {
+                const elId = el.dataset.id;
+                const elSig = el.dataset.sig;
+                
+                if (elId === String(currentTrackId) || (elSig && elSig === currentSig)) {
+                    if (el.classList.contains('track-card')) {
+                        el.classList.add('active-track');
+                        if (!el.querySelector('.playing-indicator')) {
+                            const ind = document.createElement('div'); 
+                            ind.className = 'playing-indicator'; 
+                            ind.innerHTML = '<i class="fas fa-volume-up"></i>'; 
+                            el.appendChild(ind); 
+                        }
+                    } else if (el.classList.contains('track-row')) {
+                        el.classList.add('active-row');
+                    }
+                }
             });
         }
         function goHome(p=true){ 
@@ -2001,7 +2130,9 @@
                     g.innerHTML = ''; 
                     details.tracks.forEach((it) => {
                         const displayImg = it.img || it.album.image.large || 'https://placehold.co/300x300/1a1a1a/666666?text=Music'; 
-                        const div = document.createElement('div'); div.className = 'track-card'; div.dataset.id = it.id;
+                        const div = document.createElement('div'); div.className = 'track-card'; 
+                        div.dataset.id = it.id;
+                        div.dataset.sig = getTrackSignature(it);
                         div.innerHTML = `<div class="badges-container"></div><img src="${displayImg}" loading="lazy" decoding="async"><h3>${it.title}</h3><p>${it.performer.name}</p>`;
                         div.onclick = () => { 
                             // Important : on propage la source pour que loadTrack sache comment résoudre
@@ -2057,7 +2188,9 @@
                     mediaElement = `<img src="${u}" loading="lazy" decoding="async">`; 
                 } 
                 
-                const d=document.createElement('div'); d.className='track-card'; if(isArt) d.classList.add('artist-card'); d.dataset.id=it.id; 
+                const d=document.createElement('div'); d.className='track-card'; if(isArt) d.classList.add('artist-card'); 
+                d.dataset.id=it.id; 
+                if(!isAlb && !isPl && !isArt) d.dataset.sig = getTrackSignature(it);
                 let b = ''; let rankBadgeHTML = ''; 
                 if(isAlb) b='<div class="type-badge badge-album">ALBUM</div>'; 
                 else if(isPl) b='<div class="type-badge badge-hires" style="background:#ff0055">PLAYLIST</div>'; 
