@@ -1455,12 +1455,15 @@
         function updateNeonFromImage(imgEl) {
             try {
                 const N = 200;
+                // DEPTH = nombre de pixels vers l'intérieur échantillonnés par position de bord
+                // Avec DEPTH=15 on voit les arbres, personnages, etc. qui commencent quelques px depuis le bord
+                const DEPTH = 15;
                 const canvas = document.createElement('canvas');
                 canvas.width = N; canvas.height = N;
                 const ctx = canvas.getContext('2d', { willReadFrequently: true });
                 ctx.drawImage(imgEl, 0, 0, N, N);
 
-                // Un seul appel getImageData pour tous les pixels (bien plus rapide que ~796 appels)
+                // Un seul appel getImageData pour tous les pixels
                 const raw = ctx.getImageData(0, 0, N, N).data;
                 function getRaw(x, y) {
                     const i = (y * N + x) * 4;
@@ -1468,14 +1471,15 @@
                 }
 
                 // Convertit RGB → couleur néon : saturation forcée ≥ 0.85, luminosité fixe à 0.55
-                // Cela rend le bleu ciel "vrai bleu vif", le vert pâle "vrai vert néon", etc.
+                // Les couleurs quasi-grises (saturation < 0.08) sont gardées telles quelles
                 function neonColor(r, g, b) {
                     const nr = r/255, ng = g/255, nb = b/255;
                     const max = Math.max(nr, ng, nb), min = Math.min(nr, ng, nb);
-                    if (max === min) return `rgb(${r},${g},${b})`; // gris → inchangé
+                    if (max === min) return `rgb(${r},${g},${b})`;
                     const d = max - min;
                     const l = (max + min) / 2;
                     const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+                    if (s < 0.08) return `rgb(${r},${g},${b})`; // quasi-gris → inchangé
                     let h;
                     if (max === nr)      h = ((ng - nb) / d + (ng < nb ? 6 : 0)) / 6;
                     else if (max === ng) h = ((nb - nr) / d + 2) / 6;
@@ -1493,29 +1497,45 @@
                     return `rgb(${Math.round(h2r(p,q,h+1/3)*255)},${Math.round(h2r(p,q,h)*255)},${Math.round(h2r(p,q,h-1/3)*255)})`;
                 }
 
-                // Périmètre complet en sens horaire, couleurs néon-boostées
+                // Pour chaque position du périmètre, on moyenne DEPTH pixels vers l'intérieur
+                // dx/dy = direction "vers l'intérieur" de l'image
+                function sampleBand(x, y, dx, dy) {
+                    let r=0, g=0, b=0;
+                    for (let d = 0; d < DEPTH; d++) {
+                        const [pr, pg, pb] = getRaw(x + dx*d, y + dy*d);
+                        r += pr; g += pg; b += pb;
+                    }
+                    return neonColor(Math.round(r/DEPTH), Math.round(g/DEPTH), Math.round(b/DEPTH));
+                }
+
+                // Périmètre complet en sens horaire depuis le coin haut-gauche
                 const colors = [];
-                for (let x = 0; x < N; x++)     colors.push(neonColor(...getRaw(x, 0)));
-                for (let y = 1; y < N; y++)     colors.push(neonColor(...getRaw(N-1, y)));
-                for (let x = N-2; x >= 0; x--) colors.push(neonColor(...getRaw(x, N-1)));
-                for (let y = N-2; y > 0; y--)  colors.push(neonColor(...getRaw(0, y)));
+                for (let x = 0; x < N; x++)     colors.push(sampleBand(x,   0,    0,  1)); // haut → inward = +y
+                for (let y = 1; y < N; y++)     colors.push(sampleBand(N-1, y,   -1,  0)); // droite → inward = -x
+                for (let x = N-2; x >= 0; x--) colors.push(sampleBand(x,   N-1,  0, -1)); // bas → inward = -y
+                for (let y = N-2; y > 0; y--)  colors.push(sampleBand(0,   y,    1,  0)); // gauche → inward = +x
 
                 const total = colors.length;
                 const stops = colors.map((c, i) => `${c} ${(i / total * 100).toFixed(2)}%`).join(',');
                 const gradient = `conic-gradient(from 315deg, ${stops})`;
 
-                // Box-shadow directionnel avec couleurs naturelles moyennées
-                function avgRaw(pixList) {
-                    let r=0, g=0, b=0;
-                    pixList.forEach(([x,y]) => { const [pr,pg,pb] = getRaw(x,y); r+=pr; g+=pg; b+=pb; });
-                    const n = pixList.length;
+                // Box-shadow directionnel : moyenne des couleurs naturelles de chaque bord (band complète)
+                function avgBandRaw(x, y, dx, dy, count) {
+                    let r=0, g=0, b=0, n=0;
+                    for (let i = 0; i < count; i++) {
+                        for (let d = 0; d < DEPTH; d++) {
+                            const [pr,pg,pb] = getRaw(x + dx*d + (dy !== 0 ? i : 0), y + dy*d + (dx !== 0 ? i : 0));
+                            r+=pr; g+=pg; b+=pb; n++;
+                        }
+                    }
                     return `rgb(${Math.round(r/n)},${Math.round(g/n)},${Math.round(b/n)})`;
                 }
-                const mid = Math.floor(N/2), sp = Math.floor(N/4);
-                const topC    = avgRaw(Array.from({length:sp}, (_,i) => [mid - sp/2 + i, 0]));
-                const rightC  = avgRaw(Array.from({length:sp}, (_,i) => [N-1, mid - sp/2 + i]));
-                const bottomC = avgRaw(Array.from({length:sp}, (_,i) => [mid - sp/2 + i, N-1]));
-                const leftC   = avgRaw(Array.from({length:sp}, (_,i) => [0, mid - sp/2 + i]));
+                const mid = Math.floor(N/2), sp = Math.floor(N/3);
+                const half = Math.floor(sp/2);
+                const topC    = avgBandRaw(mid-half,  0,    0,  1, sp);
+                const rightC  = avgBandRaw(N-1, mid-half,  -1,  0, sp);
+                const bottomC = avgBandRaw(mid-half,  N-1,  0, -1, sp);
+                const leftC   = avgBandRaw(0,   mid-half,   1,  0, sp);
 
                 const wrapper = document.querySelector('.xl-image-wrapper');
                 const img = wrapper && wrapper.querySelector('.album-art-xl');
