@@ -1092,22 +1092,46 @@
 
         // --- RÉPARATION PROACTIVE DES SOURCES INSTABLES AU CHARGEMENT ---
         async function repairUnstableFavorites() {
-            const unstable = ['spotify_lazy', 'tidal_hund', 'subsonic', 'yt_lazy'];
-            const toRepair = favorites.filter(f => unstable.includes(f.source));
-            if (toRepair.length === 0) return;
-            console.log(`[Repair] ${toRepair.length} favori(s) avec source instable à réparer...`);
+            const REPAIR_TTL = 24 * 60 * 60 * 1000; // 24h entre chaque vérification
+            const now = Date.now();
+
+            const toRepair = favorites.filter(f => {
+                // Toutes les sources peuvent avoir des IDs périmés
+                const knownSources = ['spotify_lazy', 'tidal_hund', 'subsonic', 'yt_lazy', 'qobuz', 'amazon_music', 'deezer'];
+                if (!knownSources.includes(f.source)) return false;
+                // Skip si déjà vérifié dans les dernières 24h
+                if (f._repaired_at && (now - new Date(f._repaired_at).getTime()) < REPAIR_TTL) return false;
+                return true;
+            });
+
+            if (toRepair.length === 0) {
+                console.log('[Repair] Tous les favoris sont à jour.');
+                return;
+            }
+            console.log(`[Repair] ${toRepair.length} favori(s) à vérifier/réparer...`);
+
             for (const fav of toRepair) {
                 try {
                     const artist = fav.performer ? fav.performer.name : (fav.artist ? fav.artist.name : '');
+                    if (!fav.title || !artist) continue;
+
                     const res = await fetch(`${API_BASE}/resolve_metadata?title=${encodeURIComponent(fav.title)}&artist=${encodeURIComponent(artist)}`);
                     if (res.ok) {
                         const newMeta = await res.json();
-                        console.log(`[Repair] Réparation proactive : ${fav.title} → ${newMeta.source}:${newMeta.id}`);
+                        // Marquer comme vérifié pour éviter de re-vérifier dans les 24h
+                        newMeta._repaired_at = new Date().toISOString();
+                        if (newMeta.id !== fav.id || newMeta.source !== fav.source) {
+                            console.log(`[Repair] ✅ ${fav.title} : ${fav.source}:${fav.id} → ${newMeta.source}:${newMeta.id}`);
+                        } else {
+                            console.log(`[Repair] ✔ ${fav.title} : ID confirmé (${newMeta.id}), timestamp mis à jour`);
+                        }
                         await updateFavoriteIfNeeded(fav.id, newMeta, fav.db_row_id);
                     }
-                } catch(e) { console.warn('[Repair] Erreur proactive:', e); }
-                await new Promise(r => setTimeout(r, 300));
+                } catch(e) { console.warn('[Repair] Erreur:', fav.title, e); }
+                // Délai entre chaque appel pour ne pas saturer l'API
+                await new Promise(r => setTimeout(r, 400));
             }
+            console.log('[Repair] Vérification terminée.');
         }
 
         // --- GESTION DU FALLBACK AUTO (EN CAS D'ERREUR) ---
