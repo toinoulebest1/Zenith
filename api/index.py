@@ -74,6 +74,9 @@ FALLBACK_TIDAL_CREDENTIALS = {
 # --- AMAZON MUSIC API ---
 AMAZON_MUSIC_API_BASE = "https://t2tunes.site/api/amazon-music"
 
+# --- QOBUZ ALTERNATIVE API ---
+QOBUZ_ALT_API_BASE = "https://trypt-hifi-dl-456461932686.us-west1.run.app"
+
 # --- INIT FASTAPI ---
 app = FastAPI(title="Zenith API", docs_url=None, redoc_url=None)
 
@@ -775,24 +778,33 @@ def sync_search_deezer_artists(query, limit=15):
     except Exception as e: return []
 
 def sync_qobuz_search(query, limit=25, type='track'):
-    if not client: return []
     try:
+        url = f"{QOBUZ_ALT_API_BASE}/api/get-music"
+        params = {'q': query, 'offset': 0}
+        r = requests.get(url, params=params, timeout=15)
+        if r.status_code != 200:
+            return []
+        data = r.json()
+        if not data.get('success'):
+            return []
         if type == 'track':
-            r = client.api_call("track/search", query=query, limit=1)
-            items = r.get('tracks', {}).get('items', [])
-            for t in items: 
+            items = data.get('data', {}).get('tracks', {}).get('items', [])
+            items = items[:limit]
+            for t in items:
                 t['source'] = 'qobuz'
                 fix_qobuz_title(t)
-                t['date'] = t.get('released_at') # Extraction Date
+                t['date'] = t.get('release_date_original') or t.get('released_at')
             return items
         elif type == 'album':
-            r = client.api_call("album/search", query=query, limit=1)
-            items = r.get('albums', {}).get('items', [])
-            for a in items: 
+            items = data.get('data', {}).get('albums', {}).get('items', [])
+            items = items[:limit]
+            for a in items:
                 a['source'] = 'qobuz'
-                a['date'] = a.get('released_at') # Extraction Date
+                a['date'] = a.get('release_date_original') or a.get('released_at')
             return items
-    except: return []
+    except Exception as e:
+        logger.error(f"[Alt Qobuz Search] Error: {e}")
+        return []
 
 def sync_get_deezer_artist_by_id(artist_id):
     try:
@@ -843,7 +855,16 @@ def sync_get_deezer_artist_by_id(artist_id):
         return None
 
 def sync_search_artist_full(name):
-    # 1. Tentative QOBUZ
+    # 1. Tentative via alt API (top tracks) + Qobuz client si disponible (albums/bio)
+    top_tracks_alt = sync_qobuz_search(name, limit=20)
+    artist_top_tracks = []
+    name_lower = name.lower()
+    for t in top_tracks_alt:
+        performer = t.get('performer', {}).get('name', '')
+        if name_lower in performer.lower() or performer.lower() in name_lower:
+            artist_top_tracks.append(t)
+    artist_top_tracks = artist_top_tracks[:10]
+
     if client:
         try:
             r = client.api_call("artist/search", query=name, limit=1)
@@ -862,24 +883,12 @@ def sync_search_artist_full(name):
                         if str(a.get('artist', {}).get('id')) == str(artist_id):
                             a['source'] = 'qobuz'
                             albums.append(a)
-                top_tracks = []
-                track_search = client.api_call("track/search", query=artist['name'], limit=20)
-                if 'tracks' in track_search and 'items' in track_search['tracks']:
-                    for t in track_search['tracks']['items']:
-                        is_related = False
-                        if str(t.get('artist', {}).get('id')) == str(artist_id): is_related = True
-                        elif 'performer' in t and artist['name'].lower() in t['performer']['name'].lower(): is_related = True
-                        if is_related:
-                            t['source'] = 'qobuz'
-                            fix_qobuz_title(t)
-                            top_tracks.append(t)
-                    top_tracks = top_tracks[:10]
                 return {
                     "id": artist['id'],
                     "name": artist['name'],
                     "image": artist.get('image', {}).get('large', '').replace('_300', '_600'),
                     "albums": albums,
-                    "top_tracks": top_tracks,
+                    "top_tracks": artist_top_tracks or [],
                     "bio": bio
                 }
         except Exception as e:
