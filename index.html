@@ -2641,11 +2641,10 @@
             if (photoFile) {
                 try {
                     const fd = new FormData();
-                    fd.append('reqtype', 'fileupload');
-                    fd.append('fileToUpload', photoFile);
-                    const upRes = await fetch('https://catbox.moe/user/api.php', { method: 'POST', body: fd });
-                    const upUrl = (await upRes.text()).trim();
-                    if (upUrl.startsWith('https://')) photoUrl = upUrl;
+                    fd.append('file', photoFile);
+                    const upRes = await fetch(`${API_BASE}/upload-image`, { method: 'POST', body: fd });
+                    const upJson = await upRes.json();
+                    if (upJson.url) photoUrl = upJson.url;
                 } catch { showToast("Photo non uploadée — vérifiez la connexion"); }
             }
 

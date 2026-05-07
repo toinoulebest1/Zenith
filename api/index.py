@@ -1829,5 +1829,27 @@ async def get_lyrics(artist: str, title: str, album: str = None, duration: str =
     if lrc_plain: return JSONResponse({"type": "plain", "lyrics": lrc_plain, "source": "LRCLib"})
     raise HTTPException(404, "No lyrics")
 
+@app.post('/upload-image')
+async def upload_image_proxy(request: Request):
+    """Proxy multipart image upload to catbox.moe (avoids browser CORS restriction)."""
+    try:
+        form = await request.form()
+        file = form.get('file')
+        if not file:
+            raise HTTPException(400, "No file provided")
+        content = await file.read()
+        files = {'fileToUpload': (file.filename, content, file.content_type)}
+        data = {'reqtype': 'fileupload'}
+        r = requests.post('https://catbox.moe/user/api.php', data=data, files=files, timeout=30)
+        url = r.text.strip()
+        if not url.startswith('https://'):
+            raise HTTPException(500, f"Upload failed: {url}")
+        return JSONResponse({'url': url})
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[upload-image] Error: {e}")
+        raise HTTPException(500, str(e))
+
 # --- STATIC FILES ---
 app.mount("/", StaticFiles(directory=PROJECT_ROOT, html=True), name="static")
