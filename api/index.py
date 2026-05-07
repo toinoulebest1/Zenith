@@ -1838,7 +1838,7 @@ async def upload_image_proxy(file: UploadFile = File(...)):
         ctype = file.content_type or 'image/jpeg'
         r = requests.post(
             'https://catbox.moe/user/api.php',
-            data={'reqtype': 'fileupload'},
+            data={'reqtype': 'fileupload', 'userhash': ''},
             files={'fileToUpload': (fname, content, ctype)},
             timeout=30
         )
