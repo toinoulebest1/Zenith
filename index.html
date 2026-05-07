@@ -1477,8 +1477,24 @@
                 const stops = colors.map((c, i) => `${c} ${(i / total * 100).toFixed(2)}%`).join(',');
                 const gradient = `conic-gradient(from 315deg, ${stops})`;
 
+                // Couleur moyenne de chaque bord pour le box-shadow directionnel
+                const avgEdge = (samples) => {
+                    let r=0,g=0,b=0;
+                    samples.forEach(([x,y]) => { const d=ctx.getImageData(x,y,1,1).data; r+=d[0];g+=d[1];b+=d[2]; });
+                    const n=samples.length;
+                    return `rgb(${Math.round(r/n)},${Math.round(g/n)},${Math.round(b/n)})`;
+                };
+                const mid = Math.floor(N/2);
+                const spread = Math.floor(N/4);
+                const topC    = avgEdge(Array.from({length:spread},(_, i)=>[ mid-spread/2+i, 0 ]));
+                const rightC  = avgEdge(Array.from({length:spread},(_, i)=>[ N-1, mid-spread/2+i ]));
+                const bottomC = avgEdge(Array.from({length:spread},(_, i)=>[ mid-spread/2+i, N-1 ]));
+                const leftC   = avgEdge(Array.from({length:spread},(_, i)=>[ 0, mid-spread/2+i ]));
+
                 const wrapper = document.querySelector('.xl-image-wrapper');
+                const img = wrapper && wrapper.querySelector('.album-art-xl');
                 if (wrapper) wrapper.style.setProperty('--neon-gradient', gradient);
+                if (img) img.style.boxShadow = `0 -8px 22px 4px ${topC}, 8px 0 22px 4px ${rightC}, 0 8px 22px 4px ${bottomC}, -8px 0 22px 4px ${leftC}`;
             } catch(e) { /* CORS bloqué — fallback gardé */ }
         }
 

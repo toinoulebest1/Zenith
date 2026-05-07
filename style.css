@@ -403,19 +403,9 @@ body.zen-active.zen-idle { cursor: none; }
     background: var(--neon-gradient, conic-gradient(from 315deg, #444, #444));
     z-index: 0;
 }
-.xl-image-wrapper::after {
-    content: '';
-    position: absolute;
-    inset: -8px;
-    border-radius: 28px;
-    background: var(--neon-gradient, conic-gradient(from 315deg, #444, #444));
-    z-index: 0;
-    filter: blur(16px);
-    animation: neon-pulse 2.5s ease-in-out infinite alternate;
-}
 @keyframes neon-pulse {
-    from { opacity: 0.5; }
-    to   { opacity: 0.85; }
+    from { opacity: 0.7; }
+    to   { opacity: 1; }
 }
 .album-art-xl { position: relative; z-index: 1; width: 100%; border-radius: 20px; aspect-ratio: 1/1; object-fit: cover; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
 .xl-badge { position: absolute; top: 15px; right: 15px; background: var(--primary); color: #000; font-size: 11px; font-weight: 900; padding: 4px 8px; border-radius: 6px; box-shadow: 0 0 15px var(--primary); z-index: 10; display: none; }
