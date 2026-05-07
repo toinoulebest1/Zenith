@@ -400,13 +400,7 @@ body.zen-active.zen-idle { cursor: none; }
     position: absolute;
     inset: -3px;
     border-radius: 23px;
-    background: conic-gradient(from 315deg,
-        var(--neon-tl, #888),
-        var(--neon-tr, #888),
-        var(--neon-br, #888),
-        var(--neon-bl, #888),
-        var(--neon-tl, #888)
-    );
+    background: var(--neon-gradient, conic-gradient(from 315deg, #444, #444));
     z-index: 0;
 }
 .xl-image-wrapper::after {
@@ -414,13 +408,7 @@ body.zen-active.zen-idle { cursor: none; }
     position: absolute;
     inset: -8px;
     border-radius: 28px;
-    background: conic-gradient(from 315deg,
-        var(--neon-tl, #888),
-        var(--neon-tr, #888),
-        var(--neon-br, #888),
-        var(--neon-bl, #888),
-        var(--neon-tl, #888)
-    );
+    background: var(--neon-gradient, conic-gradient(from 315deg, #444, #444));
     z-index: 0;
     filter: blur(16px);
     animation: neon-pulse 2.5s ease-in-out infinite alternate;
