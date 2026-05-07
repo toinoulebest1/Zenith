@@ -654,109 +654,6 @@ def get_amazon_stream_url(asin):
 
 # --- FONCTIONS SYNCHRONES (WRAPPED) ---
 
-LYRICSPLUS_BASE = "https://lyricsplus.prjktla.workers.dev"
-
-def sync_search_lyricsplus(title, artist, album=None, duration=None):
-    """
-    Recherche de paroles via l'API LyricsPlus (YouLy+).
-    Priorité #1 : retourne des paroles synchronisées mot-à-mot converties en LRC.
-    """
-    logger.info(f"[LyricsPlus] Searching: {artist} - {title}")
-    try:
-        params = {
-            "title": title,
-            "artist": artist,
-        }
-        if album:
-            params["album"] = album
-        if duration:
-            # LyricsPlus attend la durée en millisecondes
-            dur_ms = int(duration) * 1000 if isinstance(duration, (int, float)) else int(duration) * 1000
-            params["duration"] = dur_ms
-        
-        # Essayer v2 d'abord (meilleure structure avec syllabes groupées en lignes)
-        resp = requests.get(f"{LYRICSPLUS_BASE}/v2/lyrics/get", params=params, timeout=10)
-        
-        if resp.status_code == 200:
-            data = resp.json()
-            lyrics_list = data.get("lyrics", [])
-            lyrics_type = data.get("type", "")
-            source = data.get("metadata", {}).get("source", "LyricsPlus")
-            
-            if lyrics_list:
-                # Convertir le format LyricsPlus en LRC
-                lrc_lines = []
-                for line in lyrics_list:
-                    time_ms = line.get("time", 0)
-                    text = line.get("text", "").strip()
-                    if not text:
-                        continue
-                    # Conversion ms -> LRC timestamp [mm:ss.xx]
-                    total_seconds = time_ms / 1000.0
-                    minutes = int(total_seconds // 60)
-                    seconds = total_seconds % 60
-                    lrc_lines.append(f"[{minutes:02d}:{seconds:05.2f}] {text}")
-                
-                if lrc_lines:
-                    lrc_text = "\n".join(lrc_lines)
-                    logger.info(f"[LyricsPlus] Found synced lyrics ({len(lrc_lines)} lines) from {source}")
-                    return {"type": "synced", "lyrics": lrc_text, "source": f"LyricsPlus ({source})"}
-        
-        # Fallback: essayer v1
-        resp_v1 = requests.get(f"{LYRICSPLUS_BASE}/v1/lyrics/get", params=params, timeout=10)
-        
-        if resp_v1.status_code == 200:
-            data = resp_v1.json()
-            lyrics_list = data.get("lyrics", [])
-            source = data.get("metadata", {}).get("source", "LyricsPlus")
-            
-            if lyrics_list:
-                # v1 retourne des mots individuels, on les regroupe en lignes
-                lrc_lines = []
-                current_line_time = None
-                current_line_words = []
-                
-                for word in lyrics_list:
-                    time_ms = word.get("time", 0)
-                    text = word.get("text", "")
-                    is_line_ending = word.get("isLineEnding", 0)
-                    
-                    if current_line_time is None:
-                        current_line_time = time_ms
-                    
-                    current_line_words.append(text)
-                    
-                    if is_line_ending:
-                        line_text = "".join(current_line_words).strip()
-                        if line_text:
-                            total_seconds = current_line_time / 1000.0
-                            minutes = int(total_seconds // 60)
-                            seconds = total_seconds % 60
-                            lrc_lines.append(f"[{minutes:02d}:{seconds:05.2f}] {line_text}")
-                        current_line_time = None
-                        current_line_words = []
-                
-                # Flush remaining words
-                if current_line_words:
-                    line_text = "".join(current_line_words).strip()
-                    if line_text and current_line_time is not None:
-                        total_seconds = current_line_time / 1000.0
-                        minutes = int(total_seconds // 60)
-                        seconds = total_seconds % 60
-                        lrc_lines.append(f"[{minutes:02d}:{seconds:05.2f}] {line_text}")
-                
-                if lrc_lines:
-                    lrc_text = "\n".join(lrc_lines)
-                    logger.info(f"[LyricsPlus] Found synced lyrics v1 ({len(lrc_lines)} lines) from {source}")
-                    return {"type": "synced", "lyrics": lrc_text, "source": f"LyricsPlus ({source})"}
-        
-        logger.info(f"[LyricsPlus] No lyrics found (status: {resp.status_code})")
-        return None
-        
-    except Exception as e:
-        logger.warning(f"[LyricsPlus] Error: {e}")
-        return None
-
 def sync_search_yt_lyrics(title, artist):
     query = f"{title} {artist}"
     try:
@@ -1469,13 +1366,25 @@ async def get_artist(id: str):
 
 @app.get('/stream/{track_id}')
 async def stream_track(track_id: str):
-    if not client: raise HTTPException(500, "Client error")
     def _get_url():
         for fmt in [27, 7, 6, 5]:
             try:
-                d = client.get_track_url(track_id, fmt)
-                if 'url' in d: return d['url']
+                r = requests.get(
+                    f"{QOBUZ_ALT_API_BASE}/api/download-music",
+                    params={"track_id": track_id, "quality": fmt},
+                    timeout=15
+                )
+                if r.status_code == 200:
+                    data = r.json()
+                    if data.get('success') and data.get('data', {}).get('url'):
+                        return data['data']['url']
             except: continue
+        if client:
+            for fmt in [27, 7, 6, 5]:
+                try:
+                    d = client.get_track_url(track_id, fmt)
+                    if 'url' in d: return d['url']
+                except: continue
         return None
     url = await run_in_threadpool(_get_url)
     if url: return RedirectResponse(url)
@@ -1872,35 +1781,15 @@ async def get_tidal_manifest_route(track_id: str):
 
 @app.get('/lyrics')
 async def get_lyrics(artist: str, title: str, album: str = None, duration: str = None):
-    dur = parse_duration(duration)
-    
-    # Priority 1: LyricsPlus (Apple Music, Musixmatch, Spotify sources)
-    lp_res = await run_in_threadpool(sync_search_lyricsplus, title, artist, album, dur)
-    if lp_res and lp_res['type'] == 'synced':
-        return JSONResponse(lp_res)
-    
-    # Priority 2: YouTube Music (synced)
     yt_res = await run_in_threadpool(sync_search_yt_lyrics, title, artist)
-    if yt_res and yt_res['type'] == 'synced':
-        return JSONResponse({**yt_res, "source": "YouTube"})
-    
-    # Priority 3: LRCLib (synced)
+    if yt_res and yt_res['type'] == 'synced': return JSONResponse({"type": "synced", "lyrics": yt_res['lyrics'], "source": "YouTube"})
+    dur = parse_duration(duration)
     lrc_plain, lrc_synced = None, None
-    try:
-        lrc_plain, lrc_synced = await run_in_threadpool(lyrics_engine.search_lyrics, artist, title, album, dur)
-    except Exception:
-        pass
-    if lrc_synced:
-        return JSONResponse({"type": "synced", "lyrics": lrc_synced, "source": "LRCLib"})
-    
-    # Priority 4: YouTube Music (plain)
-    if yt_res and yt_res['type'] == 'plain':
-        return JSONResponse({**yt_res, "source": "YouTube"})
-    
-    # Priority 5: LRCLib (plain)
-    if lrc_plain:
-        return JSONResponse({"type": "plain", "lyrics": lrc_plain, "source": "LRCLib"})
-    
+    try: lrc_plain, lrc_synced = await run_in_threadpool(lyrics_engine.search_lyrics, artist, title, album, dur)
+    except Exception: pass
+    if lrc_synced: return JSONResponse({"type": "synced", "lyrics": lrc_synced, "source": "LRCLib"})
+    if yt_res and yt_res['type'] == 'plain': return JSONResponse({"type": "plain", "lyrics": yt_res['lyrics'], "source": "YouTube"})
+    if lrc_plain: return JSONResponse({"type": "plain", "lyrics": lrc_plain, "source": "LRCLib"})
     raise HTTPException(404, "No lyrics")
 
 # --- STATIC FILES ---
