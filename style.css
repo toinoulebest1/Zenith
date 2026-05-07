@@ -401,6 +401,18 @@ body.zen-active.zen-idle { cursor: none; }
 .right-panel.queue-open .xl-image-wrapper { max-width: 120px; margin-bottom: 10px; }
 .right-panel.queue-open { padding: 20px; }
 
+/* --- SOUVENIRS --- */
+.memory-card { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 16px; display: flex; gap: 14px; cursor: pointer; position: relative; transition: background 0.2s; }
+.memory-card:hover { background: rgba(255,255,255,0.07); }
+.memory-card-art { width: 64px; height: 64px; border-radius: 10px; object-fit: cover; flex-shrink: 0; box-shadow: 0 4px 12px rgba(0,0,0,0.4); align-self: flex-start; pointer-events: none; }
+.memory-card-body { flex: 1; overflow: hidden; text-align: left; }
+.memory-card-title { font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 2px; padding-right: 96px; }
+.memory-card-artist { color: var(--primary); font-size: 12px; margin-bottom: 7px; }
+.memory-card-note { color: #ccc; font-size: 13px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; margin-bottom: 6px; }
+.memory-card-photo { width: 100%; border-radius: 10px; margin-top: 8px; max-height: 200px; object-fit: cover; display: block; cursor: zoom-in; }
+.memory-card-meta { display: flex; align-items: center; gap: 10px; margin-top: 8px; color: #555; font-size: 11px; flex-wrap: wrap; }
+.memory-date-badge { font-size: 11px; color: #555; position: absolute; top: 14px; right: 14px; white-space: nowrap; }
+
 /* PLAYER CAPSULE */
 .player-capsule { position: absolute; bottom: 25px; left: 50%; width: 750px; height: 100px; background: #141416; border-radius: 25px; display: flex; align-items: center; justify-content: space-between; padding: 0 30px; box-shadow: 0 20px 50px rgba(0,0,0,0.9); border: 1px solid rgba(255,255,255,0.15); z-index: 100; transform: translate3d(-50%, 0, 0); will-change: transform; }
 .cap-info { display: flex; align-items: center; gap: 15px; width: 240px; }

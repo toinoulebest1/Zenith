@@ -85,6 +85,35 @@
         </div>
     </div>
 
+    <div id="memoryModal" class="login-screen" style="display:none; z-index:2000; background:rgba(0,0,0,0.88);">
+        <div class="login-card" style="max-width:400px; gap:0;">
+            <h2 style="margin-bottom:4px; font-size:1.2rem;">Épingler un souvenir</h2>
+            <p style="color:#555; font-size:12px; margin-bottom:18px;">Attaché à cette musique pour toujours</p>
+            <div id="memoryTrackPreview" style="display:flex; align-items:center; gap:12px; background:rgba(255,255,255,0.05); padding:12px; border-radius:12px; width:100%; margin-bottom:14px; border:1px solid rgba(255,255,255,0.07);">
+                <img id="memoryTrackArt" src="" style="width:48px; height:48px; border-radius:8px; object-fit:cover; flex-shrink:0;">
+                <div style="text-align:left; overflow:hidden; flex:1;">
+                    <div id="memoryTrackTitle" style="font-weight:600; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;"></div>
+                    <div id="memoryTrackArtist" style="color:var(--primary); font-size:12px;"></div>
+                </div>
+            </div>
+            <textarea id="memoryNoteInput" placeholder="Ce souvenir me rappelle..." style="width:100%; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12); border-radius:12px; color:white; padding:12px; font-family:inherit; font-size:14px; resize:none; min-height:80px; margin-bottom:12px; outline:none;"></textarea>
+            <label style="display:flex; align-items:center; gap:10px; background:rgba(255,255,255,0.04); padding:12px; border-radius:12px; cursor:pointer; width:100%; margin-bottom:8px; border:1px dashed rgba(255,255,255,0.12);">
+                <i class="fas fa-image" style="color:#666;"></i>
+                <span id="memoryPhotoLabel" style="color:#666; font-size:13px;">Ajouter une photo (optionnel)</span>
+                <input type="file" id="memoryPhotoInput" accept="image/*" style="display:none;" onchange="previewMemoryPhoto(this)">
+            </label>
+            <img id="memoryPhotoPreview" src="" style="display:none; width:100%; border-radius:10px; margin-bottom:10px; max-height:140px; object-fit:cover;">
+            <div style="display:flex; align-items:center; gap:8px; color:#555; font-size:12px; margin-bottom:18px; padding:0 2px;">
+                <i class="fas fa-map-marker-alt" style="color:#ff0055; font-size:13px;"></i>
+                <span id="memoryLocationText">Récupération de la position...</span>
+            </div>
+            <div style="display:flex; gap:10px; width:100%;">
+                <button class="login-btn" style="background:#222; color:#888; flex:1; border:1px solid #333;" onclick="closeMemoryModal()">Annuler</button>
+                <button class="login-btn" style="flex:2;" id="btnSaveMemory" onclick="saveMemory()"><i class="fas fa-thumbtack"></i> Épingler</button>
+            </div>
+        </div>
+    </div>
+
     <div id="addToPlaylistModal" class="login-screen" style="display:none; z-index:2000; background:rgba(0,0,0,0.8);">
         <div class="login-card">
             <h2 style="margin-bottom: 20px;">Ajouter à...</h2>
@@ -138,6 +167,7 @@
             <div class="nav-item" onclick="showPlaylists()" title="Mes Playlists"><i class="fas fa-list"></i></div>
             <div class="nav-item" onclick="toggleQueue()" title="File d'attente"><i class="fas fa-list-ol"></i></div>
             <div class="nav-item" onclick="showWeeklyTop()" title="Top 10 Semaine"><i class="fas fa-trophy"></i></div>
+            <div class="nav-item" onclick="showMemories()" title="Mes Souvenirs"><i class="fas fa-bookmark"></i></div>
             <div class="nav-item lyrics-btn" onclick="toggleLyrics()" title="Paroles (V)"><i class="fas fa-microphone-alt"></i></div>
             <div class="nav-item" onclick="startBlindTest()" title="Blind Test"><i class="fas fa-gamepad"></i></div>
             <div class="nav-item" id="btnPartyMenu" onclick="Party.openModal()" title="Party Mode">
@@ -231,6 +261,14 @@
             </div>
 
             <div class="lyrics-view" id="blindTestView" style="display: none;"></div>
+
+            <div class="track-view" id="memoriesView" style="display:none;">
+                <div class="header-controls">
+                    <button class="back-btn-main" onclick="goHome()" title="Retour"><i class="fas fa-arrow-left"></i></button>
+                    <h2 style="font-size:1.2rem; margin:0;">Mes Souvenirs</h2>
+                </div>
+                <div id="memoriesFeed" style="margin-top:20px; display:flex; flex-direction:column; gap:14px; padding-bottom:120px;"></div>
+            </div>
 
             <div class="profile-view" id="profileView">
                 <div class="profile-container">
@@ -355,6 +393,7 @@
                     <button id="btnLike" class="action-btn-mini" onclick="toggleLike()" title="Ajouter aux favoris"><i class="far fa-heart"></i></button>
                     <button class="action-btn-mini" onclick="openAddToPlaylistModal()" title="Ajouter à une Playlist"><i class="fas fa-list-ul"></i></button>
                     <button class="share-btn-mini" onclick="copyLink()" title="Partager"><i class="fas fa-link" style="color:var(--text-dim)"></i></button>
+                    <button class="action-btn-mini" onclick="openMemoryModal()" title="Épingler un souvenir" id="btnPinMemory"><i class="fas fa-thumbtack"></i></button>
                 </div>
             </div>
             <div class="cap-center">
@@ -2082,14 +2121,15 @@
             else goHome(); 
         };
         async function openTrackDirect(id,s){ try{const r=await fetch(`${API_BASE}/track?id=${id}&source=${s||''}`); const d=await r.json(); if(d.id){ let i=d.source==='subsonic'?`${API_BASE}/get_subsonic_cover/${d.album.image.large}`:(d.album.image.large||'').replace('_300','_600'); tracks=[{...d,img:i,performer:d.performer||{name:d.artist?d.artist.name:"Artiste"},type:'track'}]; renderGrid(tracks,true); loadTrack(0, false); }}catch(e){}}
-        function showTracks(){ 
-            document.getElementById('trackView').style.display='block'; 
-            document.getElementById('artistView').style.display='none'; 
-            document.getElementById('lyricsView').style.display='none'; 
-            document.getElementById('blindTestView').style.display='none'; 
-            document.getElementById('profileView').style.display='none'; 
-            document.getElementById('playlistView').style.display='none'; 
-            document.getElementById('allPlaylistsView').style.display='none'; 
+        function showTracks(){
+            document.getElementById('trackView').style.display='block';
+            document.getElementById('artistView').style.display='none';
+            document.getElementById('lyricsView').style.display='none';
+            document.getElementById('blindTestView').style.display='none';
+            document.getElementById('profileView').style.display='none';
+            document.getElementById('playlistView').style.display='none';
+            document.getElementById('allPlaylistsView').style.display='none';
+            document.getElementById('memoriesView').style.display='none'; 
             document.getElementById('searchBarContainer').style.display='flex'; 
             isLyricsMode=false; 
             document.getElementById('introContainer').style.display='none'; 
@@ -2386,6 +2426,181 @@
         }
         function updateMediaSessionState() { if (!('mediaSession' in navigator)) return; let d = activeAudio.duration; const t = tracks[currentIndex]; if ((!d || !isFinite(d)) && t && t.duration) { d = t.duration; } if (d && isFinite(d) && activeAudio.currentTime <= d) { try { navigator.mediaSession.setPositionState({ duration: d, playbackRate: activeAudio.playbackRate, position: activeAudio.currentTime }); } catch(e) { console.warn("MediaSession Error:", e); } } }
         
+        // ─── SOUVENIRS ────────────────────────────────────────────────────────────
+        function escapeHtml(s) {
+            if (!s) return '';
+            return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        }
+
+        let _memoryLat = null, _memoryLng = null, _memoryLocationName = null;
+
+        function openMemoryModal() {
+            const track = tracks[currentIndex];
+            if (!track) { showToast('Aucune musique en cours'); return; }
+
+            const img = (track.album?.image?.large || '').replace('_300','_600') || 'https://placehold.co/60x60/1a1a1a/444?text=Z';
+            document.getElementById('memoryTrackArt').src = img;
+            document.getElementById('memoryTrackTitle').textContent = track.title;
+            document.getElementById('memoryTrackArtist').textContent = track.performer?.name || '';
+            document.getElementById('memoryNoteInput').value = '';
+            document.getElementById('memoryPhotoPreview').style.display = 'none';
+            document.getElementById('memoryPhotoInput').value = '';
+            document.getElementById('memoryPhotoLabel').textContent = 'Ajouter une photo (optionnel)';
+            document.getElementById('btnSaveMemory').disabled = false;
+            document.getElementById('btnSaveMemory').innerHTML = '<i class="fas fa-thumbtack"></i> Épingler';
+
+            _memoryLat = null; _memoryLng = null; _memoryLocationName = null;
+            document.getElementById('memoryLocationText').textContent = 'Récupération de la position...';
+            document.getElementById('memoryModal').style.display = 'flex';
+
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(async (pos) => {
+                    _memoryLat = pos.coords.latitude;
+                    _memoryLng = pos.coords.longitude;
+                    try {
+                        const r = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${_memoryLat}&lon=${_memoryLng}&format=json`, { headers: { 'Accept-Language': 'fr' } });
+                        const geo = await r.json();
+                        const city = geo.address?.city || geo.address?.town || geo.address?.village || geo.address?.county || '';
+                        const country = geo.address?.country || '';
+                        _memoryLocationName = [city, country].filter(Boolean).join(', ') || null;
+                        document.getElementById('memoryLocationText').textContent = _memoryLocationName || `${_memoryLat.toFixed(3)}, ${_memoryLng.toFixed(3)}`;
+                    } catch {
+                        _memoryLocationName = `${_memoryLat.toFixed(3)}, ${_memoryLng.toFixed(3)}`;
+                        document.getElementById('memoryLocationText').textContent = _memoryLocationName;
+                    }
+                }, () => {
+                    document.getElementById('memoryLocationText').textContent = 'Position non partagée';
+                });
+            } else {
+                document.getElementById('memoryLocationText').textContent = 'Géolocalisation non supportée';
+            }
+        }
+
+        function closeMemoryModal() {
+            document.getElementById('memoryModal').style.display = 'none';
+        }
+
+        function previewMemoryPhoto(input) {
+            if (!input.files?.[0]) return;
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const p = document.getElementById('memoryPhotoPreview');
+                p.src = e.target.result;
+                p.style.display = 'block';
+            };
+            document.getElementById('memoryPhotoLabel').textContent = input.files[0].name;
+            reader.readAsDataURL(input.files[0]);
+        }
+
+        async function saveMemory() {
+            const track = tracks[currentIndex];
+            if (!track) return;
+            const { data: { user } } = await supabaseClient.auth.getUser();
+            if (!user) return showToast('Non connecté');
+
+            const btn = document.getElementById('btnSaveMemory');
+            btn.disabled = true;
+            btn.innerHTML = '...';
+
+            let photoUrl = null;
+            const photoFile = document.getElementById('memoryPhotoInput').files[0];
+            if (photoFile) {
+                try {
+                    const ext = photoFile.name.split('.').pop();
+                    const { error: upErr } = await supabaseClient.storage.from('memories').upload(`${user.id}/${Date.now()}.${ext}`, photoFile);
+                    if (!upErr) {
+                        const { data: { publicUrl } } = supabaseClient.storage.from('memories').getPublicUrl(`${user.id}/${Date.now()}.${ext}`);
+                        photoUrl = publicUrl;
+                    }
+                } catch {}
+            }
+
+            const note = document.getElementById('memoryNoteInput').value.trim();
+            const trackSnap = { id: track.id, title: track.title, performer: track.performer, album: track.album, source: track.source, duration: track.duration };
+
+            const { error } = await supabaseClient.from('memories').insert({
+                user_id: user.id,
+                track_id: String(track.id),
+                track_data: trackSnap,
+                note: note || null,
+                photo_url: photoUrl,
+                lat: _memoryLat,
+                lng: _memoryLng,
+                location_name: _memoryLocationName
+            });
+
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-thumbtack"></i> Épingler';
+
+            if (error) { showToast('Erreur — crée la table memories dans Supabase'); console.error(error); }
+            else { closeMemoryModal(); showToast('📍 Souvenir épinglé !'); }
+        }
+
+        function showMemories() {
+            resetNavStack();
+            document.getElementById('trackView').style.display = 'none';
+            document.getElementById('artistView').style.display = 'none';
+            document.getElementById('lyricsView').style.display = 'none';
+            document.getElementById('blindTestView').style.display = 'none';
+            document.getElementById('profileView').style.display = 'none';
+            document.getElementById('playlistView').style.display = 'none';
+            document.getElementById('allPlaylistsView').style.display = 'none';
+            document.getElementById('searchBarContainer').style.display = 'none';
+            document.getElementById('memoriesView').style.display = 'block';
+            document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+            loadMemories();
+        }
+
+        async function loadMemories() {
+            const feed = document.getElementById('memoriesFeed');
+            feed.innerHTML = '<p style="text-align:center;color:#444;padding:40px;">Chargement...</p>';
+            try {
+                const { data: { user } } = await supabaseClient.auth.getUser();
+                if (!user) return;
+                const { data, error } = await supabaseClient.from('memories').select('*').eq('user_id', user.id).order('created_at', { ascending: false });
+                if (error) throw error;
+                if (!data?.length) {
+                    feed.innerHTML = `<div style="text-align:center;padding:70px 20px;color:#444;"><i class="fas fa-bookmark" style="font-size:38px;margin-bottom:14px;display:block;"></i><p>Aucun souvenir pour l'instant.</p><p style="font-size:12px;margin-top:8px;">Écoute une musique et clique sur 📍</p></div>`;
+                    return;
+                }
+                renderMemoryCards(data, feed);
+            } catch(e) { console.error(e); feed.innerHTML = '<p style="color:red;text-align:center;padding:30px;">Erreur de chargement.</p>'; }
+        }
+
+        function renderMemoryCards(memories, feed) {
+            feed.innerHTML = '';
+            memories.forEach(m => {
+                const t = m.track_data || {};
+                const img = t.album?.image?.large || 'https://placehold.co/64x64/111/444?text=Z';
+                const d = new Date(m.created_at);
+                const dateStr = d.toLocaleDateString('fr-FR', { day:'numeric', month:'long', year:'numeric' });
+                const timeStr = d.toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' });
+
+                const card = document.createElement('div');
+                card.className = 'memory-card';
+                card.innerHTML = `
+                    <img src="${escapeHtml(img)}" class="memory-card-art" onerror="this.src='https://placehold.co/64x64/111/444?text=Z'">
+                    <div class="memory-card-body">
+                        <span class="memory-date-badge">${escapeHtml(dateStr)} · ${escapeHtml(timeStr)}</span>
+                        <div class="memory-card-title">${escapeHtml(t.title || 'Titre inconnu')}</div>
+                        <div class="memory-card-artist">${escapeHtml(t.performer?.name || '')}</div>
+                        ${m.note ? `<div class="memory-card-note">${escapeHtml(m.note)}</div>` : ''}
+                        ${m.photo_url ? `<img src="${escapeHtml(m.photo_url)}" class="memory-card-photo">` : ''}
+                        <div class="memory-card-meta">
+                            ${m.location_name ? `<span><i class="fas fa-map-marker-alt" style="color:#ff0055;"></i> ${escapeHtml(m.location_name)}</span>` : ''}
+                        </div>
+                    </div>`;
+
+                card.querySelector('.memory-card-art').onclick = () => {};
+                card.onclick = (e) => {
+                    if (e.target.classList.contains('memory-card-photo')) { window.open(m.photo_url, '_blank'); return; }
+                    if (t.id) { tracks = [t]; currentIndex = 0; loadTrack(0, true); showToast(`▶ ${t.title}`); }
+                };
+                feed.appendChild(card);
+            });
+        }
+        // ──────────────────────────────────────────────────────────────────────────
+
         document.addEventListener('DOMContentLoaded',()=>{
             document.getElementById('btnSearch').addEventListener('click',performSearch);
             document.getElementById('searchInput').addEventListener('keypress',(e)=>{if(e.key==='Enter')performSearch();});
