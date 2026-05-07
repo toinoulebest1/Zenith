@@ -4,7 +4,6 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import time
 import json
-import base64 # Nécessaire pour décoder le manifeste Tidal 16-bit
 import difflib # Nécessaire pour le matching Chosic
 import subprocess # Nécessaire pour le transcodage FLAC
 
@@ -13,7 +12,7 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(current_dir)
 PROJECT_ROOT = os.path.abspath(os.path.join(current_dir, '..'))
 
-from fastapi import FastAPI, Request, Response, HTTPException, UploadFile, File
+from fastapi import FastAPI, Request, Response, HTTPException
 from fastapi.responses import JSONResponse, RedirectResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -1828,30 +1827,6 @@ async def get_lyrics(artist: str, title: str, album: str = None, duration: str =
     if yt_res and yt_res['type'] == 'plain': return JSONResponse({"type": "plain", "lyrics": yt_res['lyrics'], "source": "YouTube"})
     if lrc_plain: return JSONResponse({"type": "plain", "lyrics": lrc_plain, "source": "LRCLib"})
     raise HTTPException(404, "No lyrics")
-
-@app.post('/upload-image')
-async def upload_image_proxy(file: UploadFile = File(...)):
-    """Proxy image upload to catbox.moe server-side (avoids browser CORS block)."""
-    try:
-        content = await file.read()
-        fname = file.filename or 'photo.jpg'
-        ctype = file.content_type or 'image/jpeg'
-        r = requests.post(
-            'https://catbox.moe/user/api.php',
-            data={'reqtype': 'fileupload', 'userhash': ''},
-            files={'fileToUpload': (fname, content, ctype)},
-            timeout=30
-        )
-        url = r.text.strip()
-        if not url.startswith('https://'):
-            logger.error(f"[upload-image] Catbox response: {url}")
-            raise HTTPException(500, f"Catbox error: {url}")
-        return JSONResponse({'url': url})
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"[upload-image] Error: {e}")
-        raise HTTPException(500, str(e))
 
 # --- STATIC FILES ---
 app.mount("/", StaticFiles(directory=PROJECT_ROOT, html=True), name="static")
