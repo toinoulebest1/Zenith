@@ -13,7 +13,7 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(current_dir)
 PROJECT_ROOT = os.path.abspath(os.path.join(current_dir, '..'))
 
-from fastapi import FastAPI, Request, Response, HTTPException
+from fastapi import FastAPI, Request, Response, HTTPException, UploadFile, File
 from fastapi.responses import JSONResponse, RedirectResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -1830,20 +1830,22 @@ async def get_lyrics(artist: str, title: str, album: str = None, duration: str =
     raise HTTPException(404, "No lyrics")
 
 @app.post('/upload-image')
-async def upload_image_proxy(request: Request):
-    """Proxy multipart image upload to catbox.moe (avoids browser CORS restriction)."""
+async def upload_image_proxy(file: UploadFile = File(...)):
+    """Proxy image upload to catbox.moe server-side (avoids browser CORS block)."""
     try:
-        form = await request.form()
-        file = form.get('file')
-        if not file:
-            raise HTTPException(400, "No file provided")
         content = await file.read()
-        files = {'fileToUpload': (file.filename, content, file.content_type)}
-        data = {'reqtype': 'fileupload'}
-        r = requests.post('https://catbox.moe/user/api.php', data=data, files=files, timeout=30)
+        fname = file.filename or 'photo.jpg'
+        ctype = file.content_type or 'image/jpeg'
+        r = requests.post(
+            'https://catbox.moe/user/api.php',
+            data={'reqtype': 'fileupload'},
+            files={'fileToUpload': (fname, content, ctype)},
+            timeout=30
+        )
         url = r.text.strip()
         if not url.startswith('https://'):
-            raise HTTPException(500, f"Upload failed: {url}")
+            logger.error(f"[upload-image] Catbox response: {url}")
+            raise HTTPException(500, f"Catbox error: {url}")
         return JSONResponse({'url': url})
     except HTTPException:
         raise

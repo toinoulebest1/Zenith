@@ -270,6 +270,7 @@
                     <button class="back-btn-main" onclick="goHome()" title="Retour"><i class="fas fa-arrow-left"></i></button>
                     <h2 style="font-size:1.2rem; margin:0; flex:1;">Mes Souvenirs</h2>
                     <button onclick="openMemoriesReel()" class="reel-trigger-btn"><i class="fas fa-film"></i> Il y a 1 an</button>
+                    <button onclick="openMemoriesReelTest()" class="reel-trigger-btn" style="background:rgba(255,100,100,0.12);border-color:rgba(255,100,100,0.3);color:rgba(255,160,160,0.9);" title="Test : lecture aléatoire de tous vos souvenirs"><i class="fas fa-flask"></i> Test</button>
                 </div>
                 <div id="memoriesFeed" style="margin-top:20px; display:flex; flex-direction:column; gap:14px; padding-bottom:120px;"></div>
             </div>
@@ -2481,6 +2482,27 @@
             }
 
             _reelMemories = data;
+            _reelIdx = 0;
+            document.getElementById('memoriesReelOverlay').style.display = 'flex';
+            _showReelSlide(0);
+        }
+
+        async function openMemoriesReelTest() {
+            const { data: { user } } = await supabaseClient.auth.getUser();
+            if (!user) return;
+
+            const { data, error } = await supabaseClient
+                .from('memories').select('*').eq('user_id', user.id)
+                .order('created_at', { ascending: false });
+
+            if (error || !data?.length) {
+                showToast("Aucun souvenir pour le test 🕰️");
+                return;
+            }
+
+            // Shuffle randomly
+            const shuffled = [...data].sort(() => Math.random() - 0.5);
+            _reelMemories = shuffled;
             _reelIdx = 0;
             document.getElementById('memoriesReelOverlay').style.display = 'flex';
             _showReelSlide(0);
