@@ -530,6 +530,7 @@
         <div class="reel-tint"></div>
         <div class="reel-grain"></div>
         <div class="reel-scanlines"></div>
+        <div class="reel-super8-frame"></div>
 
         <!-- Letterbox bars (cinema) -->
         <div class="reel-lbox-t"></div>
@@ -2594,12 +2595,22 @@
 
         // ─── MEMORIES REEL ───────────────────────────────────────────────────────
         let _reelMemories = [], _reelIdx = 0, _reelTimer = null;
-        const _REEL_TYPES = ['stories', 'polaroid', 'cinema', 'vhs'];
+        const _REEL_TYPES = ['stories', 'polaroid', 'cinema', 'vhs', 'super8'];
 
         function _assignReelTypes(arr) {
-            // Shuffle the type sequence so it's not always the same order
             const seq = [..._REEL_TYPES].sort(() => Math.random() - 0.5);
             return arr.map((m, i) => ({ ...m, _reelType: seq[i % seq.length] }));
+        }
+
+        function _getTimeLabel(dateStr) {
+            const d = new Date(dateStr), now = new Date();
+            const days = Math.floor((now - d) / 86400000);
+            if (days < 1) return "AUJOURD'HUI";
+            if (days < 7) return days === 1 ? 'IL Y A 1 JOUR' : `IL Y A ${days} JOURS`;
+            const months = Math.round(days / 30.4);
+            if (months < 12) return months <= 1 ? 'IL Y A 1 MOIS' : `IL Y A ${months} MOIS`;
+            const years = Math.round(months / 12);
+            return years <= 1 ? 'IL Y A 1 AN' : `IL Y A ${years} ANS`;
         }
 
         async function openMemoriesReel() {
@@ -2622,10 +2633,7 @@
                 return;
             }
 
-            _reelMemories = _assignReelTypes(data);
-            _reelIdx = 0;
-            document.getElementById('memoriesReelOverlay').style.display = 'flex';
-            _showReelSlide(0);
+            _openReelWith(_assignReelTypes(data));
         }
 
         async function openMemoriesReelTest() {
@@ -2641,8 +2649,11 @@
                 return;
             }
 
-            const shuffled = [...data].sort(() => Math.random() - 0.5);
-            _reelMemories = _assignReelTypes(shuffled);
+            _openReelWith(_assignReelTypes([...data].sort(() => Math.random() - 0.5)));
+        }
+
+        function _openReelWith(arr) {
+            _reelMemories = arr;
             _reelIdx = 0;
             document.getElementById('memoriesReelOverlay').style.display = 'flex';
             _showReelSlide(0);
@@ -2656,12 +2667,14 @@
             const mainImg = m.photo_url || albumImg;
             const type = m._reelType || 'stories';
 
-            // Apply type class on overlay
+            const artistName = t.performer?.name || t.artist?.name || (Array.isArray(t.artists) ? t.artists[0]?.name : '') || t.artist || '';
+
+            // Apply type class
             const overlay = document.getElementById('memoriesReelOverlay');
             _REEL_TYPES.forEach(tp => overlay.classList.remove(`reel-type-${tp}`));
             overlay.classList.add(`reel-type-${type}`);
 
-            // Background: always album art for cinematic blur
+            // Background blur (always album art for depth)
             const bg = document.getElementById('reelBg');
             bg.style.opacity = '0';
             setTimeout(() => { bg.style.backgroundImage = `url('${albumImg}')`; bg.style.opacity = '1'; }, 120);
@@ -2672,31 +2685,41 @@
             void content.offsetWidth;
             content.classList.add('reel-slide-in');
 
-            // Main visual (photo > album art)
+            // Main image (photo takes priority over album art)
             document.getElementById('reelMainImg').src = mainImg;
 
-            // Date
+            // Dates
             const d = new Date(m.created_at);
             const dateLong = d.toLocaleDateString('fr-FR', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
             const dateShort = d.toLocaleDateString('fr-FR', { day:'2-digit', month:'2-digit', year:'numeric' });
+
+            // Top bar: dynamic time label + slide counter
+            document.querySelector('#memoriesReelOverlay .reel-year-badge').textContent =
+                `${_getTimeLabel(m.created_at)}  ${idx + 1}/${_reelMemories.length}`;
             document.getElementById('reelDate').textContent = dateLong;
 
-            // Note: overlay on image (stories/vhs) or inside polaroid frame
+            // Note overlay — fixed: properly scoped per type
             const noteEl = document.getElementById('reelNoteOverlay');
-            if (m.note && type !== 'polaroid') { noteEl.textContent = `« ${m.note} »`; noteEl.style.display = 'block'; }
-            else { noteEl.style.display = 'none'; }
-
-            // Polaroid: caption below frame (date + note)
-            const capEl = document.getElementById('reelPolaroidCaption');
-            if (type === 'polaroid') {
-                capEl.textContent = m.note ? `« ${m.note} » · ${dateShort}` : dateShort;
+            if (type === 'cinema') {
+                noteEl.textContent = ''; noteEl.style.display = 'none';
+            } else if (type === 'polaroid') {
+                // Flows inside white frame via position:static (CSS)
+                noteEl.textContent = m.note || '';
+                noteEl.style.display = m.note ? 'block' : 'none';
+            } else {
+                // stories / vhs / super8: translucent overlay at bottom of photo
+                noteEl.textContent = m.note ? `« ${m.note} »` : '';
+                noteEl.style.display = m.note ? 'block' : 'none';
             }
 
-            // Cinema: credits at bottom
-            document.getElementById('reelCinemaTitle').textContent = t.title || '';
-            document.getElementById('reelCinemaArtist').textContent = t.performer?.name || '';
+            // Polaroid caption: date only (note is already inside the frame)
+            document.getElementById('reelPolaroidCaption').textContent = type === 'polaroid' ? dateShort : '';
 
-            // VHS: timestamp bottom-left
+            // Cinema credits
+            document.getElementById('reelCinemaTitle').textContent = t.title || '';
+            document.getElementById('reelCinemaArtist').textContent = artistName;
+
+            // VHS / super8 timestamp
             document.getElementById('reelVhsTs').textContent =
                 dateShort + '  ' + d.toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' });
 
@@ -2710,11 +2733,11 @@
             // Music pill
             document.getElementById('reelArt').src = albumImg;
             document.getElementById('reelTitle').textContent = t.title || '';
-            document.getElementById('reelArtist').textContent = t.performer?.name || '';
+            document.getElementById('reelArtist').textContent = artistName;
 
             _buildReelProgress();
 
-            // Play + seek to 45–70%
+            // Play track + seek 45–70% into the song
             if (t.id) {
                 tracks = [{ ...t }]; currentIndex = 0; loadTrack(0, true);
                 const seekFrac = 0.45 + Math.random() * 0.25;
@@ -2758,6 +2781,25 @@
             clearTimeout(_reelTimer);
             document.getElementById('memoriesReelOverlay').style.display = 'none';
         }
+
+        // Touch swipe + keyboard — registered once on load
+        (function() {
+            const ov = document.getElementById('memoriesReelOverlay');
+            let tx = null;
+            ov.addEventListener('touchstart', e => { tx = e.touches[0].clientX; }, { passive: true });
+            ov.addEventListener('touchend', e => {
+                if (tx === null) return;
+                const dx = e.changedTouches[0].clientX - tx; tx = null;
+                if (Math.abs(dx) < 50) return;
+                dx < 0 ? nextReelSlide() : prevReelSlide();
+            }, { passive: true });
+            document.addEventListener('keydown', e => {
+                if (document.getElementById('memoriesReelOverlay').style.display === 'none') return;
+                if (e.key === 'ArrowRight' || e.key === 'ArrowDown') nextReelSlide();
+                else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') prevReelSlide();
+                else if (e.key === 'Escape') closeMemoriesReel();
+            });
+        })();
         // ─────────────────────────────────────────────────────────────────────────
 
         // ─── SOUVENIRS ────────────────────────────────────────────────────────────

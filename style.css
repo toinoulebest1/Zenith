@@ -477,7 +477,7 @@ body.zen-active.zen-idle { cursor: none; }
 .reel-type-polaroid .reel-tint { background:linear-gradient(to bottom,rgba(12,6,2,0.8) 0%,rgba(6,3,0,0.5) 50%,rgba(12,6,2,0.85) 100%); }
 .reel-type-polaroid .reel-visual-wrap { background:#f2ede4; padding:10px 10px 0; border-radius:2px; transform:rotate(-2.5deg); overflow:visible; max-width:240px; box-shadow:0 24px 70px rgba(0,0,0,0.9),0 4px 16px rgba(0,0,0,0.6); }
 .reel-type-polaroid .reel-main-img { max-height:34vh; border-radius:0; width:100%; }
-.reel-type-polaroid .reel-note-overlay { position:static !important; display:block !important; background:none; color:#3a2c1e; font-size:12px; text-shadow:none; padding:9px 8px 12px; text-align:center; font-family:'Georgia',serif; background:none; white-space:normal; }
+.reel-type-polaroid .reel-note-overlay { position:static !important; background:none; color:#3a2c1e; font-size:13px; text-shadow:none; padding:9px 8px 14px; text-align:center; font-family:'Georgia',serif; font-style:italic; white-space:normal; line-height:1.5; }
 .reel-type-polaroid .reel-polaroid-caption { display:block; }
 .reel-type-polaroid .reel-music-pill { background:rgba(6,3,0,0.75); }
 .reel-type-polaroid .reel-year-badge { color:rgba(220,180,100,0.7); }
@@ -511,6 +511,33 @@ body.zen-active.zen-idle { cursor: none; }
 .reel-type-vhs .reel-year-badge { color:rgba(255,160,50,0.75); letter-spacing:2px; }
 .reel-type-vhs .reel-bar-fill { background:rgba(255,160,50,0.9); }
 .reel-type-vhs .reel-vinyl { border-color:rgba(255,140,40,0.25); }
+
+/* --- TYPE: super8 --- */
+.reel-super8-frame { display:none; position:absolute; inset:0; z-index:4; pointer-events:none; box-shadow:inset 0 0 100px rgba(0,0,0,0.5), inset 0 0 14px rgba(140,70,8,0.22); }
+.reel-type-super8 .reel-bg { filter:blur(30px) brightness(0.22) saturate(0.45) sepia(0.5); }
+.reel-type-super8 .reel-tint { background:linear-gradient(to bottom,rgba(30,11,0,0.7) 0%,rgba(14,5,0,0.12) 40%,rgba(14,5,0,0.12) 60%,rgba(30,11,0,0.82) 100%); }
+.reel-type-super8 .reel-grain { opacity:0.23; }
+.reel-type-super8 .reel-super8-frame { display:block; }
+.reel-type-super8 .reel-main-img { filter:sepia(0.5) saturate(0.75) contrast(1.06); animation:s8-shake 14s infinite; }
+.reel-type-super8 .reel-visual-wrap { border:2px solid rgba(200,130,20,0.1); border-radius:6px; }
+.reel-type-super8 .reel-music-pill { background:rgba(22,9,0,0.8); border-color:rgba(205,138,25,0.24); }
+.reel-type-super8 .reel-music-wave span { background:rgba(210,145,32,0.92); }
+.reel-type-super8 .reel-vinyl { border-color:rgba(210,145,32,0.3); }
+.reel-type-super8 .reel-year-badge { color:rgba(210,145,32,0.88); font-family:'Courier New',monospace; letter-spacing:2px; }
+.reel-type-super8 .reel-date-text { font-family:'Courier New',monospace; font-size:13px; color:rgba(255,220,160,0.88); }
+.reel-type-super8 .reel-bar-fill { background:rgba(210,145,32,0.92); }
+.reel-type-super8 .reel-vhs-ts { display:block; color:rgba(210,145,32,0.78); }
+.reel-type-super8 .reel-slide.reel-slide-in { animation:reel-entrance-s8 0.55s ease; }
+@keyframes reel-entrance-s8 { from{opacity:0;filter:brightness(2.5) sepia(1)} to{opacity:1;filter:brightness(1) sepia(0)} }
+@keyframes s8-shake { 0%,90%,100%{transform:none} 91%{transform:translate(-1px,-0.5px) rotate(0.2deg)} 93%{transform:translate(0.8px,0.5px) rotate(-0.15deg)} 95%{transform:none} 97%{transform:translate(-0.5px,0.3px)} 98.5%{transform:none} }
+
+/* --- Reel type-specific entrance overrides --- */
+.reel-type-cinema .reel-slide.reel-slide-in { animation:reel-entrance-cinema 0.7s ease; }
+@keyframes reel-entrance-cinema { from{opacity:0} to{opacity:1} }
+.reel-type-polaroid .reel-slide.reel-slide-in { animation:reel-entrance-polaroid 0.6s cubic-bezier(0.34,1.48,0.64,1); }
+@keyframes reel-entrance-polaroid { from{opacity:0;transform:scale(0.82) translateY(28px) rotate(-6deg)} to{opacity:1;transform:none} }
+.reel-type-vhs .reel-slide.reel-slide-in { animation:reel-entrance-vhs 0.35s ease; }
+@keyframes reel-entrance-vhs { from{opacity:0;filter:brightness(2.8)} to{opacity:1;filter:brightness(1)} }
 
 /* --- SOUVENIRS --- */
 .memory-card { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 16px; display: flex; gap: 14px; cursor: pointer; position: relative; transition: background 0.2s; }
