@@ -1452,98 +1452,6 @@
             if(radioTimeout) clearTimeout(radioTimeout);
         }
 
-        function updateNeonFromImage(imgEl) {
-            try {
-                const N = 200;
-                // DEPTH = nombre de pixels vers l'intérieur échantillonnés par position de bord
-                // Avec DEPTH=15 on voit les arbres, personnages, etc. qui commencent quelques px depuis le bord
-                const DEPTH = 15;
-                const canvas = document.createElement('canvas');
-                canvas.width = N; canvas.height = N;
-                const ctx = canvas.getContext('2d', { willReadFrequently: true });
-                ctx.drawImage(imgEl, 0, 0, N, N);
-
-                // Un seul appel getImageData pour tous les pixels
-                const raw = ctx.getImageData(0, 0, N, N).data;
-                function getRaw(x, y) {
-                    const i = (y * N + x) * 4;
-                    return [raw[i], raw[i+1], raw[i+2]];
-                }
-
-                // Convertit RGB → couleur néon : saturation forcée ≥ 0.85, luminosité fixe à 0.55
-                // Les couleurs quasi-grises (saturation < 0.08) sont gardées telles quelles
-                function neonColor(r, g, b) {
-                    const nr = r/255, ng = g/255, nb = b/255;
-                    const max = Math.max(nr, ng, nb), min = Math.min(nr, ng, nb);
-                    if (max === min) return `rgb(${r},${g},${b})`;
-                    const d = max - min;
-                    const l = (max + min) / 2;
-                    const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-                    if (s < 0.08) return `rgb(${r},${g},${b})`; // quasi-gris → inchangé
-                    let h;
-                    if (max === nr)      h = ((ng - nb) / d + (ng < nb ? 6 : 0)) / 6;
-                    else if (max === ng) h = ((nb - nr) / d + 2) / 6;
-                    else                h = ((nr - ng) / d + 4) / 6;
-                    const ns = Math.max(s, 0.85), nl = 0.55;
-                    const q = nl < 0.5 ? nl * (1 + ns) : nl + ns - nl * ns;
-                    const p = 2 * nl - q;
-                    function h2r(p, q, t) {
-                        if (t < 0) t += 1; if (t > 1) t -= 1;
-                        if (t < 1/6) return p + (q-p)*6*t;
-                        if (t < 1/2) return q;
-                        if (t < 2/3) return p + (q-p)*(2/3-t)*6;
-                        return p;
-                    }
-                    return `rgb(${Math.round(h2r(p,q,h+1/3)*255)},${Math.round(h2r(p,q,h)*255)},${Math.round(h2r(p,q,h-1/3)*255)})`;
-                }
-
-                // Pour chaque position du périmètre, on moyenne DEPTH pixels vers l'intérieur
-                // dx/dy = direction "vers l'intérieur" de l'image
-                function sampleBand(x, y, dx, dy) {
-                    let r=0, g=0, b=0;
-                    for (let d = 0; d < DEPTH; d++) {
-                        const [pr, pg, pb] = getRaw(x + dx*d, y + dy*d);
-                        r += pr; g += pg; b += pb;
-                    }
-                    return neonColor(Math.round(r/DEPTH), Math.round(g/DEPTH), Math.round(b/DEPTH));
-                }
-
-                // Périmètre complet en sens horaire depuis le coin haut-gauche
-                const colors = [];
-                for (let x = 0; x < N; x++)     colors.push(sampleBand(x,   0,    0,  1)); // haut → inward = +y
-                for (let y = 1; y < N; y++)     colors.push(sampleBand(N-1, y,   -1,  0)); // droite → inward = -x
-                for (let x = N-2; x >= 0; x--) colors.push(sampleBand(x,   N-1,  0, -1)); // bas → inward = -y
-                for (let y = N-2; y > 0; y--)  colors.push(sampleBand(0,   y,    1,  0)); // gauche → inward = +x
-
-                const total = colors.length;
-                const stops = colors.map((c, i) => `${c} ${(i / total * 100).toFixed(2)}%`).join(',');
-                const gradient = `conic-gradient(from 315deg, ${stops})`;
-
-                // Box-shadow directionnel : moyenne des couleurs naturelles de chaque bord (band complète)
-                function avgBandRaw(x, y, dx, dy, count) {
-                    let r=0, g=0, b=0, n=0;
-                    for (let i = 0; i < count; i++) {
-                        for (let d = 0; d < DEPTH; d++) {
-                            const [pr,pg,pb] = getRaw(x + dx*d + (dy !== 0 ? i : 0), y + dy*d + (dx !== 0 ? i : 0));
-                            r+=pr; g+=pg; b+=pb; n++;
-                        }
-                    }
-                    return `rgb(${Math.round(r/n)},${Math.round(g/n)},${Math.round(b/n)})`;
-                }
-                const mid = Math.floor(N/2), sp = Math.floor(N/3);
-                const half = Math.floor(sp/2);
-                const topC    = avgBandRaw(mid-half,  0,    0,  1, sp);
-                const rightC  = avgBandRaw(N-1, mid-half,  -1,  0, sp);
-                const bottomC = avgBandRaw(mid-half,  N-1,  0, -1, sp);
-                const leftC   = avgBandRaw(0,   mid-half,   1,  0, sp);
-
-                const wrapper = document.querySelector('.xl-image-wrapper');
-                const img = wrapper && wrapper.querySelector('.album-art-xl');
-                if (wrapper) wrapper.style.setProperty('--neon-gradient', gradient);
-                if (img) img.style.boxShadow = `0 -8px 22px 4px ${topC}, 8px 0 22px 4px ${rightC}, 0 8px 22px 4px ${bottomC}, -8px 0 22px 4px ${leftC}`;
-            } catch(e) { console.warn('Neon update failed (CORS?):', e); }
-        }
-
         function updateInterfaceInfo(t) {
             let img = ''; 
             if(t.source === 'subsonic') {
@@ -1587,13 +1495,11 @@
                 amb.style.backgroundImage = `url('${bgImg}')`;
 
                 const tempImg = new Image();
-                tempImg.crossOrigin = 'anonymous';
                 tempImg.onload = () => {
                     xlArt.src = img;
                     capArt.src = img;
                     xlArt.classList.remove('fade-out-active');
                     capArt.classList.remove('fade-out-active');
-                    updateNeonFromImage(tempImg);
                 };
                 tempImg.src = img;
                 setTimeout(() => { xlArt.classList.remove('fade-out-active'); capArt.classList.remove('fade-out-active'); }, 1000);
@@ -1658,7 +1564,12 @@
                 if(document.getElementById('bioReadMoreBtn')) document.getElementById('bioReadMoreBtn').remove();
 
                 if (data.bio) {
-                    bioEl.innerHTML = data.bio;
+                    bioEl.innerHTML = data.bio
+                        .replace(/<script[\s\S]*?<\/script>/gi, '')
+                        .replace(/<style[\s\S]*?<\/style>/gi, '')
+                        .replace(/on\w+\s*=\s*["'][^"']*["']/gi, '')
+                        .replace(/javascript\s*:/gi, '')
+                        .replace(/<(?!\/?(?:br|p|b|i|em|strong|a)\b)[^>]+>/gi, '');
                     bioEl.style.display = 'block';
                     
                     // Improved truncation logic (visual lines approximation)
@@ -2039,7 +1950,7 @@
                 } else if(d.type==='plain') {
                     // Pour le texte brut, on crée un pseudo-objet pour la logique de traduction
                     originalLyricsData = [{text: d.lyrics, isPlain: true}];
-                    document.getElementById('lyricsContent').innerHTML=`<div style="white-space:pre-line;font-size:18px;line-height:1.6;">${d.lyrics}</div>`; 
+                    const ld=document.createElement('div');ld.style.cssText='white-space:pre-line;font-size:18px;line-height:1.6;';ld.textContent=d.lyrics;document.getElementById('lyricsContent').replaceChildren(ld);
                 } else {
                     document.getElementById('lyricsContent').innerHTML='<p style="margin-top:50px;">Non trouvé.</p>';
                 }
@@ -2057,7 +1968,7 @@
                 document.getElementById('btnTranslate').innerHTML = '<i class="fas fa-language"></i> Traduire';
                 
                 if(lyricsData.length > 0 && lyricsData[0].isPlain) {
-                    document.getElementById('lyricsContent').innerHTML=`<div style="white-space:pre-line;font-size:18px;line-height:1.6;">${lyricsData[0].text}</div>`;
+                    const lt=document.createElement('div');lt.style.cssText='white-space:pre-line;font-size:18px;line-height:1.6;';lt.textContent=lyricsData[0].text;document.getElementById('lyricsContent').replaceChildren(lt);
                 } else {
                     renderSyncedLyrics();
                 }
@@ -2100,7 +2011,7 @@
                 btn.innerHTML = '<i class="fas fa-check"></i> Original';
                 
                 if(lyricsData.length > 0 && lyricsData[0].isPlain) {
-                    document.getElementById('lyricsContent').innerHTML=`<div style="white-space:pre-line;font-size:18px;line-height:1.6;">${lyricsData[0].text}</div>`;
+                    const lt=document.createElement('div');lt.style.cssText='white-space:pre-line;font-size:18px;line-height:1.6;';lt.textContent=lyricsData[0].text;document.getElementById('lyricsContent').replaceChildren(lt);
                 } else {
                     renderSyncedLyrics();
                 }

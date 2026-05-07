@@ -57,18 +57,18 @@ try:
 except ImportError:
     FUZZ_AVAILABLE = False
 
-# --- CONFIGURATION ---
-USER_ID = '11354776'
-TOKEN = '1Lnngw6Jk_wucqZTuhtfFCqZVRpE30Fb7W8_YvGdDF4r09jUz9nlcY713EYlgOAJBN_JIijcuiuNmggtBDZbTg' 
-APP_ID = '798273057'
+# --- CONFIGURATION (chargée depuis .env ou variables d'environnement) ---
+USER_ID = os.getenv('QOBUZ_USER_ID', '')
+TOKEN   = os.getenv('QOBUZ_TOKEN', '')
+APP_ID  = os.getenv('QOBUZ_APP_ID', '')
 
 TIDAL_HUND_BASE = "https://api.monochrome.tf"
 
-# Credentials de secours (HARDCODED FALLBACK) - TIDAL PAUSED
+# Credentials Tidal chargés uniquement depuis les variables d'environnement ou token.json
 FALLBACK_TIDAL_CREDENTIALS = {
-    "client_ID": "fX2JxdmntZWK0ixT",
-    "client_secret": "1Nn9AfDAjxrgJFJbKNWLeAyKGVGmINuXPPLHVXAvxAg=",
-    "refresh_token": "eyJraWQiOiJoUzFKYTdVMCIsImFsZyI6IkVTNTEyIn0.eyJ0eXBlIjoibzJfcmVmcmVzaCIsInVpZCI6MTg4NjEwMjE4LCJzY29wZSI6Indfc3ViIHJfdXNyIHdfdXNyIiwiY2lkIjoxMzMxOSwic1ZlciI6MCwiZ1ZlciI6MCwiaXNzIjoiaHR0cHM6Ly9hdXRoLnRpZGFsLmNvbS92MSJ9.Abink5EqzLxeKQKuEEjo_ydkkehy_wtBFNR_1i4Hy7K8-5rgdsGYSicdCKC02MGHbTWpDsdgyvv-abN2yMGk4Af-AC4BpnQc3s3VBQ3ocp3zVpI5jlW8GpG3JHQsO0uiYYvyxDouKx_71EJHnItne2yWGhGuaobirACxrrqsffcgq8bi"
+    "client_ID":      os.getenv('CLIENT_ID', ''),
+    "client_secret":  os.getenv('CLIENT_SECRET', ''),
+    "refresh_token":  os.getenv('REFRESH_TOKEN', '')
 }
 
 # --- AMAZON MUSIC API ---
