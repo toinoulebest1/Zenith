@@ -1454,38 +1454,27 @@
 
         function updateNeonFromImage(imgEl) {
             try {
-                const N = 24; // résolution du canvas → 24 échantillons par côté
+                const N = 200; // 200 échantillons par côté = ~796 stops au total
                 const canvas = document.createElement('canvas');
                 canvas.width = N; canvas.height = N;
                 const ctx = canvas.getContext('2d', { willReadFrequently: true });
                 ctx.drawImage(imgEl, 0, 0, N, N);
 
-                // Boost vers neon : même teinte que l'image, saturation max, luminosité fixe vivide
-                const toNeon = (r, g, b) => {
-                    const r1=r/255, g1=g/255, b1=b/255;
-                    const max=Math.max(r1,g1,b1), min=Math.min(r1,g1,b1);
-                    if (max===min) return `hsl(0,0%,60%)`;
-                    const d = max-min;
-                    let h;
-                    switch(max) {
-                        case r1: h=((g1-b1)/d+(g1<b1?6:0))/6; break;
-                        case g1: h=((b1-r1)/d+2)/6; break;
-                        default: h=((r1-g1)/d+4)/6;
-                    }
-                    return `hsl(${Math.round(h*360)},100%,58%)`;
+                // Couleur brute du pixel — aucune modification de teinte
+                const px = (x, y) => {
+                    const d = ctx.getImageData(x, y, 1, 1).data;
+                    return `rgb(${d[0]},${d[1]},${d[2]})`;
                 };
 
-                const px = (x,y) => { const d=ctx.getImageData(x,y,1,1).data; return toNeon(d[0],d[1],d[2]); };
-
-                // Échantillonnage du périmètre en sens horaire depuis le coin haut-gauche
+                // Périmètre complet en sens horaire depuis le coin haut-gauche
                 const colors = [];
-                for (let x=0; x<N; x++)   colors.push(px(x, 0));       // bord haut  →
-                for (let y=1; y<N; y++)   colors.push(px(N-1, y));     // bord droit ↓
-                for (let x=N-2; x>=0; x--) colors.push(px(x, N-1));   // bord bas   ←
-                for (let y=N-2; y>0; y--) colors.push(px(0, y));       // bord gauche↑
+                for (let x = 0; x < N; x++)     colors.push(px(x, 0));       // haut  →
+                for (let y = 1; y < N; y++)     colors.push(px(N-1, y));     // droite ↓
+                for (let x = N-2; x >= 0; x--) colors.push(px(x, N-1));     // bas   ←
+                for (let y = N-2; y > 0; y--)  colors.push(px(0, y));       // gauche ↑
 
                 const total = colors.length;
-                const stops = colors.map((c,i) => `${c} ${(i/total*100).toFixed(2)}%`).join(',');
+                const stops = colors.map((c, i) => `${c} ${(i / total * 100).toFixed(2)}%`).join(',');
                 const gradient = `conic-gradient(from 315deg, ${stops})`;
 
                 const wrapper = document.querySelector('.xl-image-wrapper');
