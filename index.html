@@ -525,28 +525,50 @@
 
     <!-- MEMORIES REEL OVERLAY -->
     <div id="memoriesReelOverlay" style="display:none; position:fixed; inset:0; z-index:5000; overflow:hidden; background:#000;">
+        <!-- Layers -->
         <div id="reelBg" class="reel-bg"></div>
         <div class="reel-tint"></div>
         <div class="reel-grain"></div>
+        <div class="reel-scanlines"></div>
 
+        <!-- Letterbox bars (cinema) -->
+        <div class="reel-lbox-t"></div>
+        <div class="reel-lbox-b"></div>
+
+        <!-- VHS overlays -->
+        <div class="reel-rec-badge"><span class="reel-rec-dot"></span> REC</div>
+        <div class="reel-vhs-ts" id="reelVhsTs"></div>
+
+        <!-- Progress + close -->
         <div id="reelProgress" class="reel-progress-track"></div>
         <button onclick="closeMemoriesReel()" class="reel-close-btn"><i class="fas fa-times"></i></button>
 
+        <!-- Top info (stories + polaroid + vhs) -->
         <div class="reel-top-bar">
             <div class="reel-year-badge">IL Y A 1 AN</div>
             <div id="reelDate" class="reel-date-text"></div>
         </div>
 
+        <!-- Tap zones -->
         <div class="reel-tap-left" onclick="prevReelSlide()"></div>
         <div class="reel-tap-right" onclick="nextReelSlide()"></div>
 
+        <!-- Main slide -->
         <div class="reel-slide" id="reelContent">
             <div class="reel-visual-wrap">
                 <img id="reelMainImg" class="reel-main-img" src="" alt="">
                 <div id="reelNoteOverlay" class="reel-note-overlay" style="display:none;"></div>
             </div>
+            <!-- Polaroid caption (below frame) -->
+            <div class="reel-polaroid-caption" id="reelPolaroidCaption"></div>
+            <!-- Cinema credits -->
+            <div class="reel-cinema-credits">
+                <div id="reelCinemaTitle" class="reel-cinema-title"></div>
+                <div id="reelCinemaArtist" class="reel-cinema-artist"></div>
+            </div>
         </div>
 
+        <!-- Bottom bar (stories + polaroid + vhs) -->
         <div class="reel-bottom-bar">
             <div id="reelLocation" class="reel-location" style="display:none;"></div>
             <div class="reel-music-pill">
@@ -2572,6 +2594,13 @@
 
         // ─── MEMORIES REEL ───────────────────────────────────────────────────────
         let _reelMemories = [], _reelIdx = 0, _reelTimer = null;
+        const _REEL_TYPES = ['stories', 'polaroid', 'cinema', 'vhs'];
+
+        function _assignReelTypes(arr) {
+            // Shuffle the type sequence so it's not always the same order
+            const seq = [..._REEL_TYPES].sort(() => Math.random() - 0.5);
+            return arr.map((m, i) => ({ ...m, _reelType: seq[i % seq.length] }));
+        }
 
         async function openMemoriesReel() {
             const { data: { user } } = await supabaseClient.auth.getUser();
@@ -2593,7 +2622,7 @@
                 return;
             }
 
-            _reelMemories = data;
+            _reelMemories = _assignReelTypes(data);
             _reelIdx = 0;
             document.getElementById('memoriesReelOverlay').style.display = 'flex';
             _showReelSlide(0);
@@ -2612,9 +2641,8 @@
                 return;
             }
 
-            // Shuffle randomly
             const shuffled = [...data].sort(() => Math.random() - 0.5);
-            _reelMemories = shuffled;
+            _reelMemories = _assignReelTypes(shuffled);
             _reelIdx = 0;
             document.getElementById('memoriesReelOverlay').style.display = 'flex';
             _showReelSlide(0);
@@ -2626,6 +2654,12 @@
             const t = m.track_data || {};
             const albumImg = (t.album?.image?.large || '').replace('_300','_600') || 'https://placehold.co/600x600/111/333?text=Z';
             const mainImg = m.photo_url || albumImg;
+            const type = m._reelType || 'stories';
+
+            // Apply type class on overlay
+            const overlay = document.getElementById('memoriesReelOverlay');
+            _REEL_TYPES.forEach(tp => overlay.classList.remove(`reel-type-${tp}`));
+            overlay.classList.add(`reel-type-${type}`);
 
             // Background: always album art for cinematic blur
             const bg = document.getElementById('reelBg');
@@ -2638,17 +2672,33 @@
             void content.offsetWidth;
             content.classList.add('reel-slide-in');
 
-            // Main visual: user photo if available, otherwise album art
+            // Main visual (photo > album art)
             document.getElementById('reelMainImg').src = mainImg;
 
-            // Note as caption overlay on the image
+            // Date
+            const d = new Date(m.created_at);
+            const dateLong = d.toLocaleDateString('fr-FR', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
+            const dateShort = d.toLocaleDateString('fr-FR', { day:'2-digit', month:'2-digit', year:'numeric' });
+            document.getElementById('reelDate').textContent = dateLong;
+
+            // Note: overlay on image (stories/vhs) or inside polaroid frame
             const noteEl = document.getElementById('reelNoteOverlay');
-            if (m.note) { noteEl.textContent = `« ${m.note} »`; noteEl.style.display = 'block'; }
+            if (m.note && type !== 'polaroid') { noteEl.textContent = `« ${m.note} »`; noteEl.style.display = 'block'; }
             else { noteEl.style.display = 'none'; }
 
-            // Date at top
-            const d = new Date(m.created_at);
-            document.getElementById('reelDate').textContent = d.toLocaleDateString('fr-FR', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
+            // Polaroid: caption below frame (date + note)
+            const capEl = document.getElementById('reelPolaroidCaption');
+            if (type === 'polaroid') {
+                capEl.textContent = m.note ? `« ${m.note} » · ${dateShort}` : dateShort;
+            }
+
+            // Cinema: credits at bottom
+            document.getElementById('reelCinemaTitle').textContent = t.title || '';
+            document.getElementById('reelCinemaArtist').textContent = t.performer?.name || '';
+
+            // VHS: timestamp bottom-left
+            document.getElementById('reelVhsTs').textContent =
+                dateShort + '  ' + d.toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' });
 
             // Location
             const locEl = document.getElementById('reelLocation');
@@ -2657,14 +2707,14 @@
                 locEl.style.display = 'flex';
             } else { locEl.style.display = 'none'; }
 
-            // Music pill (vinyl + info)
+            // Music pill
             document.getElementById('reelArt').src = albumImg;
             document.getElementById('reelTitle').textContent = t.title || '';
             document.getElementById('reelArtist').textContent = t.performer?.name || '';
 
             _buildReelProgress();
 
-            // Play track then seek to 45–70% for nostalgia feel
+            // Play + seek to 45–70%
             if (t.id) {
                 tracks = [{ ...t }]; currentIndex = 0; loadTrack(0, true);
                 const seekFrac = 0.45 + Math.random() * 0.25;
