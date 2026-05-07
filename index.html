@@ -570,17 +570,18 @@
 
         const originalLoadProfile = window.loadProfile; window.loadProfile = async function() { if(originalLoadProfile) await originalLoadProfile(); const { data: { user } } = await supabaseClient.auth.getUser(); if(!user) return; if (window.loadUserPlaylists) window.loadUserPlaylists(); if (window.loadUserHistory) await window.loadUserHistory(); const { data, error } = await supabaseClient.from('profiles').select('settings').eq('id', user.id).single(); if (data && data.settings) { userSettings = { ...userSettings, ...data.settings }; applySettings(userSettings); localStorage.setItem('zenith_pref_limiter', userSettings.limiter); localStorage.setItem('zenith_pref_crossfade', userSettings.crossfade); localStorage.setItem('zenith_pref_magic', userSettings.magic); localStorage.setItem('zenith_pref_eco', userSettings.eco); localStorage.setItem('zenith_pref_directAudio', userSettings.directAudio); } };
         function showProfileSettings() { document.getElementById('trackView').style.display = 'none'; document.getElementById('artistView').style.display = 'none'; document.getElementById('lyricsView').style.display = 'none'; document.getElementById('blindTestView').style.display = 'none'; document.getElementById('allPlaylistsView').style.display = 'none'; document.getElementById('playlistView').style.display = 'none'; document.getElementById('searchBarContainer').style.display = 'none'; document.getElementById('profileView').style.display = 'block'; window.loadProfile(); }
-        window.loadUserFavorites = async function() { 
-            if(!supabaseClient) return; 
-            const { data: { user } } = await supabaseClient.auth.getUser(); 
-            if(!user) return; 
-            const { data, error } = await supabaseClient.from('favorites').select('*'); 
-            if(data) { 
-                // Stockage de l'ID UUID (clé primaire) pour des mises à jour précises plus tard
-                favorites = data.map(f => ({...f.track_data, db_row_id: f.id, fromSearch: false})); 
-                updateLikeButtonState(); 
-            } 
-            window.loadProfile(); 
+        window.loadUserFavorites = async function() {
+            if(!supabaseClient) return;
+            const { data: { user } } = await supabaseClient.auth.getUser();
+            if(!user) return;
+            const { data, error } = await supabaseClient.from('favorites').select('*');
+            if(data) {
+                favorites = data.map(f => ({...f.track_data, db_row_id: f.id, fromSearch: false}));
+                updateLikeButtonState();
+                // Réparation proactive en arrière-plan pour les sources instables
+                setTimeout(() => repairUnstableFavorites(), 2000);
+            }
+            window.loadProfile();
         };
         function safePushState(data, title, url) { try { if (window.history && window.history.pushState) { window.history.pushState(data, title, url); } } catch (e) { console.warn("History pushState blocked", e); } }
         
@@ -930,8 +931,9 @@
                         nextTrack.source = newMeta.source;
                         if(newMeta.duration && (!nextTrack.duration || nextTrack.duration === 0)) nextTrack.duration = newMeta.duration;
                         
-                        // CORRECTION SUPABASE : Si c'est un favori, on le répare en base avant même l'erreur
-                        updateFavoriteIfNeeded(oldId, newMeta);
+                        // CORRECTION SUPABASE : réparation en base avec db_row_id direct si disponible
+                        const directId = nextTrack.db_row_id || null;
+                        updateFavoriteIfNeeded(oldId, newMeta, directId);
                     } else {
                         console.warn("❌ Echec résolution métadonnées, tentative de lecture directe...");
                     }
@@ -1021,72 +1023,90 @@
         }
         
         // --- MISE A JOUR DES FAVORIS (CORRECTION PERMANENTE - DEEP SEARCH) ---
-        async function updateFavoriteIfNeeded(oldId, newMeta) {
+        async function updateFavoriteIfNeeded(oldId, newMeta, directDbRowId = null) {
             if (!supabaseClient) return;
-            
+
             const { data: { user } } = await supabaseClient.auth.getUser();
             if (!user) return;
 
-            console.log(`Deep Search : Tentative de réparation pour ${oldId}...`);
-            
-            // 1. Recherche de tous les UUIDs (db_row_id) correspondants dans nos favoris locaux
+            console.log(`[Repair] Tentative de réparation pour ${oldId} (${newMeta.title})...`);
+
             const currentSig = getTrackSignature(newMeta);
-            const matches = favorites.filter(f => 
-                String(f.id) === String(oldId) || 
-                getTrackSignature(f) === currentSig
-            );
+            let rowIdsToUpdate = [];
 
-            let rowIdsToUpdate = matches.map(m => m.db_row_id).filter(id => id);
-
-            // 2. Si rien en local, on fait une recherche directe sur Supabase (Cas: lecture depuis Recherche/Dashboard)
-            if (rowIdsToUpdate.length === 0) {
-                console.log("Deep Search : Recherche sur Supabase (non présent en local)...");
-                const { data: found } = await supabaseClient
-                    .from('favorites')
-                    .select('id')
-                    .eq('user_id', user.id)
-                    .or(`track_id.eq.${oldId},track_data->>id.eq.${oldId}`);
-                
-                if (found && found.length > 0) {
-                    rowIdsToUpdate = found.map(f => f.id);
-                    console.log(`Deep Search : ${rowIdsToUpdate.length} ligne(s) trouvée(s) sur Supabase.`);
-                }
+            // 1. Si on a le db_row_id directement (track joué depuis les favoris), on l'utilise immédiatement
+            if (directDbRowId) {
+                rowIdsToUpdate = [directDbRowId];
+                console.log(`[Repair] db_row_id direct utilisé : ${directDbRowId}`);
             } else {
-                console.log(`Deep Search : ${rowIdsToUpdate.length} ligne(s) identifiée(s) via favoris locaux.`);
+                // 2. Recherche dans les favoris locaux par ID ou signature titre|artiste
+                const matches = favorites.filter(f =>
+                    String(f.id) === String(oldId) ||
+                    getTrackSignature(f) === currentSig
+                );
+                rowIdsToUpdate = matches.map(m => m.db_row_id).filter(Boolean);
+
+                // 3. Si toujours rien : deux requêtes Supabase séparées (plus fiable que .or() avec JSON)
+                if (rowIdsToUpdate.length === 0) {
+                    console.log('[Repair] Recherche sur Supabase...');
+                    const [{ data: byTrackId }, { data: byDataId }] = await Promise.all([
+                        supabaseClient.from('favorites').select('id').eq('user_id', user.id).eq('track_id', String(oldId)),
+                        supabaseClient.from('favorites').select('id').eq('user_id', user.id).filter('track_data->>id', 'eq', String(oldId))
+                    ]);
+                    const allFound = [...(byTrackId || []), ...(byDataId || [])];
+                    rowIdsToUpdate = [...new Set(allFound.map(f => f.id))];
+                    console.log(`[Repair] ${rowIdsToUpdate.length} ligne(s) trouvée(s) sur Supabase.`);
+                }
             }
 
-            // 3. Mise à jour de CHAQUE ligne trouvée
-            if (rowIdsToUpdate.length > 0) {
-                for (const urlUuid of rowIdsToUpdate) {
-                    const { data, error } = await supabaseClient
-                        .from('favorites')
-                        .update({ 
-                            track_id: String(newMeta.id), 
-                            track_data: { ...newMeta, db_row_id: urlUuid, fromSearch: false } 
-                        })
-                        .eq('id', urlUuid)
-                        .select();
+            if (rowIdsToUpdate.length === 0) {
+                console.warn(`[Repair] Aucun favori trouvé pour id=${oldId} (${newMeta.title})`);
+                return;
+            }
 
-                    if (data && data.length > 0) {
-                        console.log(`✅ Supabase : Ligne ${urlUuid} mise à jour (${newMeta.title})`);
-                    } else if (error) {
-                        console.error(`❌ Erreur mise à jour ligne ${urlUuid}:`, error);
-                    }
+            // 4. Mise à jour de chaque ligne dans Supabase
+            for (const rowId of rowIdsToUpdate) {
+                const { error } = await supabaseClient
+                    .from('favorites')
+                    .update({
+                        track_id: String(newMeta.id),
+                        track_data: { ...newMeta, db_row_id: rowId, fromSearch: false }
+                    })
+                    .eq('id', rowId)
+                    .eq('user_id', user.id);
+
+                if (error) console.error(`[Repair] ❌ Erreur update ${rowId}:`, error);
+                else console.log(`[Repair] ✅ Ligne ${rowId} mise à jour → ${newMeta.source}:${newMeta.id}`);
+            }
+
+            // 5. Mise à jour du tableau local
+            favorites.forEach((f, idx) => {
+                if (String(f.id) === String(oldId) || getTrackSignature(f) === currentSig || rowIdsToUpdate.includes(f.db_row_id)) {
+                    favorites[idx] = { ...newMeta, db_row_id: favorites[idx].db_row_id, fromSearch: false };
                 }
+            });
 
-                // 4. Mise à jour de la variable locale
-                favorites.forEach((f, idx) => {
-                    if (String(f.id) === String(oldId) || getTrackSignature(f) === currentSig) {
-                        favorites[idx] = { ...newMeta, db_row_id: favorites[idx].db_row_id, fromSearch: false };
+            // 6. Rafraîchissement UI si on est sur la vue Favoris
+            if (document.getElementById('viewTitle').innerText === "Mes Favoris ❤️") showFavorites();
+        }
+
+        // --- RÉPARATION PROACTIVE DES SOURCES INSTABLES AU CHARGEMENT ---
+        async function repairUnstableFavorites() {
+            const unstable = ['spotify_lazy', 'tidal_hund', 'subsonic', 'yt_lazy'];
+            const toRepair = favorites.filter(f => unstable.includes(f.source));
+            if (toRepair.length === 0) return;
+            console.log(`[Repair] ${toRepair.length} favori(s) avec source instable à réparer...`);
+            for (const fav of toRepair) {
+                try {
+                    const artist = fav.performer ? fav.performer.name : (fav.artist ? fav.artist.name : '');
+                    const res = await fetch(`${API_BASE}/resolve_metadata?title=${encodeURIComponent(fav.title)}&artist=${encodeURIComponent(artist)}`);
+                    if (res.ok) {
+                        const newMeta = await res.json();
+                        console.log(`[Repair] Réparation proactive : ${fav.title} → ${newMeta.source}:${newMeta.id}`);
+                        await updateFavoriteIfNeeded(fav.id, newMeta, fav.db_row_id);
                     }
-                });
-
-                // 5. Rafraîchissement UI si nécessaire
-                if (document.getElementById('viewTitle').innerText === "Mes Favoris ❤️") {
-                    showFavorites();
-                }
-            } else {
-                console.warn(`⚠️ Deep Search : Aucun favori n'a été trouvé pour ${oldId} (${newMeta.title}).`);
+                } catch(e) { console.warn('[Repair] Erreur proactive:', e); }
+                await new Promise(r => setTimeout(r, 300));
             }
         }
 
@@ -1131,23 +1151,21 @@
             const track = tracks[index];
             const artistName = track.performer ? track.performer.name : (track.artist ? track.artist.name : 'Inconnu');
             const oldId = track.id;
+            const directDbRowId = track.db_row_id || null;
 
             try {
-                // On utilise l'API de résolution (Backend)
                 const res = await fetch(`${API_BASE}/resolve_metadata?title=${encodeURIComponent(track.title)}&artist=${encodeURIComponent(artistName)}`);
                 if (res.ok) {
                     const newMeta = await res.json();
                     console.log("✅ Fallback trouvé :", newMeta.source, newMeta.id);
-                    
-                    // Mise à jour de l'objet de la file d'attente
-                    tracks[index] = { ...track, ...newMeta };
-                    
-                    // Mise à jour permanente dans les favoris Supabase
-                    await updateFavoriteIfNeeded(oldId, newMeta);
-                    
-                    // Nouvelle tentative de lecture
+
+                    tracks[index] = { ...track, ...newMeta, db_row_id: directDbRowId };
+
+                    // Mise à jour permanente dans Supabase avec db_row_id direct
+                    await updateFavoriteIfNeeded(oldId, newMeta, directDbRowId);
+
                     showToast("Source réparée, reprise... ✨");
-                    loadTrack(index, true, false); 
+                    loadTrack(index, true, false);
                     return true;
                 }
             } catch (e) {
