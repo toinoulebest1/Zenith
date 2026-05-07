@@ -926,63 +926,78 @@ def sync_search_artist_full(name):
         logger.error(f"Deezer Artist Full Error: {e}")
         return None
 
-def sync_resolve_track(title, artist):
+def sync_resolve_track(title, artist, isrc=None):
     """
-    Recherche le titre sur Qobuz ou Amazon Music et retourne l'objet COMPLET (avec image)
-    au lieu de juste l'ID.
+    Recherche le titre sur Qobuz (alt API) ou Amazon Music.
+    Si un ISRC est fourni, il est utilisé en priorité (plus fiable que titre+artiste).
     """
+    # 1. Recherche par ISRC (priorité absolue - identifiant unique)
+    if isrc:
+        try:
+            items = sync_qobuz_search(isrc, limit=10, type='track')
+            for rec in items:
+                if rec.get('isrc', '').upper() == isrc.upper():
+                    rec['source'] = 'qobuz'
+                    fix_qobuz_title(rec)
+                    if rec.get('album', {}).get('image', {}).get('large'):
+                        rec['album']['image']['large'] = rec['album']['image']['large'].replace('_300', '_600')
+                    logger.info(f"[Resolve] ISRC match: {isrc} → qobuz:{rec['id']}")
+                    return rec
+        except Exception as e:
+            logger.warning(f"[Resolve] ISRC search failed: {e}")
+
+    # Si pas de titre/artiste on abandonne ici
+    if not title or not artist:
+        return None
+
     target_artist = clean_string(artist)
     target_title = clean_string(title)
-    
-    # 1. Recherche Qobuz
-    if client:
-        try:
-            items = sync_qobuz_search(f"{title} {artist}", limit=5)
-            for rec in items:
-                rec_title = clean_string(rec['title'])
-                rec_artist = clean_string(rec.get('performer', {}).get('name', ''))
-                match_artist = False
+
+    # 2. Recherche Qobuz par titre+artiste
+    try:
+        items = sync_qobuz_search(f"{title} {artist}", limit=5)
+        for rec in items:
+            rec_title = clean_string(rec['title'])
+            rec_artist = clean_string(rec.get('performer', {}).get('name', ''))
+            match_artist = False
+            if FUZZ_AVAILABLE:
+                if fuzz.ratio(target_artist, rec_artist) > 65: match_artist = True
+            elif target_artist in rec_artist or rec_artist in target_artist: match_artist = True
+
+            if match_artist:
+                match_title = False
                 if FUZZ_AVAILABLE:
-                    if fuzz.ratio(target_artist, rec_artist) > 65: match_artist = True
-                elif target_artist in rec_artist or rec_artist in target_artist: match_artist = True
-                
-                if match_artist:
-                    match_title = False
-                    if FUZZ_AVAILABLE:
-                        if fuzz.ratio(target_title, rec_title) > 60: match_title = True
-                    elif target_title in rec_title or rec_title in target_title: match_title = True
-                    
-                    if match_title:
-                        rec['source'] = 'qobuz'
-                        # S'assurer que l'image est bien formatée
-                        if rec.get('album', {}).get('image', {}).get('large'):
-                            rec['album']['image']['large'] = rec['album']['image']['large'].replace('_300', '_600')
-                        return rec
-        except: pass
-    
-    # 2. Fallback Amazon Music (remplace Tidal)
+                    if fuzz.ratio(target_title, rec_title) > 60: match_title = True
+                elif target_title in rec_title or rec_title in target_title: match_title = True
+
+                if match_title:
+                    rec['source'] = 'qobuz'
+                    if rec.get('album', {}).get('image', {}).get('large'):
+                        rec['album']['image']['large'] = rec['album']['image']['large'].replace('_300', '_600')
+                    return rec
+    except: pass
+
+    # 3. Fallback Amazon Music
     amazon_res = sync_search_amazon(f"{title} {artist}", limit=5)
     for t in amazon_res:
         t_artist = clean_string(t['performer']['name'])
         t_title = clean_string(t['title'])
-        
-        # Vérification Artiste
+
         match_artist = False
         if FUZZ_AVAILABLE:
             if fuzz.ratio(target_artist, t_artist) > 65: match_artist = True
         elif target_artist in t_artist or t_artist in target_artist: match_artist = True
-        
+
         if match_artist:
-            # Vérification Titre
             match_title = False
             if FUZZ_AVAILABLE:
                 if fuzz.ratio(target_title, t_title) > 60: match_title = True
             elif target_title in t_title or t_title in target_title: match_title = True
-            
+
             if match_title:
                 t['source'] = 'amazon_music'
                 return t
-            
+
     return None
 
 # --- YOUTUBE MUSIC RADIO LOGIC ---
@@ -1289,12 +1304,12 @@ async def resolve_and_stream(title: str, artist: str):
     raise HTTPException(404, "Track not found")
 
 @app.get('/resolve_metadata')
-async def resolve_metadata_route(title: str, artist: str):
+async def resolve_metadata_route(title: str = '', artist: str = '', isrc: str = None):
     """
-    Retourne l'objet track complet (ID, source, image, etc.) pour mettre à jour l'interface
-    avant la lecture.
+    Retourne l'objet track complet (ID, source, image, etc.).
+    Accepte title+artist et/ou isrc (ISRC est prioritaire).
     """
-    match = await run_in_threadpool(sync_resolve_track, title, artist)
+    match = await run_in_threadpool(sync_resolve_track, title, artist, isrc)
     if match: return JSONResponse(match)
     raise HTTPException(404, "Not found")
 

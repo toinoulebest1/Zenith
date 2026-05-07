@@ -918,7 +918,8 @@
             if (nextTrack.source !== 'qobuz' && nextTrack.source !== 'amazon_music') {
                 try {
                     const artist = nextTrack.performer ? nextTrack.performer.name : (nextTrack.artist ? nextTrack.artist.name : 'Inconnu');
-                    const res = await fetch(`${API_BASE}/resolve_metadata?title=${encodeURIComponent(nextTrack.title)}&artist=${encodeURIComponent(artist)}`);
+                    const resolveParams = new URLSearchParams({ title: nextTrack.title || '', artist, ...(nextTrack.isrc && { isrc: nextTrack.isrc }) });
+                    const res = await fetch(`${API_BASE}/resolve_metadata?${resolveParams}`);
                     
                     if (thisLoadId !== currentLoadId) return;
 
@@ -1113,9 +1114,16 @@
             for (const fav of toRepair) {
                 try {
                     const artist = fav.performer ? fav.performer.name : (fav.artist ? fav.artist.name : '');
-                    if (!fav.title || !artist) continue;
+                    const isrc = fav.isrc || '';
+                    // On accepte de continuer même sans titre si on a un ISRC
+                    if (!isrc && (!fav.title || !artist)) continue;
 
-                    const res = await fetch(`${API_BASE}/resolve_metadata?title=${encodeURIComponent(fav.title)}&artist=${encodeURIComponent(artist)}`);
+                    const params = new URLSearchParams({
+                        title: fav.title || '',
+                        artist: artist || '',
+                        ...(isrc && { isrc })
+                    });
+                    const res = await fetch(`${API_BASE}/resolve_metadata?${params}`);
                     if (res.ok) {
                         const newMeta = await res.json();
                         // Marquer comme vérifié pour éviter de re-vérifier dans les 24h
@@ -1178,7 +1186,12 @@
             const directDbRowId = track.db_row_id || null;
 
             try {
-                const res = await fetch(`${API_BASE}/resolve_metadata?title=${encodeURIComponent(track.title)}&artist=${encodeURIComponent(artistName)}`);
+                const params = new URLSearchParams({
+                    title: track.title || '',
+                    artist: artistName,
+                    ...(track.isrc && { isrc: track.isrc })
+                });
+                const res = await fetch(`${API_BASE}/resolve_metadata?${params}`);
                 if (res.ok) {
                     const newMeta = await res.json();
                     console.log("✅ Fallback trouvé :", newMeta.source, newMeta.id);
