@@ -578,8 +578,6 @@
             if(data) {
                 favorites = data.map(f => ({...f.track_data, db_row_id: f.id, fromSearch: false}));
                 updateLikeButtonState();
-                // Réparation proactive en arrière-plan pour les sources instables
-                setTimeout(() => repairUnstableFavorites(), 2000);
             }
             window.loadProfile();
         };
@@ -988,9 +986,18 @@
                     url = `${API_BASE}/resolve_stream?title=${encodeURIComponent(nextTrack.title)}&artist=${encodeURIComponent(artist)}`;
                 }
                 else {
-                    url = `${API_BASE}/stream/${nextTrack.id}`;
+                    // Utiliser l'URL pré-résolue si disponible (évite l'appel alt API)
+                    const trackIdStr = String(nextTrack.id);
+                    const preFetched = prefetchedStreamUrls[trackIdStr];
+                    if (preFetched && (Date.now() - preFetched.fetchedAt) < PREFETCH_TTL) {
+                        url = preFetched.url;
+                        delete prefetchedStreamUrls[trackIdStr];
+                        console.log(`[Prefetch] ✅ URL directe utilisée pour ${nextTrack.title}`);
+                    } else {
+                        url = `${API_BASE}/stream/${nextTrack.id}`;
+                    }
                 }
-                
+
                 // CHECK CONCURRENCY
                 if (thisLoadId !== currentLoadId) return;
 
@@ -1001,11 +1008,11 @@
             if (thisLoadId !== currentLoadId) return;
 
             if(nextTrack.source !== 'yt_lazy' && nextTrack.source !== 'spotify_lazy' && nextTrack.source !== 'deezer' && nextTrack.source !== 'subsonic' && nextTrack.source !== 'amazon_music') safePushState({}, "", `/?track=${nextTrack.id}&source=${nextTrack.source}`);
-            
+
             // Force disable crossfade if direct audio
-            startCrossfade(prevAudio, nextAudio, useCrossfade && !userSettings.directAudio); 
-            
-            activeAudio = nextAudio; 
+            startCrossfade(prevAudio, nextAudio, useCrossfade && !userSettings.directAudio);
+
+            activeAudio = nextAudio;
             
             setupMediaSession(nextTrack); fetchLyrics(nextTrack, nextTrack.performer ? nextTrack.performer.name : 'Artiste'); 
             
@@ -1017,9 +1024,12 @@
             }
 
             if (autoPlay) {
-                play(); 
+                play();
             }
-            
+
+            // Pré-résoudre l'URL de la piste suivante en arrière-plan
+            setTimeout(() => prefetchNextTrackUrl(index + 1), 1500);
+
             if(document.getElementById('queuePanel').classList.contains('active')) renderQueueList();
         }
         
@@ -1150,7 +1160,30 @@
         }
 
         // --- GESTION DU FALLBACK AUTO (EN CAS D'ERREUR) ---
-        let fallbackRetries = {}; 
+        let fallbackRetries = {};
+
+        // Cache des URLs Qobuz pré-résolues (piste suivante)
+        const prefetchedStreamUrls = {};
+        const PREFETCH_TTL = 20 * 60 * 1000; // 20 min
+
+        async function prefetchNextTrackUrl(nextIndex) {
+            if (nextIndex < 0 || nextIndex >= tracks.length) return;
+            const next = tracks[nextIndex];
+            if (!next) return;
+            const id = String(next.id);
+            const cached = prefetchedStreamUrls[id];
+            if (cached && (Date.now() - cached.fetchedAt) < PREFETCH_TTL) return;
+            if (next.source === 'qobuz') {
+                try {
+                    const r = await fetch(`${API_BASE}/stream_url/${id}`);
+                    if (r.ok) {
+                        const { url } = await r.json();
+                        if (url) prefetchedStreamUrls[id] = { url, fetchedAt: Date.now() };
+                        console.log(`[Prefetch] ✅ URL Qobuz pré-résolue pour piste ${nextIndex}`);
+                    }
+                } catch (e) {}
+            }
+        }
 
         async function handlePlaybackError(index) {
             const track = tracks[index];
@@ -1419,6 +1452,41 @@
             if(radioTimeout) clearTimeout(radioTimeout);
         }
 
+        function updateNeonFromImage(imgEl) {
+            try {
+                const S = 4; // canvas 4x4 → 1 pixel = 1 quadrant de l'image
+                const canvas = document.createElement('canvas');
+                canvas.width = S; canvas.height = S;
+                const ctx = canvas.getContext('2d', { willReadFrequently: true });
+                ctx.drawImage(imgEl, 0, 0, S, S);
+
+                // Boost couleur vers neon : saturation max, luminosité vivide
+                const toNeon = (r, g, b) => {
+                    const r1 = r/255, g1 = g/255, b1 = b/255;
+                    const max = Math.max(r1,g1,b1), min = Math.min(r1,g1,b1);
+                    if (max === min) return `hsl(0,0%,60%)`;
+                    const d = max - min;
+                    const l = (max+min)/2;
+                    let h;
+                    switch(max) {
+                        case r1: h = ((g1-b1)/d + (g1<b1?6:0))/6; break;
+                        case g1: h = ((b1-r1)/d + 2)/6; break;
+                        default: h = ((r1-g1)/d + 4)/6;
+                    }
+                    return `hsl(${Math.round(h*360)},100%,58%)`;
+                };
+
+                const px = (x, y) => { const d = ctx.getImageData(x,y,1,1).data; return toNeon(d[0],d[1],d[2]); };
+                const wrapper = document.querySelector('.xl-image-wrapper');
+                if (!wrapper) return;
+                // conic-gradient part at 315° = top-left → en sens horaire : tl, tr, br, bl
+                wrapper.style.setProperty('--neon-tl', px(0, 0));
+                wrapper.style.setProperty('--neon-tr', px(S-1, 0));
+                wrapper.style.setProperty('--neon-br', px(S-1, S-1));
+                wrapper.style.setProperty('--neon-bl', px(0, S-1));
+            } catch(e) { /* CORS bloqué — couleurs par défaut gardées */ }
+        }
+
         function updateInterfaceInfo(t) {
             let img = ''; 
             if(t.source === 'subsonic') {
@@ -1461,14 +1529,15 @@
                 if(amb.style.opacity != '1') amb.style.opacity = '1';
                 amb.style.backgroundImage = `url('${bgImg}')`;
 
-                const tempImg = new Image(); 
-                tempImg.onload = () => { 
-                    xlArt.src = img; 
-                    capArt.src = img; 
-                    // On ne touche plus au background ici, il est déjà chargé en low-res
-                    xlArt.classList.remove('fade-out-active'); 
-                    capArt.classList.remove('fade-out-active'); 
-                }; 
+                const tempImg = new Image();
+                tempImg.crossOrigin = 'anonymous';
+                tempImg.onload = () => {
+                    xlArt.src = img;
+                    capArt.src = img;
+                    xlArt.classList.remove('fade-out-active');
+                    capArt.classList.remove('fade-out-active');
+                    updateNeonFromImage(tempImg);
+                };
                 tempImg.src = img;
                 setTimeout(() => { xlArt.classList.remove('fade-out-active'); capArt.classList.remove('fade-out-active'); }, 1000);
             } else { 

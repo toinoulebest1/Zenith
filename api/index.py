@@ -77,6 +77,10 @@ AMAZON_MUSIC_API_BASE = "https://t2tunes.site/api/amazon-music"
 # --- QOBUZ ALTERNATIVE API ---
 QOBUZ_ALT_API_BASE = "https://trypt-hifi-dl-456461932686.us-west1.run.app"
 
+# --- STREAM URL CACHE (évite d'appeler l'alt API à chaque lecture) ---
+_stream_url_cache: dict = {}  # {track_id: {'url': str, 'ts': float}}
+STREAM_CACHE_TTL = 25 * 60   # 25 minutes (URLs Qobuz expirent vers 30 min)
+
 # --- INIT FASTAPI ---
 app = FastAPI(title="Zenith API", docs_url=None, redoc_url=None)
 
@@ -1379,30 +1383,48 @@ async def get_artist(id: str):
         return JSONResponse(meta)
     except: raise HTTPException(404)
 
-@app.get('/stream/{track_id}')
-async def stream_track(track_id: str):
-    def _get_url():
+def _resolve_qobuz_url(track_id: str):
+    for fmt in [27, 7, 6, 5]:
+        try:
+            r = requests.get(
+                f"{QOBUZ_ALT_API_BASE}/api/download-music",
+                params={"track_id": track_id, "quality": fmt},
+                timeout=15
+            )
+            if r.status_code == 200:
+                data = r.json()
+                if data.get('success') and data.get('data', {}).get('url'):
+                    return data['data']['url']
+        except: continue
+    if client:
         for fmt in [27, 7, 6, 5]:
             try:
-                r = requests.get(
-                    f"{QOBUZ_ALT_API_BASE}/api/download-music",
-                    params={"track_id": track_id, "quality": fmt},
-                    timeout=15
-                )
-                if r.status_code == 200:
-                    data = r.json()
-                    if data.get('success') and data.get('data', {}).get('url'):
-                        return data['data']['url']
+                d = client.get_track_url(track_id, fmt)
+                if 'url' in d: return d['url']
             except: continue
-        if client:
-            for fmt in [27, 7, 6, 5]:
-                try:
-                    d = client.get_track_url(track_id, fmt)
-                    if 'url' in d: return d['url']
-                except: continue
-        return None
-    url = await run_in_threadpool(_get_url)
-    if url: return RedirectResponse(url)
+    return None
+
+@app.get('/stream_url/{track_id}')
+async def get_stream_url(track_id: str):
+    """Retourne l'URL de stream Qobuz en JSON (pour le pré-fetch frontend)."""
+    cached = _stream_url_cache.get(track_id)
+    if cached and (time.time() - cached['ts']) < STREAM_CACHE_TTL:
+        return JSONResponse({'url': cached['url']})
+    url = await run_in_threadpool(_resolve_qobuz_url, track_id)
+    if url:
+        _stream_url_cache[track_id] = {'url': url, 'ts': time.time()}
+        return JSONResponse({'url': url})
+    raise HTTPException(404, "URL not found")
+
+@app.get('/stream/{track_id}')
+async def stream_track(track_id: str):
+    cached = _stream_url_cache.get(track_id)
+    if cached and (time.time() - cached['ts']) < STREAM_CACHE_TTL:
+        return RedirectResponse(cached['url'])
+    url = await run_in_threadpool(_resolve_qobuz_url, track_id)
+    if url:
+        _stream_url_cache[track_id] = {'url': url, 'ts': time.time()}
+        return RedirectResponse(url)
     raise HTTPException(404, "URL not found")
 
 @app.get('/amazon_stream/{asin}')
