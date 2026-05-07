@@ -1067,17 +1067,24 @@
 
             // 4. Mise à jour de chaque ligne dans Supabase
             for (const rowId of rowIdsToUpdate) {
-                const { error } = await supabaseClient
+                const { data: updated, error } = await supabaseClient
                     .from('favorites')
                     .update({
                         track_id: String(newMeta.id),
                         track_data: { ...newMeta, db_row_id: rowId, fromSearch: false }
                     })
                     .eq('id', rowId)
-                    .eq('user_id', user.id);
+                    .eq('user_id', user.id)
+                    .select();
 
-                if (error) console.error(`[Repair] ❌ Erreur update ${rowId}:`, error);
-                else console.log(`[Repair] ✅ Ligne ${rowId} mise à jour → ${newMeta.source}:${newMeta.id}`);
+                if (error) {
+                    console.error(`[Repair] ❌ Erreur update ${rowId}:`, error);
+                } else if (!updated || updated.length === 0) {
+                    console.error(`[Repair] ❌ Update bloqué (0 lignes affectées) pour ${rowId} — vérifiez les politiques RLS Supabase (UPDATE manquant ?)`);
+                    showToast('⚠️ Erreur : mise à jour Supabase bloquée (politique RLS)');
+                } else {
+                    console.log(`[Repair] ✅ Ligne ${rowId} mise à jour → ${newMeta.source}:${newMeta.id}`);
+                }
             }
 
             // 5. Mise à jour du tableau local
