@@ -524,8 +524,7 @@
     </div>
 
     <!-- MEMORIES REEL OVERLAY -->
-    <div id="memoriesReelOverlay"
-        style="display:none; position:fixed; inset:0; z-index:5000; align-items:center; justify-content:center; overflow:hidden; flex-direction:column;">
+    <div id="memoriesReelOverlay" style="display:none; position:fixed; inset:0; z-index:5000; overflow:hidden; background:#000;">
         <div id="reelBg" class="reel-bg"></div>
         <div class="reel-tint"></div>
         <div class="reel-grain"></div>
@@ -533,20 +532,30 @@
         <div id="reelProgress" class="reel-progress-track"></div>
         <button onclick="closeMemoriesReel()" class="reel-close-btn"><i class="fas fa-times"></i></button>
 
+        <div class="reel-top-bar">
+            <div class="reel-year-badge">IL Y A 1 AN</div>
+            <div id="reelDate" class="reel-date-text"></div>
+        </div>
+
         <div class="reel-tap-left" onclick="prevReelSlide()"></div>
         <div class="reel-tap-right" onclick="nextReelSlide()"></div>
 
-        <div class="reel-content" id="reelContent">
-            <div class="reel-year-badge">Il y a 1 an</div>
-            <div class="reel-polaroid">
-                <img id="reelArt" src="" alt="">
+        <div class="reel-slide" id="reelContent">
+            <div class="reel-visual-wrap">
+                <img id="reelMainImg" class="reel-main-img" src="" alt="">
+                <div id="reelNoteOverlay" class="reel-note-overlay" style="display:none;"></div>
             </div>
-            <h2 id="reelTitle" class="reel-title"></h2>
-            <p id="reelArtist" class="reel-artist"></p>
-            <p id="reelNote" class="reel-note" style="display:none;"></p>
-            <div id="reelMeta" class="reel-meta">
-                <span id="reelLocation" style="display:none;"></span>
-                <span id="reelDate"></span>
+        </div>
+
+        <div class="reel-bottom-bar">
+            <div id="reelLocation" class="reel-location" style="display:none;"></div>
+            <div class="reel-music-pill">
+                <div class="reel-vinyl"><img id="reelArt" src="" alt=""></div>
+                <div class="reel-music-meta">
+                    <div id="reelTitle" class="reel-title"></div>
+                    <div id="reelArtist" class="reel-artist"></div>
+                </div>
+                <div class="reel-music-wave"><span></span><span></span><span></span><span></span></div>
             </div>
         </div>
     </div>
@@ -2615,42 +2624,58 @@
             _reelIdx = idx;
             const m = _reelMemories[idx];
             const t = m.track_data || {};
-            const img = (t.album?.image?.large || '').replace('_300', '_600') || 'https://placehold.co/600x600/111/333?text=Z';
+            const albumImg = (t.album?.image?.large || '').replace('_300','_600') || 'https://placehold.co/600x600/111/333?text=Z';
+            const mainImg = m.photo_url || albumImg;
 
-            // Swap background with cross-fade
+            // Background: always album art for cinematic blur
             const bg = document.getElementById('reelBg');
             bg.style.opacity = '0';
-            setTimeout(() => { bg.style.backgroundImage = `url('${img}')`; bg.style.opacity = '1'; }, 120);
+            setTimeout(() => { bg.style.backgroundImage = `url('${albumImg}')`; bg.style.opacity = '1'; }, 120);
 
-            // Swap content with entrance animation
+            // Entrance animation
             const content = document.getElementById('reelContent');
             content.classList.remove('reel-slide-in');
             void content.offsetWidth;
             content.classList.add('reel-slide-in');
 
-            document.getElementById('reelArt').src = img;
-            document.getElementById('reelTitle').textContent = t.title || '';
-            document.getElementById('reelArtist').textContent = t.performer?.name || '';
+            // Main visual: user photo if available, otherwise album art
+            document.getElementById('reelMainImg').src = mainImg;
 
-            const noteEl = document.getElementById('reelNote');
-            noteEl.textContent = m.note || '';
-            noteEl.style.display = m.note ? 'block' : 'none';
+            // Note as caption overlay on the image
+            const noteEl = document.getElementById('reelNoteOverlay');
+            if (m.note) { noteEl.textContent = `« ${m.note} »`; noteEl.style.display = 'block'; }
+            else { noteEl.style.display = 'none'; }
 
+            // Date at top
             const d = new Date(m.created_at);
-            document.getElementById('reelDate').textContent = d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
+            document.getElementById('reelDate').textContent = d.toLocaleDateString('fr-FR', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
 
+            // Location
             const locEl = document.getElementById('reelLocation');
             if (m.location_name) {
                 locEl.innerHTML = `<i class="fas fa-map-marker-alt"></i> ${escapeHtml(m.location_name)}`;
-                locEl.style.display = 'inline';
+                locEl.style.display = 'flex';
             } else { locEl.style.display = 'none'; }
+
+            // Music pill (vinyl + info)
+            document.getElementById('reelArt').src = albumImg;
+            document.getElementById('reelTitle').textContent = t.title || '';
+            document.getElementById('reelArtist').textContent = t.performer?.name || '';
 
             _buildReelProgress();
 
-            // Play track
-            if (t.id) { tracks = [{ ...t }]; currentIndex = 0; loadTrack(0, true); }
+            // Play track then seek to 45–70% for nostalgia feel
+            if (t.id) {
+                tracks = [{ ...t }]; currentIndex = 0; loadTrack(0, true);
+                const seekFrac = 0.45 + Math.random() * 0.25;
+                const trySeek = (n = 0) => {
+                    if (activeAudio?.duration && isFinite(activeAudio.duration) && activeAudio.duration > 0) {
+                        activeAudio.currentTime = activeAudio.duration * seekFrac;
+                    } else if (n < 25) { setTimeout(() => trySeek(n + 1), 400); }
+                };
+                setTimeout(() => trySeek(), 600);
+            }
 
-            // Auto-advance after 18s
             clearTimeout(_reelTimer);
             _reelTimer = setTimeout(nextReelSlide, 18000);
         }
