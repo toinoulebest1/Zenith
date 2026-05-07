@@ -103,6 +103,9 @@
                 <input type="file" id="memoryPhotoInput" accept="image/*" style="display:none;" onchange="previewMemoryPhoto(this)">
             </label>
             <img id="memoryPhotoPreview" src="" style="display:none; width:100%; border-radius:10px; margin-bottom:10px; max-height:140px; object-fit:cover;">
+            <p style="font-size:10px; color:#444; margin:-4px 0 14px; text-align:left; line-height:1.5;">
+                <i class="fas fa-shield-alt" style="margin-right:4px;"></i>Vos photos sont hébergées de façon sécurisée par un service tiers indépendant. Zenith ne conserve aucune image sur sa propre infrastructure.
+            </p>
             <div style="display:flex; align-items:center; gap:8px; color:#555; font-size:12px; margin-bottom:18px; padding:0 2px;">
                 <i class="fas fa-map-marker-alt" style="color:#ff0055; font-size:13px;"></i>
                 <span id="memoryLocationText">Récupération de la position...</span>
@@ -263,9 +266,10 @@
             <div class="lyrics-view" id="blindTestView" style="display: none;"></div>
 
             <div class="track-view" id="memoriesView" style="display:none;">
-                <div class="header-controls">
+                <div class="header-controls" style="flex-wrap:wrap; gap:10px;">
                     <button class="back-btn-main" onclick="goHome()" title="Retour"><i class="fas fa-arrow-left"></i></button>
-                    <h2 style="font-size:1.2rem; margin:0;">Mes Souvenirs</h2>
+                    <h2 style="font-size:1.2rem; margin:0; flex:1;">Mes Souvenirs</h2>
+                    <button onclick="openMemoriesReel()" class="reel-trigger-btn"><i class="fas fa-film"></i> Il y a 1 an</button>
                 </div>
                 <div id="memoriesFeed" style="margin-top:20px; display:flex; flex-direction:column; gap:14px; padding-bottom:120px;"></div>
             </div>
@@ -413,6 +417,33 @@
             <div class="cap-right">
                 <i class="fas fa-volume-up" style="color:#888; font-size:12px;"></i>
                 <input type="range" class="vol-slider" min="0" max="1" step="0.01" value="1">
+            </div>
+        </div>
+    </div>
+
+    <!-- MEMORIES REEL OVERLAY -->
+    <div id="memoriesReelOverlay" style="display:none; position:fixed; inset:0; z-index:5000; align-items:center; justify-content:center; overflow:hidden; flex-direction:column;">
+        <div id="reelBg" class="reel-bg"></div>
+        <div class="reel-tint"></div>
+        <div class="reel-grain"></div>
+
+        <div id="reelProgress" class="reel-progress-track"></div>
+        <button onclick="closeMemoriesReel()" class="reel-close-btn"><i class="fas fa-times"></i></button>
+
+        <div class="reel-tap-left"  onclick="prevReelSlide()"></div>
+        <div class="reel-tap-right" onclick="nextReelSlide()"></div>
+
+        <div class="reel-content" id="reelContent">
+            <div class="reel-year-badge">Il y a 1 an</div>
+            <div class="reel-polaroid">
+                <img id="reelArt" src="" alt="">
+            </div>
+            <h2 id="reelTitle"  class="reel-title"></h2>
+            <p  id="reelArtist" class="reel-artist"></p>
+            <p  id="reelNote"   class="reel-note" style="display:none;"></p>
+            <div id="reelMeta"  class="reel-meta">
+                <span id="reelLocation" style="display:none;"></span>
+                <span id="reelDate"></span>
             </div>
         </div>
     </div>
@@ -2426,6 +2457,109 @@
         }
         function updateMediaSessionState() { if (!('mediaSession' in navigator)) return; let d = activeAudio.duration; const t = tracks[currentIndex]; if ((!d || !isFinite(d)) && t && t.duration) { d = t.duration; } if (d && isFinite(d) && activeAudio.currentTime <= d) { try { navigator.mediaSession.setPositionState({ duration: d, playbackRate: activeAudio.playbackRate, position: activeAudio.currentTime }); } catch(e) { console.warn("MediaSession Error:", e); } } }
         
+        // ─── MEMORIES REEL ───────────────────────────────────────────────────────
+        let _reelMemories = [], _reelIdx = 0, _reelTimer = null;
+
+        async function openMemoriesReel() {
+            const { data: { user } } = await supabaseClient.auth.getUser();
+            if (!user) return;
+
+            const now = new Date();
+            const anchor = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
+            const from = new Date(anchor); from.setDate(from.getDate() - 45);
+            const to   = new Date(anchor); to.setDate(to.getDate() + 45);
+
+            const { data, error } = await supabaseClient
+                .from('memories').select('*').eq('user_id', user.id)
+                .gte('created_at', from.toISOString())
+                .lte('created_at', to.toISOString())
+                .order('created_at', { ascending: true });
+
+            if (error || !data?.length) {
+                showToast("Aucun souvenir d'il y a 1 an 🕰️");
+                return;
+            }
+
+            _reelMemories = data;
+            _reelIdx = 0;
+            document.getElementById('memoriesReelOverlay').style.display = 'flex';
+            _showReelSlide(0);
+        }
+
+        function _showReelSlide(idx) {
+            _reelIdx = idx;
+            const m = _reelMemories[idx];
+            const t = m.track_data || {};
+            const img = (t.album?.image?.large || '').replace('_300','_600') || 'https://placehold.co/600x600/111/333?text=Z';
+
+            // Swap background with cross-fade
+            const bg = document.getElementById('reelBg');
+            bg.style.opacity = '0';
+            setTimeout(() => { bg.style.backgroundImage = `url('${img}')`; bg.style.opacity = '1'; }, 120);
+
+            // Swap content with entrance animation
+            const content = document.getElementById('reelContent');
+            content.classList.remove('reel-slide-in');
+            void content.offsetWidth;
+            content.classList.add('reel-slide-in');
+
+            document.getElementById('reelArt').src = img;
+            document.getElementById('reelTitle').textContent  = t.title || '';
+            document.getElementById('reelArtist').textContent = t.performer?.name || '';
+
+            const noteEl = document.getElementById('reelNote');
+            noteEl.textContent = m.note || '';
+            noteEl.style.display = m.note ? 'block' : 'none';
+
+            const d = new Date(m.created_at);
+            document.getElementById('reelDate').textContent = d.toLocaleDateString('fr-FR', { day:'numeric', month:'long', year:'numeric' });
+
+            const locEl = document.getElementById('reelLocation');
+            if (m.location_name) {
+                locEl.innerHTML = `<i class="fas fa-map-marker-alt"></i> ${escapeHtml(m.location_name)}`;
+                locEl.style.display = 'inline';
+            } else { locEl.style.display = 'none'; }
+
+            _buildReelProgress();
+
+            // Play track
+            if (t.id) { tracks = [{ ...t }]; currentIndex = 0; loadTrack(0, true); }
+
+            // Auto-advance after 18s
+            clearTimeout(_reelTimer);
+            _reelTimer = setTimeout(nextReelSlide, 18000);
+        }
+
+        function _buildReelProgress() {
+            const track = document.getElementById('reelProgress');
+            track.innerHTML = '';
+            _reelMemories.forEach((_, i) => {
+                const bar = document.createElement('div');
+                bar.className = 'reel-bar';
+                const fill = document.createElement('div');
+                fill.className = 'reel-bar-fill' + (i < _reelIdx ? ' done' : '') + (i === _reelIdx ? ' active' : '');
+                bar.appendChild(fill);
+                track.appendChild(bar);
+            });
+        }
+
+        function nextReelSlide() {
+            clearTimeout(_reelTimer);
+            if (_reelIdx < _reelMemories.length - 1) _showReelSlide(_reelIdx + 1);
+            else closeMemoriesReel();
+        }
+
+        function prevReelSlide() {
+            clearTimeout(_reelTimer);
+            if (_reelIdx > 0) _showReelSlide(_reelIdx - 1);
+        }
+
+        function closeMemoriesReel() {
+            clearTimeout(_reelTimer);
+            document.getElementById('memoriesReelOverlay').style.display = 'none';
+        }
+        // ─────────────────────────────────────────────────────────────────────────
+
         // ─── SOUVENIRS ────────────────────────────────────────────────────────────
         function escapeHtml(s) {
             if (!s) return '';
@@ -2506,13 +2640,13 @@
             const photoFile = document.getElementById('memoryPhotoInput').files[0];
             if (photoFile) {
                 try {
-                    const ext = photoFile.name.split('.').pop();
-                    const { error: upErr } = await supabaseClient.storage.from('memories').upload(`${user.id}/${Date.now()}.${ext}`, photoFile);
-                    if (!upErr) {
-                        const { data: { publicUrl } } = supabaseClient.storage.from('memories').getPublicUrl(`${user.id}/${Date.now()}.${ext}`);
-                        photoUrl = publicUrl;
-                    }
-                } catch {}
+                    const fd = new FormData();
+                    fd.append('reqtype', 'fileupload');
+                    fd.append('fileToUpload', photoFile);
+                    const upRes = await fetch('https://catbox.moe/user/api.php', { method: 'POST', body: fd });
+                    const upUrl = (await upRes.text()).trim();
+                    if (upUrl.startsWith('https://')) photoUrl = upUrl;
+                } catch { showToast("Photo non uploadée — vérifiez la connexion"); }
             }
 
             const note = document.getElementById('memoryNoteInput').value.trim();
