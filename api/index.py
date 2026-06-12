@@ -1494,11 +1494,15 @@ async def get_deezer_playlist_details_route(id: str):
             final_tracks = []
             art = data.get('picture_xl') or data.get('picture_big') or data.get('picture_medium')
             for t in raw_tracks:
+                alb = t.get('album', {}) or {}
+                # Pochette propre à l'album du titre (sinon repli sur la pochette playlist)
+                cover = alb.get('cover_xl') or alb.get('cover_big') or alb.get('cover_medium') or art
                 final_tracks.append({
                     'id': str(t.get('id')),
                     'title': t.get('title'),
+                    'isrc': t.get('isrc'),  # permet la résolution Qobuz précise par ISRC
                     'performer': {'name': t.get('artist', {}).get('name', data.get('artist', {}).get('name'))},
-                    'album': {'title': data.get('title'), 'image': {'large': data.get('cover_xl') or data.get('cover_big')}},
+                    'album': {'title': alb.get('title') or data.get('title'), 'image': {'large': cover}},
                     'duration': t.get('duration', 0),
                     'source': 'deezer',
                     'maximum_bit_depth': 16,
