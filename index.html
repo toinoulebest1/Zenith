@@ -19,6 +19,10 @@
     <link rel="stylesheet" href="magic.css">
     <link rel="stylesheet" href="style.css">
 
+    <!-- Leaflet (carte des souvenirs) -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
     <!-- SHAKA PLAYER pour DASH/HLS -->
@@ -330,6 +334,10 @@
                         style="background:rgba(255,100,100,0.12);border-color:rgba(255,100,100,0.3);color:rgba(255,160,160,0.9);"
                         title="Test : lecture aléatoire de tous vos souvenirs"><i class="fas fa-flask"></i>
                         Test</button>
+                    <button onclick="openMemoriesMap()" class="reel-trigger-btn"
+                        style="background:rgba(0,210,255,0.12);border-color:rgba(0,210,255,0.3);color:var(--primary);"
+                        title="Voir tous vos souvenirs sur une carte"><i class="fas fa-map-marked-alt"></i>
+                        Carte</button>
                 </div>
                 <div id="memoriesFeed"
                     style="margin-top:20px; display:flex; flex-direction:column; gap:14px; padding-bottom:120px;"></div>
@@ -580,6 +588,21 @@
                 </div>
                 <div class="reel-music-wave"><span></span><span></span><span></span><span></span></div>
             </div>
+        </div>
+    </div>
+
+    <!-- CARTE DES SOUVENIRS -->
+    <div id="memoriesMapOverlay" class="mem-map-overlay" style="display:none;">
+        <div class="mem-map-topbar">
+            <div class="mem-map-title"><i class="fas fa-map-marked-alt"></i> Carte des souvenirs</div>
+            <div id="memMapStatus" class="mem-map-status"></div>
+            <button class="mem-map-close" onclick="closeMemoriesMap()" title="Fermer"><i class="fas fa-times"></i></button>
+        </div>
+        <div id="memMapCanvas" class="mem-map-canvas"></div>
+        <div id="memMapEmpty" class="mem-map-empty" style="display:none;">
+            <i class="fas fa-map-marker-alt"></i>
+            <p>Aucun souvenir géolocalisé pour l'instant.</p>
+            <span>Épingle un souvenir en autorisant la localisation pour le voir ici.</span>
         </div>
     </div>
 
@@ -2995,6 +3018,112 @@
             cardEl.style.transform = 'translateX(40px)';
             setTimeout(() => cardEl.remove(), 300);
             showToast('Souvenir supprimé');
+        }
+
+        // ─── CARTE DES SOUVENIRS ───────────────────────────────────────────────────
+        let _memMap = null, _memMapMarkers = [], _memMapTimer = null;
+
+        async function openMemoriesMap() {
+            const overlay = document.getElementById('memoriesMapOverlay');
+            const statusEl = document.getElementById('memMapStatus');
+            const emptyEl = document.getElementById('memMapEmpty');
+            overlay.style.display = 'block';
+            emptyEl.style.display = 'none';
+            statusEl.textContent = 'Chargement…';
+
+            // 1. Récupérer les souvenirs géolocalisés (ordre chronologique)
+            let mems = [];
+            try {
+                const { data: { user } } = await supabaseClient.auth.getUser();
+                if (user) {
+                    const { data } = await supabaseClient.from('memories').select('*')
+                        .eq('user_id', user.id).order('created_at', { ascending: true });
+                    mems = (data || []).filter(m => typeof m.lat === 'number' && typeof m.lng === 'number');
+                }
+            } catch (e) { console.error('Map memories error', e); }
+
+            // 2. Initialiser la carte (une seule fois) avec des tuiles sombres
+            if (!_memMap) {
+                _memMap = L.map('memMapCanvas', { zoomControl: false, attributionControl: false }).setView([20, 0], 2);
+                L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+                    subdomains: 'abcd', maxZoom: 19
+                }).addTo(_memMap);
+                L.control.zoom({ position: 'bottomright' }).addTo(_memMap);
+            }
+            setTimeout(() => _memMap.invalidateSize(), 120);
+
+            // 3. Nettoyer les marqueurs précédents
+            if (_memMapTimer) { clearTimeout(_memMapTimer); _memMapTimer = null; }
+            _memMapMarkers.forEach(mk => _memMap.removeLayer(mk));
+            _memMapMarkers = [];
+
+            if (mems.length === 0) {
+                statusEl.textContent = '';
+                emptyEl.style.display = 'flex';
+                _memMap.setView([20, 0], 2);
+                return;
+            }
+
+            // 4. Cadrer la carte sur l'ensemble des souvenirs
+            const latlngs = mems.map(m => [m.lat, m.lng]);
+            setTimeout(() => _memMap.fitBounds(latlngs, { padding: [70, 70], maxZoom: 6 }), 160);
+
+            // 5. Révéler les marqueurs un par un, de plus en plus vite
+            let i = 0;
+            let interval = 900; // ms, accéléré à chaque étape
+            const reveal = () => {
+                if (i >= mems.length) {
+                    statusEl.textContent = `${mems.length} souvenir${mems.length > 1 ? 's' : ''}`;
+                    return;
+                }
+                const m = mems[i];
+                const t = m.track_data || {};
+                const cover = ((t.album && t.album.image && t.album.image.large) || t.img || 'https://placehold.co/120x120/111/444?text=%E2%99%AA').replace('_300', '_600');
+                const d = new Date(m.created_at);
+                const dateStr = d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
+
+                const icon = L.divIcon({
+                    className: 'mem-marker',
+                    html: `<div class="mem-marker-inner"><img src="${cover}" onerror="this.src='https://placehold.co/120x120/111/444?text=%E2%99%AA'"></div>`,
+                    iconSize: [46, 46], iconAnchor: [23, 23], popupAnchor: [0, -26]
+                });
+                const mk = L.marker([m.lat, m.lng], { icon }).addTo(_memMap);
+                mk.bindPopup(
+                    `<div class="mem-popup">
+                        <img class="mem-popup-art" src="${escapeHtml(cover)}" onerror="this.src='https://placehold.co/120x120/111/444?text=%E2%99%AA'">
+                        <div class="mem-popup-title">${escapeHtml(t.title || 'Titre inconnu')}</div>
+                        <div class="mem-popup-artist">${escapeHtml((t.performer && t.performer.name) || '')}</div>
+                        ${m.note ? `<div class="mem-popup-note">« ${escapeHtml(m.note)} »</div>` : ''}
+                        ${m.location_name ? `<div class="mem-popup-loc"><i class="fas fa-map-marker-alt"></i> ${escapeHtml(m.location_name)}</div>` : ''}
+                        <div class="mem-popup-date">${escapeHtml(dateStr)}</div>
+                        <button class="mem-popup-play" onclick="playMemoryTrack(${i})"><i class="fas fa-play"></i> Écouter</button>
+                    </div>`,
+                    { className: 'mem-popup-wrap', maxWidth: 240 }
+                );
+                _memMapMarkers.push(mk);
+                _memMapMarkers._mems = mems;
+
+                statusEl.textContent = `${i + 1} / ${mems.length}`;
+                i++;
+                interval = Math.max(85, interval * 0.82); // accélération
+                _memMapTimer = setTimeout(reveal, interval);
+            };
+            reveal();
+        }
+
+        function playMemoryTrack(index) {
+            const mems = _memMapMarkers._mems || [];
+            const m = mems[index];
+            if (!m || !m.track_data || !m.track_data.id) return;
+            tracks = [m.track_data];
+            currentIndex = 0;
+            loadTrack(0, true);
+            showToast(`▶ ${m.track_data.title}`);
+        }
+
+        function closeMemoriesMap() {
+            if (_memMapTimer) { clearTimeout(_memMapTimer); _memMapTimer = null; }
+            document.getElementById('memoriesMapOverlay').style.display = 'none';
         }
         // ──────────────────────────────────────────────────────────────────────────
 
