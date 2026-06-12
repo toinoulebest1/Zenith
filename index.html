@@ -19,9 +19,11 @@
     <link rel="stylesheet" href="magic.css">
     <link rel="stylesheet" href="style.css">
 
-    <!-- Leaflet (carte des souvenirs) -->
+    <!-- Leaflet (carte des souvenirs) + clustering -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
@@ -3021,7 +3023,7 @@
         }
 
         // ─── CARTE DES SOUVENIRS ───────────────────────────────────────────────────
-        let _memMap = null, _memMapMarkers = [], _memMapTimer = null;
+        let _memMap = null, _memCluster = null, _memMapMarkers = [], _memMapTimer = null;
 
         async function openMemoriesMap() {
             const overlay = document.getElementById('memoriesMapOverlay');
@@ -3049,12 +3051,27 @@
                     subdomains: 'abcd', maxZoom: 19
                 }).addTo(_memMap);
                 L.control.zoom({ position: 'bottomright' }).addTo(_memMap);
+                // Regroupement : les souvenirs au même endroit forment une pastille
+                // (compteur) qui s'écarte en éventail au clic (spiderfy).
+                _memCluster = L.markerClusterGroup({
+                    showCoverageOnHover: false,
+                    spiderfyOnMaxZoom: true,
+                    maxClusterRadius: 45,
+                    spiderfyDistanceMultiplier: 1.6,
+                    spiderLegPolylineOptions: { weight: 1.5, color: '#00d2ff', opacity: 0.45 },
+                    iconCreateFunction: (cluster) => L.divIcon({
+                        className: 'mem-cluster',
+                        html: `<div class="mem-cluster-inner">${cluster.getChildCount()}</div>`,
+                        iconSize: [42, 42]
+                    })
+                });
+                _memMap.addLayer(_memCluster);
             }
             setTimeout(() => _memMap.invalidateSize(), 120);
 
             // 3. Nettoyer les marqueurs précédents
             if (_memMapTimer) { clearTimeout(_memMapTimer); _memMapTimer = null; }
-            _memMapMarkers.forEach(mk => _memMap.removeLayer(mk));
+            _memCluster.clearLayers();
             _memMapMarkers = [];
 
             if (mems.length === 0) {
@@ -3087,7 +3104,8 @@
                     html: `<div class="mem-marker-inner"><img src="${cover}" onerror="this.src='https://placehold.co/120x120/111/444?text=%E2%99%AA'"></div>`,
                     iconSize: [46, 46], iconAnchor: [23, 23], popupAnchor: [0, -26]
                 });
-                const mk = L.marker([m.lat, m.lng], { icon }).addTo(_memMap);
+                const mk = L.marker([m.lat, m.lng], { icon });
+                _memCluster.addLayer(mk);
                 mk.bindPopup(
                     `<div class="mem-popup">
                         <img class="mem-popup-art" src="${escapeHtml(cover)}" onerror="this.src='https://placehold.co/120x120/111/444?text=%E2%99%AA'">
