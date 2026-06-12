@@ -29,6 +29,9 @@ except ImportError:
 
 import logging
 import random
+import threading
+import base64
+import tempfile
 import requests
 import requests.adapters
 import re
@@ -73,8 +76,17 @@ FALLBACK_TIDAL_CREDENTIALS = {
 # --- AMAZON MUSIC API ---
 AMAZON_MUSIC_API_BASE = "https://t2tunes.site/api/amazon-music"
 
-# --- QOBUZ ALTERNATIVE API ---
+# --- QOBUZ ALTERNATIVE API (PAUSED — remplacé par squid.wtf) ---
 QOBUZ_ALT_API_BASE = "https://trypt-hifi-dl-456461932686.us-west1.run.app"
+QOBUZ_ENABLED = False  # Qobuz est en pause : recherche + audio passent par squid.wtf
+
+# --- SQUID.WTF (Amazon Music) API ---
+# Remplace Qobuz pour la recherche et l'audio. Renvoie du FLAC chiffré (CENC)
+# déchiffré côté serveur via ffmpeg -decryption_key.
+SQUID_API_BASE = "https://amz.squid.wtf"
+SQUID_COUNTRY = "US"
+SQUID_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36")
 
 # --- STREAM URL CACHE (évite d'appeler l'alt API à chaque lecture) ---
 _stream_url_cache: dict = {}  # {track_id: {'url': str, 'ts': float}}
@@ -181,6 +193,193 @@ class TidalAuthManager:
 
 tidal_auth = TidalAuthManager()
 
+# --- CLIENT SQUID.WTF (Amazon Music) ---
+class SquidClient:
+    """
+    Client pour amz.squid.wtf : résout le proof-of-work ALTCHA/PBKDF2,
+    met en cache le token captcha (réutilisable), et expose search/track/stream.
+    """
+    def __init__(self):
+        self.token = None
+        self.token_ts = 0
+        self.token_ttl = 8 * 60  # le token est réutilisable ; on le rafraîchit toutes les ~8 min
+        self._lock = threading.Lock()
+        self.session = requests.Session()
+        self.session.headers.update({
+            "User-Agent": SQUID_UA,
+            "Referer": f"{SQUID_API_BASE}/",
+            "Origin": SQUID_API_BASE,
+        })
+
+    def _solve_pow(self, params):
+        """Brute-force le counter du PoW PBKDF2-HMAC-SHA256."""
+        nonce = bytes.fromhex(params['nonce'])
+        salt = bytes.fromhex(params['salt'])
+        kp = bytes.fromhex(params['keyPrefix'])
+        cost = params['cost']
+        klen = params['keyLength']
+        counter = 0
+        t0 = time.time()
+        while counter < 10_000_000:
+            dk = hashlib.pbkdf2_hmac('sha256', nonce + struct.pack('>I', counter), salt, cost, dklen=klen)
+            if dk[:len(kp)] == kp:
+                return counter, dk.hex(), (time.time() - t0) * 1000
+            counter += 1
+        raise RuntimeError("Squid PoW: aucune solution trouvée")
+
+    def _new_token(self):
+        r = self.session.get(f"{SQUID_API_BASE}/api/captcha/challenge", timeout=20)
+        r.raise_for_status()
+        ch = r.json()
+        params = ch['parameters']
+        counter, dk_hex, took = self._solve_pow(params)
+        payload = {
+            "challenge": {"parameters": params, "signature": ch['signature']},
+            "solution": {"counter": counter, "derivedKey": dk_hex, "time": took},
+        }
+        b64 = base64.b64encode(json.dumps(payload).encode()).decode()
+        rv = self.session.post(f"{SQUID_API_BASE}/api/captcha/verify",
+                               json={"payload": b64}, timeout=20)
+        rv.raise_for_status()
+        token = rv.json().get('token')
+        if not token:
+            raise RuntimeError("Squid captcha: pas de token dans la réponse verify")
+        logger.info(f"[Squid] Nouveau token captcha (counter={counter}, {round(took)}ms)")
+        return token
+
+    def get_token(self, force=False):
+        with self._lock:
+            if not force and self.token and (time.time() - self.token_ts) < self.token_ttl:
+                return self.token
+            self.token = self._new_token()
+            self.token_ts = time.time()
+            return self.token
+
+    def _request(self, method, path, json_body=None, params=None, stream=False):
+        """Requête authentifiée avec retry unique si le captcha est rejeté."""
+        url = path if path.startswith('http') else f"{SQUID_API_BASE}{path}"
+        for attempt in range(2):
+            token = self.get_token(force=(attempt == 1))
+            headers = {"x-captcha-token": token}
+            if json_body is not None:
+                headers["Content-Type"] = "application/json"
+            resp = self.session.request(method, url, json=json_body, params=params,
+                                        headers=headers, stream=stream, timeout=90)
+            if resp.status_code in (401, 403) and attempt == 0:
+                logger.info(f"[Squid] {path} -> {resp.status_code}, renouvellement du token")
+                continue
+            return resp
+        return resp
+
+    def search(self, query, limit=50):
+        try:
+            resp = self._request('POST', '/api/search',
+                                 json_body={"query": query, "country": SQUID_COUNTRY})
+            if resp.status_code != 200:
+                logger.error(f"[Squid Search] Status {resp.status_code}: {resp.text[:200]}")
+                return []
+            data = resp.json()
+            results = []
+            for t in data.get('trackList', [])[:limit]:
+                asin = t.get('asin')
+                if not asin:
+                    continue
+                img = (t.get('album') or {}).get('image') or 'https://placehold.co/300x300/1a1a1a/666666?text=Music'
+                results.append({
+                    'id': asin,
+                    'title': t.get('title', 'Titre Inconnu'),
+                    'performer': {'name': t.get('artistName') or t.get('primaryArtistName') or 'Inconnu'},
+                    'album': {
+                        'title': (t.get('album') or {}).get('title', ''),
+                        'image': {'large': img, 'small': img},
+                    },
+                    'duration': 0,  # non fourni par /api/search
+                    'maximum_bit_depth': 16,
+                    'source': 'qobuz',  # libellé conservé pour l'UX (prefetch HD, badges)
+                })
+            return results
+        except Exception as e:
+            logger.error(f"[Squid Search] Exception: {e}")
+            return []
+
+    def get_track_full(self, asin, tier='best'):
+        """Renvoie (metadata, drm_key, stream_path, codec) ou None."""
+        try:
+            resp = self._request('POST', '/api/track',
+                                 json_body={"asin": asin, "tier": tier, "country": SQUID_COUNTRY})
+            if resp.status_code != 200:
+                logger.error(f"[Squid Track] {asin} tier={tier} -> {resp.status_code}")
+                return None
+            d = resp.json()
+            meta = d.get('metadata', {}) or {}
+            key = (d.get('drm') or {}).get('key')
+            stream = d.get('stream') or {}
+            return meta, key, stream.get('url'), stream.get('codec')
+        except Exception as e:
+            logger.error(f"[Squid Track] Exception: {e}")
+            return None
+
+    def get_track_meta(self, asin):
+        """Métadonnées seules, formatées en objet track Zenith."""
+        res = self.get_track_full(asin)
+        if not res:
+            # repli : métadonnées sans tier (pas de clé requise)
+            try:
+                resp = self._request('POST', '/api/track',
+                                     json_body={"asin": asin, "country": SQUID_COUNTRY})
+                d = resp.json() if resp.status_code == 200 else {}
+                meta = d.get('metadata', {}) or {}
+            except Exception:
+                meta = {}
+        else:
+            meta = res[0]
+        if not meta:
+            return None
+        cover = meta.get('cover') or 'https://placehold.co/300x300/1a1a1a/666666?text=Music'
+        return {
+            'id': asin,
+            'title': meta.get('title', 'Titre Inconnu'),
+            'performer': {'name': meta.get('artist', 'Inconnu')},
+            'album': {'title': meta.get('album', ''), 'image': {'large': cover, 'small': cover}},
+            'duration': 0,
+            'maximum_bit_depth': 16,
+            'isrc': meta.get('isrc'),
+            'date': meta.get('date') or meta.get('year'),
+            'source': 'qobuz',
+        }
+
+    def fetch_encrypted_stream(self, asin):
+        """
+        Télécharge le flux chiffré + récupère la clé.
+        Renvoie (encrypted_bytes, key_hex, codec) ou None.
+        Essaie les tiers du meilleur au plus bas.
+        """
+        for tier in ('best', 'hd', 'standard'):
+            res = self.get_track_full(asin, tier=tier)
+            if not res:
+                continue
+            _meta, key, stream_path, codec = res
+            if not key or not stream_path:
+                continue
+            try:
+                resp = self._request('GET', stream_path, stream=False)
+                if resp.status_code != 200:
+                    logger.error(f"[Squid Stream] {asin} {stream_path} -> {resp.status_code}")
+                    continue
+                return resp.content, key, (codec or 'flac')
+            except Exception as e:
+                logger.error(f"[Squid Stream] Exception {asin} tier={tier}: {e}")
+                continue
+        return None
+
+
+squid = SquidClient()
+
+ASIN_RE = re.compile(r'^[A-Z0-9]{10}$')
+
+def is_asin(track_id):
+    return bool(track_id and ASIN_RE.match(str(track_id)))
+
 # --- CLIENT QOBUZ ---
 class TokenQobuzClient(QobuzClient):
     def __init__(self, app_id, secrets, token):
@@ -203,13 +402,16 @@ class TokenQobuzClient(QobuzClient):
         return s
 
 client = None
-try:
-    logger.info("Init Qobuz...")
-    fetched_app_id, secrets = get_app_credentials()
-    client = TokenQobuzClient(APP_ID, secrets, TOKEN)
-    logger.info("Ready.")
-except Exception as e:
-    logger.error(f"Init Error: {e}")
+if QOBUZ_ENABLED:
+    try:
+        logger.info("Init Qobuz...")
+        fetched_app_id, secrets = get_app_credentials()
+        client = TokenQobuzClient(APP_ID, secrets, TOKEN)
+        logger.info("Ready.")
+    except Exception as e:
+        logger.error(f"Init Error: {e}")
+else:
+    logger.info("Qobuz en pause — recherche & audio via squid.wtf.")
 
 # --- UTILITAIRES ---
 def clean_string(s):
@@ -781,33 +983,13 @@ def sync_search_deezer_artists(query, limit=15):
     except Exception as e: return []
 
 def sync_qobuz_search(query, limit=25, type='track'):
-    try:
-        url = f"{QOBUZ_ALT_API_BASE}/api/get-music"
-        params = {'q': query, 'offset': 0}
-        r = requests.get(url, params=params, timeout=15)
-        if r.status_code != 200:
-            return []
-        data = r.json()
-        if not data.get('success'):
-            return []
-        if type == 'track':
-            items = data.get('data', {}).get('tracks', {}).get('items', [])
-            items = items[:limit]
-            for t in items:
-                t['source'] = 'qobuz'
-                fix_qobuz_title(t)
-                t['date'] = t.get('release_date_original') or t.get('released_at')
-            return items
-        elif type == 'album':
-            items = data.get('data', {}).get('albums', {}).get('items', [])
-            items = items[:limit]
-            for a in items:
-                a['source'] = 'qobuz'
-                a['date'] = a.get('release_date_original') or a.get('released_at')
-            return items
-    except Exception as e:
-        logger.error(f"[Alt Qobuz Search] Error: {e}")
-        return []
+    """
+    Qobuz est en pause : la recherche de titres passe désormais par squid.wtf.
+    Les albums ne sont pas couverts par squid (couverts par Amazon/Deezer ailleurs).
+    """
+    if type == 'track':
+        return squid.search(query, limit=limit)
+    return []
 
 def sync_get_deezer_artist_by_id(artist_id):
     try:
@@ -1318,9 +1500,14 @@ async def resolve_metadata_route(title: str = '', artist: str = '', isrc: str = 
 
 @app.get('/track')
 async def get_track_info(id: str, source: str = None):
-    if source == 'tidal_hund' or source == 'amazon_music':
+    if source == 'tidal_hund':
         raise HTTPException(404)
-    elif client:
+    # squid.wtf (ASIN) : nouvelle source principale (libellée 'qobuz')
+    if source == 'amazon_music' or is_asin(id):
+        res = await run_in_threadpool(squid.get_track_meta, id)
+        if res: return JSONResponse(res)
+        raise HTTPException(404)
+    if QOBUZ_ENABLED and client:
         try:
             res = await run_in_threadpool(client.get_track_meta, id)
             res['source'] = 'qobuz'; fix_qobuz_title(res)
@@ -1383,6 +1570,9 @@ async def get_artist(id: str):
     except: raise HTTPException(404)
 
 def _resolve_qobuz_url(track_id: str):
+    """Qobuz est en pause. Conservé pour compat (renvoie None)."""
+    if not QOBUZ_ENABLED:
+        return None
     for fmt in [27, 7, 6, 5]:
         try:
             r = requests.get(
@@ -1403,26 +1593,88 @@ def _resolve_qobuz_url(track_id: str):
             except: continue
     return None
 
+def squid_decrypt_audio(asin: str):
+    """
+    Télécharge le flux chiffré squid.wtf, le déchiffre et le transcode via ffmpeg.
+    Renvoie (content_bytes, media_type) ou None.
+    """
+    fetched = squid.fetch_encrypted_stream(asin)
+    if not fetched:
+        return None
+    enc, key, codec = fetched
+    codec = (codec or 'flac').lower()
+    is_mp4 = codec in ('opus', 'eac3', 'ec-3', 'ac-3', 'atmos')
+
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as tf:
+            tf.write(enc)
+            tmp_path = tf.name
+
+        def _run(args):
+            p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            out, err = p.communicate()
+            return p.returncode, out, err
+
+        if is_mp4:
+            rc, out, err = _run(['ffmpeg', '-y', '-decryption_key', key, '-i', tmp_path,
+                                 '-map', '0:a:0', '-c:a', 'copy', '-f', 'mp4',
+                                 '-movflags', 'frag_keyframe+empty_moov', 'pipe:1'])
+            if rc == 0 and out:
+                return out, 'audio/mp4'
+            logger.error(f"[Squid Decrypt] mp4 copy failed: {err[-300:].decode('utf-8','replace')}")
+            return None
+
+        # FLAC : copie du flux (rapide, lossless), repli sur ré-encodage
+        rc, out, err = _run(['ffmpeg', '-y', '-decryption_key', key, '-i', tmp_path,
+                             '-map', '0:a:0', '-c:a', 'copy', '-f', 'flac', 'pipe:1'])
+        if rc == 0 and out:
+            return out, 'audio/flac'
+        rc, out, err = _run(['ffmpeg', '-y', '-decryption_key', key, '-i', tmp_path,
+                             '-map', '0:a:0', '-c:a', 'flac', '-f', 'flac', 'pipe:1'])
+        if rc == 0 and out:
+            return out, 'audio/flac'
+        logger.error(f"[Squid Decrypt] flac failed: {err[-300:].decode('utf-8','replace')}")
+        return None
+    except Exception as e:
+        logger.error(f"[Squid Decrypt] Exception {asin}: {e}")
+        return None
+    finally:
+        if tmp_path:
+            try: os.remove(tmp_path)
+            except: pass
+
 @app.get('/stream_url/{track_id}')
 async def get_stream_url(track_id: str):
-    """Retourne l'URL de stream Qobuz en JSON (pour le pré-fetch frontend)."""
-    cached = _stream_url_cache.get(track_id)
-    if cached and (time.time() - cached['ts']) < STREAM_CACHE_TTL:
-        return JSONResponse({'url': cached['url']})
+    """Retourne l'URL de lecture en JSON (pour le pré-fetch frontend)."""
+    # squid.wtf nécessite un déchiffrement côté serveur : on renvoie l'URL proxy locale.
+    if is_asin(track_id):
+        return JSONResponse({'url': f"/stream/{track_id}"})
     url = await run_in_threadpool(_resolve_qobuz_url, track_id)
     if url:
-        _stream_url_cache[track_id] = {'url': url, 'ts': time.time()}
         return JSONResponse({'url': url})
     raise HTTPException(404, "URL not found")
 
 @app.get('/stream/{track_id}')
 async def stream_track(track_id: str):
-    cached = _stream_url_cache.get(track_id)
-    if cached and (time.time() - cached['ts']) < STREAM_CACHE_TTL:
-        return RedirectResponse(cached['url'])
+    # squid.wtf (Amazon Music) : déchiffrement + transcodage FLAC côté serveur
+    if is_asin(track_id):
+        result = await run_in_threadpool(squid_decrypt_audio, track_id)
+        if not result:
+            raise HTTPException(404, "Stream not found")
+        content, media_type = result
+        return Response(
+            content=content,
+            media_type=media_type,
+            headers={
+                'Content-Length': str(len(content)),
+                'Accept-Ranges': 'bytes',
+                'Cache-Control': 'public, max-age=3600',
+                'Access-Control-Allow-Origin': '*',
+            },
+        )
     url = await run_in_threadpool(_resolve_qobuz_url, track_id)
     if url:
-        _stream_url_cache[track_id] = {'url': url, 'ts': time.time()}
         return RedirectResponse(url)
     raise HTTPException(404, "URL not found")
 

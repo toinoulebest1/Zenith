@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s -X GET 'https://amz.squid.wtf/api/track?id=B0064UPV9K&asin=B0064UPV9K&country=US' -H 'x-captcha-token: abf8c2fb9bfc5bf5dbc6c1ab24116a5e5f24a7df4160e8b0' -H 'referer: https://amz.squid.wtf/' -H 'user-agent: Mozilla/5.0 \\(Windows NT 10.0; Win64; x64\\) AppleWebKit/537.36 \\(KHTML, like Gecko\\) Chrome/148.0.0.0 Safari/537.36' --max-time 25)",
+      "Bash(curl -s -X GET https://amz.squid.wtf/api/captcha/challenge -H 'user-agent: Mozilla/5.0 \\(Windows NT 10.0; Win64; x64\\) AppleWebKit/537.36 \\(KHTML, like Gecko\\) Chrome/148.0.0.0 Safari/537.36' -H 'referer: https://amz.squid.wtf/' --max-time 20)",
+      "Bash(curl -s -X POST https://amz.squid.wtf/api/captcha/challenge -H 'user-agent: Mozilla/5.0 \\(Windows NT 10.0; Win64; x64\\) AppleWebKit/537.36 \\(KHTML, like Gecko\\) Chrome/148.0.0.0 Safari/537.36' -H 'referer: https://amz.squid.wtf/' --max-time 20)",
+      "Bash(grep -hoiE '.{200}counter.{0,30}\\\\+\\\\+.{150}' chunk_118710tgjag0d.js)",
+      "Bash(grep -hoiE '.{0}new r9.{0,40}' chunk_118710tgjag0d.js)",
+      "Bash(cd /tmp)",
+      "Bash(grep -hoE 'function r9\\\\\\(\\\\\\)\\\\{.{0,1200}' chunk_118710tgjag0d.js)",
+      "Bash(grep -hoE 'PBKDF2.{0,300}' chunk_118710tgjag0d.js)",
+      "Bash(grep -hoE '\\\\{ ?name: ?\"PBKDF2\".{0,400}' chunk_118710tgjag0d.js)",
+      "Bash(grep -hoE 'deriveBits.{0,300}' chunk_118710tgjag0d.js)",
+      "Bash(grep -hoE 'r9[^a-zA-Z0-9].{0,80}' chunk_118710tgjag0d.js)",
+      "Bash(python -)",
+      "Bash(PYTHONIOENCODING=utf-8 python -)",
+      "PowerShell(python -m py_compile \"api/index.py\")",
+      "PowerShell(if \\($?\\) { \"COMPILE OK\" })"
+    ]
+  }
+}
