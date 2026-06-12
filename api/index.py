@@ -76,13 +76,16 @@ FALLBACK_TIDAL_CREDENTIALS = {
 # --- AMAZON MUSIC API ---
 AMAZON_MUSIC_API_BASE = "https://t2tunes.site/api/amazon-music"
 
-# --- QOBUZ ALTERNATIVE API (PAUSED — remplacé par squid.wtf) ---
-QOBUZ_ALT_API_BASE = "https://trypt-hifi-dl-456461932686.us-west1.run.app"
-QOBUZ_ENABLED = False  # Qobuz est en pause : recherche + audio passent par squid.wtf
+# --- QOBUZ ALTERNATIVE API (source principale : recherche + audio) ---
+# Renvoie une URL CDN directe (redirigeable) : compatible Vercel serverless.
+QOBUZ_ALT_API_BASE = "https://qobuz.kennyy.com.br"
+QOBUZ_ENABLED = True   # Qobuz (via l'API alt kennyy) gère recherche + audio
+QOBUZ_OFFICIAL_ENABLED = False  # Client Qobuz officiel (credentials) : non utilisé
 
 # --- SQUID.WTF (Amazon Music) API ---
-# Remplace Qobuz pour la recherche et l'audio. Renvoie du FLAC chiffré (CENC)
-# déchiffré côté serveur via ffmpeg -decryption_key.
+# EN PAUSE : incompatible Vercel (déchiffrement ffmpeg + flux >4.5 Mo).
+# Code conservé pour réactivation sur un hôte non-serverless.
+SQUID_ENABLED = False
 SQUID_API_BASE = "https://amz.squid.wtf"
 SQUID_COUNTRY = "US"
 SQUID_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -375,7 +378,7 @@ class SquidClient:
 
 squid = SquidClient()
 
-ASIN_RE = re.compile(r'^[A-Z0-9]{10}$')
+ASIN_RE = re.compile(r'^B[0-9A-Z]{9}$')  # ASIN Amazon : 'B' + 9 alphanum (≠ id Qobuz numérique)
 
 def is_asin(track_id):
     return bool(track_id and ASIN_RE.match(str(track_id)))
@@ -402,16 +405,16 @@ class TokenQobuzClient(QobuzClient):
         return s
 
 client = None
-if QOBUZ_ENABLED:
+if QOBUZ_OFFICIAL_ENABLED:
     try:
-        logger.info("Init Qobuz...")
+        logger.info("Init Qobuz (client officiel)...")
         fetched_app_id, secrets = get_app_credentials()
         client = TokenQobuzClient(APP_ID, secrets, TOKEN)
         logger.info("Ready.")
     except Exception as e:
         logger.error(f"Init Error: {e}")
 else:
-    logger.info("Qobuz en pause — recherche & audio via squid.wtf.")
+    logger.info("Qobuz via API alt (kennyy) — pas de client officiel requis.")
 
 # --- UTILITAIRES ---
 def clean_string(s):
@@ -983,13 +986,67 @@ def sync_search_deezer_artists(query, limit=15):
     except Exception as e: return []
 
 def sync_qobuz_search(query, limit=25, type='track'):
-    """
-    Qobuz est en pause : la recherche de titres passe désormais par squid.wtf.
-    Les albums ne sont pas couverts par squid (couverts par Amazon/Deezer ailleurs).
-    """
-    if type == 'track':
-        return squid.search(query, limit=limit)
+    """Recherche Qobuz via l'API alt (kennyy) : titres ou albums."""
+    try:
+        url = f"{QOBUZ_ALT_API_BASE}/api/get-music"
+        params = {'q': query, 'offset': 0}
+        r = requests.get(url, params=params, timeout=15)
+        if r.status_code != 200:
+            return []
+        data = r.json()
+        if not data.get('success'):
+            return []
+        if type == 'track':
+            items = data.get('data', {}).get('tracks', {}).get('items', [])[:limit]
+            for t in items:
+                t['source'] = 'qobuz'
+                fix_qobuz_title(t)
+                t['date'] = t.get('release_date_original') or t.get('released_at')
+            return items
+        elif type == 'album':
+            items = data.get('data', {}).get('albums', {}).get('items', [])[:limit]
+            for a in items:
+                a['source'] = 'qobuz'
+                a['date'] = a.get('release_date_original') or a.get('released_at')
+            return items
+    except Exception as e:
+        logger.error(f"[Qobuz Search] Error: {e}")
     return []
+
+def sync_get_qobuz_album(album_id):
+    """Détails d'un album Qobuz via l'API alt (kennyy). album_id = UPC."""
+    try:
+        r = requests.get(f"{QOBUZ_ALT_API_BASE}/api/get-album",
+                         params={'album_id': album_id}, timeout=15)
+        if r.status_code != 200:
+            return None
+        payload = r.json()
+        if not payload.get('success'):
+            return None
+        d = payload['data']
+        img = (d.get('image') or {})
+        cover = img.get('large') or img.get('small')
+        tracks = []
+        for t in d.get('tracks', {}).get('items', []):
+            t = dict(t)
+            t['source'] = 'qobuz'
+            fix_qobuz_title(t)
+            t.setdefault('album', {'title': d.get('title'), 'image': {'large': cover}})
+            if not t.get('performer'):
+                t['performer'] = {'name': (d.get('artist') or {}).get('name', 'Inconnu')}
+            tracks.append(t)
+        return {
+            'id': d.get('id') or album_id,
+            'title': d.get('title'),
+            'artist': {'name': (d.get('artist') or {}).get('name', 'Inconnu')},
+            'image': {'large': cover},
+            'source': 'qobuz',
+            'maximum_bit_depth': d.get('maximum_bit_depth', 16),
+            'tracks': {'items': tracks},
+        }
+    except Exception as e:
+        logger.error(f"[Qobuz Album] Error: {e}")
+        return None
 
 def sync_get_deezer_artist_by_id(artist_id):
     try:
@@ -1113,7 +1170,7 @@ def sync_search_artist_full(name):
 
 def sync_resolve_track(title, artist, isrc=None):
     """
-    Recherche le titre sur Qobuz (alt API) ou Amazon Music.
+    Recherche le titre sur Qobuz (alt API).
     Si un ISRC est fourni, il est utilisé en priorité (plus fiable que titre+artiste).
     """
     # 1. Recherche par ISRC (priorité absolue - identifiant unique)
@@ -1161,27 +1218,6 @@ def sync_resolve_track(title, artist, isrc=None):
                         rec['album']['image']['large'] = rec['album']['image']['large'].replace('_300', '_600')
                     return rec
     except: pass
-
-    # 3. Fallback Amazon Music
-    amazon_res = sync_search_amazon(f"{title} {artist}", limit=5)
-    for t in amazon_res:
-        t_artist = clean_string(t['performer']['name'])
-        t_title = clean_string(t['title'])
-
-        match_artist = False
-        if FUZZ_AVAILABLE:
-            if fuzz.ratio(target_artist, t_artist) > 65: match_artist = True
-        elif target_artist in t_artist or t_artist in target_artist: match_artist = True
-
-        if match_artist:
-            match_title = False
-            if FUZZ_AVAILABLE:
-                if fuzz.ratio(target_title, t_title) > 60: match_title = True
-            elif target_title in t_title or t_title in target_title: match_title = True
-
-            if match_title:
-                t['source'] = 'amazon_music'
-                return t
 
     return None
 
@@ -1307,10 +1343,8 @@ async def search_tracks(q: str, type: str = 'all'):
     tasks = []
     if type in ['track', 'all']:
         tasks.append(run_in_threadpool(sync_qobuz_search, q, 50, 'track'))
-        tasks.append(run_in_threadpool(sync_search_amazon, q, 50))
     if type in ['album', 'all']:
         tasks.append(run_in_threadpool(sync_qobuz_search, q, 15, 'album'))
-        tasks.append(run_in_threadpool(sync_search_amazon_albums, q, 15))
         tasks.append(run_in_threadpool(sync_search_deezer_albums, q, 15))
     if type in ['artist', 'all']:
         tasks.append(run_in_threadpool(sync_search_deezer_artists, q, 15))
@@ -1323,10 +1357,8 @@ async def search_tracks(q: str, type: str = 'all'):
 
     if type in ['track', 'all']:
         r1 = finished[idx]; idx += 1; qobuz_tracks = r1 if isinstance(r1, list) else []
-        r2 = finished[idx]; idx += 1; amazon_tracks = r2 if isinstance(r2, list) else []
     if type in ['album', 'all']:
         r4 = finished[idx]; idx += 1; qobuz_albums = r4 if isinstance(r4, list) else []
-        r5 = finished[idx]; idx += 1; amazon_albums = r5 if isinstance(r5, list) else []
         r6 = finished[idx]; idx += 1; deezer_albums = r6 if isinstance(r6, list) else []
     if type in ['artist', 'all']:
         r7 = finished[idx]; idx += 1; deezer_artists = r7 if isinstance(r7, list) else []
@@ -1500,26 +1532,30 @@ async def resolve_metadata_route(title: str = '', artist: str = '', isrc: str = 
 
 @app.get('/track')
 async def get_track_info(id: str, source: str = None):
-    if source == 'tidal_hund':
+    if source in ('tidal_hund', 'amazon_music'):
         raise HTTPException(404)
-    # squid.wtf (ASIN) : nouvelle source principale (libellée 'qobuz')
-    if source == 'amazon_music' or is_asin(id):
+    # squid (ASIN) en pause : seulement si réactivé
+    if SQUID_ENABLED and is_asin(id):
         res = await run_in_threadpool(squid.get_track_meta, id)
         if res: return JSONResponse(res)
         raise HTTPException(404)
-    if QOBUZ_ENABLED and client:
+    if QOBUZ_OFFICIAL_ENABLED and client:
         try:
             res = await run_in_threadpool(client.get_track_meta, id)
             res['source'] = 'qobuz'; fix_qobuz_title(res)
             return JSONResponse(res)
         except: pass
+    # L'API alt (kennyy) n'expose pas de lookup track-by-id :
+    # les liens directs /track?source=qobuz dégradent proprement (le frontend re-résout).
     raise HTTPException(404)
 
 @app.get('/album')
 async def get_album(id: str, source: str = None):
     if source == 'amazon_music':
-        res = await run_in_threadpool(sync_get_amazon_album, id)
-        if res: return JSONResponse(res)
+        if SQUID_ENABLED:
+            res = await run_in_threadpool(sync_get_amazon_album, id)
+            if res: return JSONResponse(res)
+        raise HTTPException(404)
     elif source == 'tidal_hund':
         res = await run_in_threadpool(sync_get_tidal_album, id)
         if res: return JSONResponse(res)
@@ -1550,12 +1586,10 @@ async def get_album(id: str, source: str = None):
             except Exception as e: return None
         res = await run_in_threadpool(_fetch_deezer_album)
         if res: return JSONResponse(res)
-    elif client:
-        try:
-            res = await run_in_threadpool(client.get_album_meta, id)
-            res['source'] = 'qobuz'
-            return JSONResponse(res)
-        except: pass
+    else:
+        # Qobuz (ou source absente) : détails via l'API alt (kennyy)
+        res = await run_in_threadpool(sync_get_qobuz_album, id)
+        if res: return JSONResponse(res)
     raise HTTPException(404)
 
 @app.get('/artist')
@@ -1570,7 +1604,7 @@ async def get_artist(id: str):
     except: raise HTTPException(404)
 
 def _resolve_qobuz_url(track_id: str):
-    """Qobuz est en pause. Conservé pour compat (renvoie None)."""
+    """Résout l'URL CDN Qobuz via l'API alt (kennyy). Renvoie l'URL ou None."""
     if not QOBUZ_ENABLED:
         return None
     for fmt in [27, 7, 6, 5]:
@@ -1612,7 +1646,13 @@ def squid_decrypt_audio(asin: str):
             tmp_path = tf.name
 
         def _run(args):
-            p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            try:
+                p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            except FileNotFoundError:
+                raise RuntimeError(
+                    "ffmpeg introuvable : il est requis pour déchiffrer les flux squid.wtf. "
+                    "Installez ffmpeg sur l'hôte (impossible sur Vercel serverless — voir Docker)."
+                )
             out, err = p.communicate()
             return p.returncode, out, err
 
@@ -1646,9 +1686,8 @@ def squid_decrypt_audio(asin: str):
 
 @app.get('/stream_url/{track_id}')
 async def get_stream_url(track_id: str):
-    """Retourne l'URL de lecture en JSON (pour le pré-fetch frontend)."""
-    # squid.wtf nécessite un déchiffrement côté serveur : on renvoie l'URL proxy locale.
-    if is_asin(track_id):
+    """Retourne l'URL CDN Qobuz en JSON (pour le pré-fetch frontend)."""
+    if SQUID_ENABLED and is_asin(track_id):
         return JSONResponse({'url': f"/stream/{track_id}"})
     url = await run_in_threadpool(_resolve_qobuz_url, track_id)
     if url:
@@ -1657,8 +1696,8 @@ async def get_stream_url(track_id: str):
 
 @app.get('/stream/{track_id}')
 async def stream_track(track_id: str):
-    # squid.wtf (Amazon Music) : déchiffrement + transcodage FLAC côté serveur
-    if is_asin(track_id):
+    # squid (Amazon Music) en pause : déchiffrement serveur uniquement si réactivé
+    if SQUID_ENABLED and is_asin(track_id):
         result = await run_in_threadpool(squid_decrypt_audio, track_id)
         if not result:
             raise HTTPException(404, "Stream not found")
@@ -1673,6 +1712,7 @@ async def stream_track(track_id: str):
                 'Access-Control-Allow-Origin': '*',
             },
         )
+    # Qobuz : redirection vers l'URL CDN directe (compatible Vercel)
     url = await run_in_threadpool(_resolve_qobuz_url, track_id)
     if url:
         return RedirectResponse(url)

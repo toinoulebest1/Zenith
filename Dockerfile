@@ -2,10 +2,13 @@ FROM python:3.9-slim
 
 WORKDIR /app
 
-# Installation des dépendances système nécessaires (gcc pour la compilation de certains packages)
+# Installation des dépendances système nécessaires
+# - gcc / libc-dev : compilation de certains packages Python
+# - ffmpeg : OBLIGATOIRE pour déchiffrer/transcoder les flux squid.wtf (Amazon Music)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     libc-dev \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Copie et installation des dépendances Python

@@ -15,7 +15,8 @@
       "Bash(python -)",
       "Bash(PYTHONIOENCODING=utf-8 python -)",
       "PowerShell(python -m py_compile \"api/index.py\")",
-      "PowerShell(if \\($?\\) { \"COMPILE OK\" })"
+      "PowerShell(if \\($?\\) { \"COMPILE OK\" })",
+      "Bash(curl -s 'https://qobuz.kennyy.com.br/api/download-music?track_id=282771&quality=6' --max-time 25)"
     ]
   }
 }
