@@ -3095,28 +3095,44 @@
                 }
                 const m = mems[i];
                 const t = m.track_data || {};
-                const cover = ((t.album && t.album.image && t.album.image.large) || t.img || 'https://placehold.co/120x120/111/444?text=%E2%99%AA').replace('_300', '_600');
+                const ph = 'https://placehold.co/120x120/111/444?text=%E2%99%AA';
+                const cover = ((t.album && t.album.image && t.album.image.large) || t.img || ph).replace('_300', '_600');
+                const photo = m.photo_url || '';
+                const markerImg = photo || cover;  // vignette = photo si dispo, sinon pochette
                 const d = new Date(m.created_at);
                 const dateStr = d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
 
                 const icon = L.divIcon({
-                    className: 'mem-marker',
-                    html: `<div class="mem-marker-inner"><img src="${cover}" onerror="this.src='https://placehold.co/120x120/111/444?text=%E2%99%AA'"></div>`,
+                    className: 'mem-marker' + (photo ? ' has-photo' : ''),
+                    html: `<div class="mem-marker-inner"><img src="${escapeHtml(markerImg)}" onerror="this.src='${ph}'"></div>${photo ? '<span class="mem-marker-cam"><i class="fas fa-camera"></i></span>' : ''}`,
                     iconSize: [46, 46], iconAnchor: [23, 23], popupAnchor: [0, -26]
                 });
                 const mk = L.marker([m.lat, m.lng], { icon });
                 _memCluster.addLayer(mk);
+
+                // Bloc musique : grand si pas de photo, compact (vignette + texte) si photo
+                const musicBlock = photo
+                    ? `<div class="mem-popup-music">
+                            <img class="mem-popup-cover-sm" src="${escapeHtml(cover)}" onerror="this.src='${ph}'">
+                            <div class="mem-popup-music-meta">
+                                <div class="mem-popup-title">${escapeHtml(t.title || 'Titre inconnu')}</div>
+                                <div class="mem-popup-artist">${escapeHtml((t.performer && t.performer.name) || '')}</div>
+                            </div>
+                       </div>`
+                    : `<img class="mem-popup-art" src="${escapeHtml(cover)}" onerror="this.src='${ph}'">
+                       <div class="mem-popup-title">${escapeHtml(t.title || 'Titre inconnu')}</div>
+                       <div class="mem-popup-artist">${escapeHtml((t.performer && t.performer.name) || '')}</div>`;
+
                 mk.bindPopup(
                     `<div class="mem-popup">
-                        <img class="mem-popup-art" src="${escapeHtml(cover)}" onerror="this.src='https://placehold.co/120x120/111/444?text=%E2%99%AA'">
-                        <div class="mem-popup-title">${escapeHtml(t.title || 'Titre inconnu')}</div>
-                        <div class="mem-popup-artist">${escapeHtml((t.performer && t.performer.name) || '')}</div>
+                        ${photo ? `<img class="mem-popup-photo" src="${escapeHtml(photo)}" onclick="window.open('${escapeHtml(photo)}','_blank')" onerror="this.style.display='none'" title="Voir la photo en grand">` : ''}
+                        ${musicBlock}
                         ${m.note ? `<div class="mem-popup-note">« ${escapeHtml(m.note)} »</div>` : ''}
                         ${m.location_name ? `<div class="mem-popup-loc"><i class="fas fa-map-marker-alt"></i> ${escapeHtml(m.location_name)}</div>` : ''}
                         <div class="mem-popup-date">${escapeHtml(dateStr)}</div>
                         <button class="mem-popup-play" onclick="playMemoryTrack(${i})"><i class="fas fa-play"></i> Écouter</button>
                     </div>`,
-                    { className: 'mem-popup-wrap', maxWidth: 240 }
+                    { className: 'mem-popup-wrap', maxWidth: 250 }
                 );
                 _memMapMarkers.push(mk);
                 _memMapMarkers._mems = mems;
