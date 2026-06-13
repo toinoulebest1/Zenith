@@ -1188,8 +1188,13 @@ def sync_resolve_track(title, artist, isrc=None):
         except Exception as e:
             logger.warning(f"[Resolve] ISRC search failed: {e}")
 
-    # Si pas de titre/artiste on abandonne ici
+    # Si pas de titre/artiste : tenter Deezer par ISRC puis abandonner
     if not title or not artist:
+        if DEEZER_FALLBACK_ENABLED and isrc:
+            try:
+                dz = sync_deezer_lookup(None, None, isrc)
+                if dz: return dz
+            except Exception: pass
         return None
 
     target_artist = clean_string(artist)
@@ -1218,6 +1223,16 @@ def sync_resolve_track(title, artist, isrc=None):
                         rec['album']['image']['large'] = rec['album']['image']['large'].replace('_300', '_600')
                     return rec
     except: pass
+
+    # 3. Fallback Deezer (titres absents du catalogue Qobuz)
+    if DEEZER_FALLBACK_ENABLED:
+        try:
+            dz = sync_deezer_lookup(title, artist, isrc)
+            if dz:
+                logger.info(f"[Resolve] Deezer fallback: {dz['id']} ({dz['title']})")
+                return dz
+        except Exception as e:
+            logger.warning(f"[Resolve] Deezer fallback failed: {e}")
 
     return None
 
@@ -1521,6 +1536,7 @@ async def resolve_and_stream(title: str, artist: str):
         rid = match['id']
         if match['source'] == 'amazon_music': return RedirectResponse(f"/amazon_stream/{rid}")
         if match['source'] == 'tidal_hund': return RedirectResponse(f"/tidal_manifest/{rid}")
+        if match['source'] == 'deezer_flac': return RedirectResponse(f"/deezer_stream/{rid}")
         return RedirectResponse(f"/stream/{rid}")
     raise HTTPException(404, "Track not found")
 
@@ -1687,6 +1703,167 @@ def squid_decrypt_audio(asin: str):
         if tmp_path:
             try: os.remove(tmp_path)
             except: pass
+
+# --- DEEZER FALLBACK (FLAC via resolver zarz.moe + déchiffrement Blowfish stripe) ---
+# Secours quand Qobuz n'a pas le titre. Le flux Deezer est chiffré (Blowfish, 1 bloc
+# de 2048 o sur 3, IV fixe), mais le déchiffrement est INDÉPENDANT par bloc → on peut
+# servir n'importe quelle plage (Range) en déchiffrant à la volée. Chaque réponse reste
+# petite, donc compatible Vercel (limite 4,5 Mo) comme Docker.
+DEEZER_FALLBACK_ENABLED = True
+DEEZER_RESOLVER_URL = "https://api.zarz.moe/v1/dl/dzr"
+DEEZER_BF_SECRET = b"g4el58wc0zvf9na1"
+DEEZER_BF_IV = bytes.fromhex("0001020304050607")
+DEEZER_CHUNK = 2048
+DEEZER_MAX_RANGE = 1024 * 1024  # 1 Mo max par réponse (sous la limite Vercel)
+_deezer_cdn_cache: dict = {}    # track_id -> {'url','size','ts'}
+DEEZER_CDN_TTL = 25 * 60
+
+def _deezer_bf_key(track_id):
+    md5 = hashlib.md5(str(track_id).encode('ascii')).hexdigest().encode('ascii')
+    return bytes(md5[i] ^ md5[i + 16] ^ DEEZER_BF_SECRET[i] for i in range(16))
+
+def _deezer_api(url):
+    try:
+        r = requests.get(url, timeout=8, headers={'User-Agent': SQUID_UA})
+        return r.json()
+    except Exception:
+        return None
+
+def sync_deezer_lookup(title, artist, isrc):
+    """Trouve le titre sur Deezer → objet track (source 'deezer_flac') ou None."""
+    td = None
+    if isrc:
+        d = _deezer_api(f"https://api.deezer.com/2.0/track/isrc:{isrc}")
+        if d and 'error' not in d and d.get('id'):
+            td = d
+    if not td and title and artist:
+        first_artist = artist.split(',')[0].strip()
+        q = urllib.parse.quote(f'track:"{title}" artist:"{first_artist}"')
+        res = _deezer_api(f"https://api.deezer.com/search?q={q}&limit=10")
+        items = (res or {}).get('data', [])
+        tgt_t = clean_string(title); tgt_a = clean_string(first_artist)
+        best = None; best_score = 0
+        for t in items:
+            st = clean_string(t.get('title', '')); sa = clean_string(t.get('artist', {}).get('name', ''))
+            if FUZZ_AVAILABLE:
+                score = fuzz.ratio(tgt_t, st) * 0.7 + fuzz.ratio(tgt_a, sa) * 0.3
+            else:
+                score = 0
+                if tgt_t in st or st in tgt_t: score += 70
+                if tgt_a in sa or sa in tgt_a: score += 30
+            if score > best_score:
+                best_score = score; best = t
+        if best and best_score >= 60 and best.get('id'):
+            td = _deezer_api(f"https://api.deezer.com/track/{best['id']}") or best
+    if not td or not td.get('id'):
+        return None
+    alb = td.get('album', {}) or {}
+    cover = alb.get('cover_xl') or alb.get('cover_big') or alb.get('cover_medium') or ''
+    return {
+        'id': str(td['id']),
+        'title': td.get('title', ''),
+        'performer': {'name': td.get('artist', {}).get('name', 'Inconnu')},
+        'album': {'title': alb.get('title', ''), 'image': {'large': cover}},
+        'duration': td.get('duration', 0),
+        'isrc': td.get('isrc'),
+        'maximum_bit_depth': 16,
+        'source': 'deezer_flac',
+    }
+
+def _deezer_resolve_cdn(track_id):
+    """Résout l'URL CDN chiffrée + la taille via zarz.moe (mis en cache)."""
+    c = _deezer_cdn_cache.get(str(track_id))
+    if c and (time.time() - c['ts']) < DEEZER_CDN_TTL:
+        return c
+    try:
+        r = requests.post(
+            DEEZER_RESOLVER_URL,
+            json={"platform": "deezer", "url": f"https://www.deezer.com/track/{track_id}"},
+            headers={"User-Agent": "SpotiFLAC-Mobile/4.3.0", "Content-Type": "application/json"},
+            timeout=40,
+        )
+        d = r.json()
+        if not d.get('success'):
+            return None
+        url = d.get('direct_download_url') or d.get('download_url')
+        if not url:
+            return None
+        size = 0
+        try:
+            h = requests.get(url, headers={'Range': 'bytes=0-0', 'User-Agent': SQUID_UA}, timeout=10)
+            cr = h.headers.get('Content-Range', '')
+            if '/' in cr:
+                size = int(cr.rsplit('/', 1)[-1])
+        except Exception:
+            pass
+        info = {'url': url, 'size': size, 'ts': time.time()}
+        _deezer_cdn_cache[str(track_id)] = info
+        return info
+    except Exception as e:
+        logger.error(f"[Deezer] resolve CDN error: {e}")
+        return None
+
+def _deezer_decrypt(track_id, enc, abs_start):
+    """Déchiffre une plage (abs_start aligné sur 2048) selon le schéma stripe Deezer."""
+    from Crypto.Cipher import Blowfish
+    key = _deezer_bf_key(track_id)
+    data = bytearray(enc)
+    first_chunk = abs_start // DEEZER_CHUNK
+    for i in range(0, len(data), DEEZER_CHUNK):
+        gi = first_chunk + i // DEEZER_CHUNK
+        clen = min(DEEZER_CHUNK, len(data) - i)
+        if gi % 3 == 0 and clen == DEEZER_CHUNK:
+            cipher = Blowfish.new(key, Blowfish.MODE_CBC, DEEZER_BF_IV)
+            data[i:i + DEEZER_CHUNK] = cipher.decrypt(bytes(data[i:i + DEEZER_CHUNK]))
+    return bytes(data)
+
+@app.get('/deezer_stream/{track_id}')
+async def deezer_stream(track_id: str, request: Request):
+    info = await run_in_threadpool(_deezer_resolve_cdn, track_id)
+    if not info or not info.get('url'):
+        raise HTTPException(404, "Deezer stream not found")
+    url = info['url']; size = info.get('size') or 0
+
+    # Plage demandée (sinon début, plafonnée pour rester sous la limite Vercel)
+    start = 0; end = None
+    rng = request.headers.get('range') or request.headers.get('Range') or ''
+    m = re.match(r'bytes=(\d+)-(\d*)', rng)
+    if m:
+        start = int(m.group(1))
+        if m.group(2):
+            end = int(m.group(2))
+    if end is None:
+        end = start + DEEZER_MAX_RANGE - 1
+    end = min(end, start + DEEZER_MAX_RANGE - 1)
+    if size:
+        end = min(end, size - 1)
+    if start > end:
+        start = 0
+        end = min(DEEZER_MAX_RANGE - 1, (size - 1) if size else DEEZER_MAX_RANGE - 1)
+
+    # Alignement sur les blocs de 2048 pour le fetch + déchiffrement
+    aligned_start = (start // DEEZER_CHUNK) * DEEZER_CHUNK
+    aligned_end = ((end // DEEZER_CHUNK) + 1) * DEEZER_CHUNK - 1
+    if size:
+        aligned_end = min(aligned_end, size - 1)
+
+    def _fetch_dec():
+        r = requests.get(url, headers={'Range': f'bytes={aligned_start}-{aligned_end}', 'User-Agent': SQUID_UA}, timeout=40)
+        dec = _deezer_decrypt(track_id, r.content, aligned_start)
+        return dec[start - aligned_start: end - aligned_start + 1]
+
+    body = await run_in_threadpool(_fetch_dec)
+    total = str(size) if size else '*'
+    return Response(
+        content=body, status_code=206, media_type='audio/flac',
+        headers={
+            'Content-Range': f'bytes {start}-{start + len(body) - 1}/{total}',
+            'Accept-Ranges': 'bytes',
+            'Content-Length': str(len(body)),
+            'Cache-Control': 'no-store',
+            'Access-Control-Allow-Origin': '*',
+        },
+    )
 
 @app.get('/stream_url/{track_id}')
 async def get_stream_url(track_id: str):
