@@ -921,6 +921,36 @@ def sync_search_deezer(query, limit=25):
         return results
     except Exception as e: return []
 
+def sync_search_deezer_tracks(query, limit=25):
+    """Recherche de titres Deezer pour la grille → objets 'deezer_flac' (id = ISRC).
+    Sélectionner un de ces titres déclenche la lecture directe via le resolver Deezer."""
+    try:
+        r = requests.get("https://api.deezer.com/search",
+                         params={'q': query, 'index': 0, 'limit': limit}, timeout=8)
+        data = r.json()
+        results = []
+        for t in data.get('data', []):
+            isrc = t.get('isrc')
+            if not isrc:
+                continue  # sans ISRC on ne peut pas résoudre via dzr
+            alb = t.get('album', {}) or {}
+            cover = alb.get('cover_xl') or alb.get('cover_big') or alb.get('cover_medium')
+            results.append({
+                'id': isrc,  # l'ISRC sert de clé pour /deezer_stream
+                'title': t.get('title'),
+                'performer': {'name': t.get('artist', {}).get('name', 'Inconnu')},
+                'album': {'title': alb.get('title'), 'image': {'large': cover}},
+                'duration': t.get('duration', 0),
+                'isrc': isrc,
+                'maximum_bit_depth': 16,
+                'source': 'deezer_flac',
+                'date': alb.get('release_date'),
+            })
+        return results
+    except Exception as e:
+        logger.error(f"[Deezer Search] {e}")
+        return []
+
 def sync_search_deezer_albums(query, limit=15):
     try:
         url = "https://api.deezer.com/search/album"
@@ -1358,6 +1388,7 @@ async def search_tracks(q: str, type: str = 'all'):
     tasks = []
     if type in ['track', 'all']:
         tasks.append(run_in_threadpool(sync_qobuz_search, q, 50, 'track'))
+        tasks.append(run_in_threadpool(sync_search_deezer_tracks, q, 25))
     if type in ['album', 'all']:
         tasks.append(run_in_threadpool(sync_qobuz_search, q, 15, 'album'))
         tasks.append(run_in_threadpool(sync_search_deezer_albums, q, 15))
@@ -1372,6 +1403,7 @@ async def search_tracks(q: str, type: str = 'all'):
 
     if type in ['track', 'all']:
         r1 = finished[idx]; idx += 1; qobuz_tracks = r1 if isinstance(r1, list) else []
+        r2 = finished[idx]; idx += 1; deezer_tracks = r2 if isinstance(r2, list) else []
     if type in ['album', 'all']:
         r4 = finished[idx]; idx += 1; qobuz_albums = r4 if isinstance(r4, list) else []
         r6 = finished[idx]; idx += 1; deezer_albums = r6 if isinstance(r6, list) else []
