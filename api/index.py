@@ -1704,23 +1704,23 @@ def squid_decrypt_audio(asin: str):
             try: os.remove(tmp_path)
             except: pass
 
-# --- DEEZER FALLBACK (FLAC via resolver zarz.moe + déchiffrement Blowfish stripe) ---
-# Secours quand Qobuz n'a pas le titre. Le flux Deezer est chiffré (Blowfish, 1 bloc
-# de 2048 o sur 3, IV fixe), mais le déchiffrement est INDÉPENDANT par bloc → on peut
-# servir n'importe quelle plage (Range) en déchiffrant à la volée. Chaque réponse reste
-# petite, donc compatible Vercel (limite 4,5 Mo) comme Docker.
+# --- DEEZER FALLBACK (FLAC/MP3 via flacdownloader.com) ---
+# Secours quand Qobuz n'a pas le titre. flacdownloader renvoie un fichier DÉJÀ déchiffré
+# (FLAC, ou MP3 si le FLAC n'existe pas). On le proxifie en même-origine (obligatoire :
+# flacdownloader n'a pas de CORS et le lecteur utilise crossOrigin="anonymous"), via un
+# cache disque + FileResponse (gère le Range/seek et le bon Content-Type).
 DEEZER_FALLBACK_ENABLED = True
-DEEZER_RESOLVER_URL = "https://api.zarz.moe/v1/dl/dzr"
-DEEZER_BF_SECRET = b"g4el58wc0zvf9na1"
-DEEZER_BF_IV = bytes.fromhex("0001020304050607")
-DEEZER_CHUNK = 2048
-DEEZER_MAX_RANGE = 1024 * 1024  # 1 Mo max par réponse (sous la limite Vercel)
-_deezer_cdn_cache: dict = {}    # track_id -> {'url','size','ts'}
-DEEZER_CDN_TTL = 25 * 60
-
-def _deezer_bf_key(track_id):
-    md5 = hashlib.md5(str(track_id).encode('ascii')).hexdigest().encode('ascii')
-    return bytes(md5[i] ^ md5[i + 16] ^ DEEZER_BF_SECRET[i] for i in range(16))
+FLACDL_BASE = "https://flacdownloader.com/flac"
+FLACDL_ACCESS = "l@p*gute)77=g5clebcp4lz#=x%(*rwg+ku0_)bh=&%6wg!a"
+FLACDL_FORMAT = "FLAC"  # le service bascule en MP3 si le FLAC n'existe pas
+DEEZER_CACHE_MAX = 40   # nb max de fichiers gardés en cache
+_deezer_cache_dir = os.path.join(tempfile.gettempdir(), "zenith_deezer")
+try:
+    os.makedirs(_deezer_cache_dir, exist_ok=True)
+except Exception:
+    pass
+_deezer_dl_locks: dict = {}
+_deezer_locks_guard = threading.Lock()
 
 def _deezer_api(url):
     try:
@@ -1770,99 +1770,97 @@ def sync_deezer_lookup(title, artist, isrc):
         'source': 'deezer_flac',
     }
 
-def _deezer_resolve_cdn(track_id):
-    """Résout l'URL CDN chiffrée + la taille via zarz.moe (mis en cache)."""
-    c = _deezer_cdn_cache.get(str(track_id))
-    if c and (time.time() - c['ts']) < DEEZER_CDN_TTL:
-        return c
+def _flacdl_download_url(track_id):
+    """Étape token flacdownloader → URL de téléchargement complète, ou None."""
     try:
-        r = requests.post(
-            DEEZER_RESOLVER_URL,
-            json={"platform": "deezer", "url": f"https://www.deezer.com/track/{track_id}"},
-            headers={"User-Agent": "SpotiFLAC-Mobile/4.3.0", "Content-Type": "application/json"},
-            timeout=40,
+        r = requests.get(
+            f"{FLACDL_BASE}/download-token?t={track_id}&f={FLACDL_FORMAT}",
+            headers={"X-Download-Access": FLACDL_ACCESS, "User-Agent": SQUID_UA},
+            timeout=20,
         )
+        if r.status_code != 200:
+            logger.warning(f"[Deezer] token {track_id} -> {r.status_code}")
+            return None
         d = r.json()
-        if not d.get('success'):
+        tok = d.get('token'); exp = d.get('expires')
+        if not tok:
             return None
-        url = d.get('direct_download_url') or d.get('download_url')
-        if not url:
-            return None
-        size = 0
-        try:
-            h = requests.get(url, headers={'Range': 'bytes=0-0', 'User-Agent': SQUID_UA}, timeout=10)
-            cr = h.headers.get('Content-Range', '')
-            if '/' in cr:
-                size = int(cr.rsplit('/', 1)[-1])
-        except Exception:
-            pass
-        info = {'url': url, 'size': size, 'ts': time.time()}
-        _deezer_cdn_cache[str(track_id)] = info
-        return info
+        return f"{FLACDL_BASE}/download?t={track_id}&f={FLACDL_FORMAT}&token={urllib.parse.quote(str(tok))}&expires={exp}"
     except Exception as e:
-        logger.error(f"[Deezer] resolve CDN error: {e}")
+        logger.error(f"[Deezer] token error: {e}")
         return None
 
-def _deezer_decrypt(track_id, enc, abs_start):
-    """Déchiffre une plage (abs_start aligné sur 2048) selon le schéma stripe Deezer."""
-    from Crypto.Cipher import Blowfish
-    key = _deezer_bf_key(track_id)
-    data = bytearray(enc)
-    first_chunk = abs_start // DEEZER_CHUNK
-    for i in range(0, len(data), DEEZER_CHUNK):
-        gi = first_chunk + i // DEEZER_CHUNK
-        clen = min(DEEZER_CHUNK, len(data) - i)
-        if gi % 3 == 0 and clen == DEEZER_CHUNK:
-            cipher = Blowfish.new(key, Blowfish.MODE_CBC, DEEZER_BF_IV)
-            data[i:i + DEEZER_CHUNK] = cipher.decrypt(bytes(data[i:i + DEEZER_CHUNK]))
-    return bytes(data)
+def _deezer_trim_cache():
+    try:
+        files = [os.path.join(_deezer_cache_dir, f) for f in os.listdir(_deezer_cache_dir)
+                 if not f.endswith('.part')]
+        if len(files) <= DEEZER_CACHE_MAX:
+            return
+        files.sort(key=lambda p: os.path.getmtime(p))
+        for p in files[:len(files) - DEEZER_CACHE_MAX]:
+            try: os.remove(p)
+            except Exception: pass
+    except Exception:
+        pass
+
+def _deezer_fetch_to_cache(track_id):
+    """Télécharge le fichier (FLAC/MP3) en cache local. Renvoie (path, media_type) ou None."""
+    # Déjà en cache ?
+    for ext, mt in (('flac', 'audio/flac'), ('mp3', 'audio/mpeg')):
+        p = os.path.join(_deezer_cache_dir, f"{track_id}.{ext}")
+        if os.path.exists(p) and os.path.getsize(p) > 0:
+            return p, mt
+    with _deezer_locks_guard:
+        lock = _deezer_dl_locks.setdefault(str(track_id), threading.Lock())
+    with lock:
+        # Re-vérifier après acquisition du verrou (téléchargement concurrent)
+        for ext, mt in (('flac', 'audio/flac'), ('mp3', 'audio/mpeg')):
+            p = os.path.join(_deezer_cache_dir, f"{track_id}.{ext}")
+            if os.path.exists(p) and os.path.getsize(p) > 0:
+                return p, mt
+        url = _flacdl_download_url(track_id)
+        if not url:
+            return None
+        tmp = os.path.join(_deezer_cache_dir, f"{track_id}.part")
+        try:
+            first = b""
+            with requests.get(url, headers={"User-Agent": SQUID_UA}, stream=True, timeout=120) as r:
+                if r.status_code != 200:
+                    logger.warning(f"[Deezer] download {track_id} -> {r.status_code}")
+                    return None
+                with open(tmp, 'wb') as f:
+                    for chunk in r.iter_content(65536):
+                        if chunk:
+                            if not first:
+                                first = chunk[:4]
+                            f.write(chunk)
+            # Détection du format réel (le service peut renvoyer du MP3 si pas de FLAC)
+            if first[:4] == b'fLaC':
+                ext, mt = 'flac', 'audio/flac'
+            elif first[:3] == b'ID3' or (len(first) > 1 and first[0] == 0xFF and (first[1] & 0xE0) == 0xE0):
+                ext, mt = 'mp3', 'audio/mpeg'
+            else:
+                ext, mt = 'flac', 'audio/flac'
+            final = os.path.join(_deezer_cache_dir, f"{track_id}.{ext}")
+            os.replace(tmp, final)
+            _deezer_trim_cache()
+            return final, mt
+        except Exception as e:
+            logger.error(f"[Deezer] download error {track_id}: {e}")
+            try: os.remove(tmp)
+            except Exception: pass
+            return None
 
 @app.get('/deezer_stream/{track_id}')
-async def deezer_stream(track_id: str, request: Request):
-    info = await run_in_threadpool(_deezer_resolve_cdn, track_id)
-    if not info or not info.get('url'):
+async def deezer_stream(track_id: str):
+    res = await run_in_threadpool(_deezer_fetch_to_cache, track_id)
+    if not res:
         raise HTTPException(404, "Deezer stream not found")
-    url = info['url']; size = info.get('size') or 0
-
-    # Plage demandée (sinon début, plafonnée pour rester sous la limite Vercel)
-    start = 0; end = None
-    rng = request.headers.get('range') or request.headers.get('Range') or ''
-    m = re.match(r'bytes=(\d+)-(\d*)', rng)
-    if m:
-        start = int(m.group(1))
-        if m.group(2):
-            end = int(m.group(2))
-    if end is None:
-        end = start + DEEZER_MAX_RANGE - 1
-    end = min(end, start + DEEZER_MAX_RANGE - 1)
-    if size:
-        end = min(end, size - 1)
-    if start > end:
-        start = 0
-        end = min(DEEZER_MAX_RANGE - 1, (size - 1) if size else DEEZER_MAX_RANGE - 1)
-
-    # Alignement sur les blocs de 2048 pour le fetch + déchiffrement
-    aligned_start = (start // DEEZER_CHUNK) * DEEZER_CHUNK
-    aligned_end = ((end // DEEZER_CHUNK) + 1) * DEEZER_CHUNK - 1
-    if size:
-        aligned_end = min(aligned_end, size - 1)
-
-    def _fetch_dec():
-        r = requests.get(url, headers={'Range': f'bytes={aligned_start}-{aligned_end}', 'User-Agent': SQUID_UA}, timeout=40)
-        dec = _deezer_decrypt(track_id, r.content, aligned_start)
-        return dec[start - aligned_start: end - aligned_start + 1]
-
-    body = await run_in_threadpool(_fetch_dec)
-    total = str(size) if size else '*'
-    return Response(
-        content=body, status_code=206, media_type='audio/flac',
-        headers={
-            'Content-Range': f'bytes {start}-{start + len(body) - 1}/{total}',
-            'Accept-Ranges': 'bytes',
-            'Content-Length': str(len(body)),
-            'Cache-Control': 'no-store',
-            'Access-Control-Allow-Origin': '*',
-        },
+    path, mt = res
+    # FileResponse gère automatiquement les requêtes Range (seek) depuis le disque.
+    return FileResponse(
+        path, media_type=mt,
+        headers={'Access-Control-Allow-Origin': '*', 'Cache-Control': 'public, max-age=3600'},
     )
 
 @app.get('/stream_url/{track_id}')
