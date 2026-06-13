@@ -230,7 +230,7 @@ async function loginWithSpotify() {
     showAuthLoading(true);
     const { data, error } = await supabaseClient.auth.signInWithOAuth({
         provider: 'spotify',
-        options: { scopes: 'user-library-read', redirectTo: window.location.origin }
+        options: { scopes: 'user-read-email user-library-read', redirectTo: window.location.origin }
     });
     if (error) { showAuthLoading(false); showAuthError(error.message); }
 }

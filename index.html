@@ -1561,7 +1561,7 @@
                     }
                 }
                 if (audioObj === activeAudio && !document.hidden) {
-                    let d = audioObj.duration; if ((!d || !isFinite(d)) && tracks[currentIndex].duration) d = tracks[currentIndex].duration;
+                    let d = audioObj.duration; if ((!d || !isFinite(d)) && tracks[currentIndex] && tracks[currentIndex].duration) d = tracks[currentIndex].duration;
                     if (d && isFinite(d)) { document.getElementById('progressFill').style.width = (audioObj.currentTime / d) * 100 + '%'; }
                     document.getElementById('currTime').innerText = fmtTime(audioObj.currentTime);
 
