@@ -13,7 +13,7 @@ sys.path.append(current_dir)
 PROJECT_ROOT = os.path.abspath(os.path.join(current_dir, '..'))
 
 from fastapi import FastAPI, Request, Response, HTTPException
-from fastapi.responses import JSONResponse, RedirectResponse, FileResponse
+from fastapi.responses import JSONResponse, RedirectResponse, FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.concurrency import run_in_threadpool
@@ -1803,65 +1803,87 @@ def _deezer_trim_cache():
     except Exception:
         pass
 
-def _deezer_fetch_to_cache(track_id):
-    """Télécharge le fichier (FLAC/MP3) en cache local. Renvoie (path, media_type) ou None."""
-    # Déjà en cache ?
+def _deezer_cached(track_id):
+    """Renvoie (path, media_type) si le fichier est déjà entièrement en cache, sinon None."""
     for ext, mt in (('flac', 'audio/flac'), ('mp3', 'audio/mpeg')):
         p = os.path.join(_deezer_cache_dir, f"{track_id}.{ext}")
         if os.path.exists(p) and os.path.getsize(p) > 0:
             return p, mt
-    with _deezer_locks_guard:
-        lock = _deezer_dl_locks.setdefault(str(track_id), threading.Lock())
-    with lock:
-        # Re-vérifier après acquisition du verrou (téléchargement concurrent)
-        for ext, mt in (('flac', 'audio/flac'), ('mp3', 'audio/mpeg')):
-            p = os.path.join(_deezer_cache_dir, f"{track_id}.{ext}")
-            if os.path.exists(p) and os.path.getsize(p) > 0:
-                return p, mt
-        url = _flacdl_download_url(track_id)
-        if not url:
+    return None
+
+def _deezer_open_stream(track_id):
+    """
+    Ouvre le flux flacdownloader et lit le 1er bloc (détection FLAC/MP3).
+    Renvoie (resp, iterator, first_chunk, media_type, ext, content_length) ou None.
+    """
+    url = _flacdl_download_url(track_id)
+    if not url:
+        return None
+    try:
+        resp = requests.get(url, headers={"User-Agent": SQUID_UA}, stream=True, timeout=120)
+        if resp.status_code != 200:
+            logger.warning(f"[Deezer] download {track_id} -> {resp.status_code}")
+            resp.close()
             return None
-        tmp = os.path.join(_deezer_cache_dir, f"{track_id}.part")
-        try:
-            first = b""
-            with requests.get(url, headers={"User-Agent": SQUID_UA}, stream=True, timeout=120) as r:
-                if r.status_code != 200:
-                    logger.warning(f"[Deezer] download {track_id} -> {r.status_code}")
-                    return None
-                with open(tmp, 'wb') as f:
-                    for chunk in r.iter_content(65536):
-                        if chunk:
-                            if not first:
-                                first = chunk[:4]
-                            f.write(chunk)
-            # Détection du format réel (le service peut renvoyer du MP3 si pas de FLAC)
-            if first[:4] == b'fLaC':
-                ext, mt = 'flac', 'audio/flac'
-            elif first[:3] == b'ID3' or (len(first) > 1 and first[0] == 0xFF and (first[1] & 0xE0) == 0xE0):
-                ext, mt = 'mp3', 'audio/mpeg'
-            else:
-                ext, mt = 'flac', 'audio/flac'
-            final = os.path.join(_deezer_cache_dir, f"{track_id}.{ext}")
-            os.replace(tmp, final)
-            _deezer_trim_cache()
-            return final, mt
-        except Exception as e:
-            logger.error(f"[Deezer] download error {track_id}: {e}")
-            try: os.remove(tmp)
-            except Exception: pass
-            return None
+        it = resp.iter_content(65536)
+        first = next(it, b"")
+        if first[:4] == b'fLaC':
+            mt, ext = 'audio/flac', 'flac'
+        elif first[:3] == b'ID3' or (len(first) > 1 and first[0] == 0xFF and (first[1] & 0xE0) == 0xE0):
+            mt, ext = 'audio/mpeg', 'mp3'
+        else:
+            mt, ext = 'audio/flac', 'flac'
+        return resp, it, first, mt, ext, resp.headers.get('Content-Length')
+    except Exception as e:
+        logger.error(f"[Deezer] open stream {track_id}: {e}")
+        return None
 
 @app.get('/deezer_stream/{track_id}')
 async def deezer_stream(track_id: str):
-    res = await run_in_threadpool(_deezer_fetch_to_cache, track_id)
-    if not res:
+    # 1) Déjà en cache → service direct depuis le disque (seek/Range gérés par FileResponse)
+    cached = _deezer_cached(track_id)
+    if cached:
+        path, mt = cached
+        return FileResponse(
+            path, media_type=mt,
+            headers={'Access-Control-Allow-Origin': '*', 'Cache-Control': 'public, max-age=3600'},
+        )
+
+    # 2) Sinon → streaming progressif (lecture immédiate) + mise en cache simultanée
+    opened = await run_in_threadpool(_deezer_open_stream, track_id)
+    if not opened:
         raise HTTPException(404, "Deezer stream not found")
-    path, mt = res
-    # FileResponse gère automatiquement les requêtes Range (seek) depuis le disque.
-    return FileResponse(
-        path, media_type=mt,
-        headers={'Access-Control-Allow-Origin': '*', 'Cache-Control': 'public, max-age=3600'},
-    )
+    resp, it, first, mt, ext, clen = opened
+    final = os.path.join(_deezer_cache_dir, f"{track_id}.{ext}")
+    tmp = os.path.join(_deezer_cache_dir, f"{track_id}.{random.randint(0, 1 << 30)}.part")
+
+    def gen():
+        ok = False
+        try:
+            with open(tmp, 'wb') as f:
+                if first:
+                    f.write(first); yield first
+                for chunk in it:
+                    if chunk:
+                        f.write(chunk); yield chunk
+            ok = True
+        except Exception as e:
+            logger.warning(f"[Deezer] stream interrupted {track_id}: {e}")
+        finally:
+            try: resp.close()
+            except Exception: pass
+            try:
+                if ok and not os.path.exists(final):
+                    os.replace(tmp, final); _deezer_trim_cache()
+                elif os.path.exists(tmp):
+                    os.remove(tmp)
+            except Exception:
+                pass
+
+    headers = {'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store', 'Accept-Ranges': 'none'}
+    if clen:
+        headers['Content-Length'] = clen
+    return StreamingResponse(gen(), media_type=mt, headers=headers)
 
 @app.get('/stream_url/{track_id}')
 async def get_stream_url(track_id: str):
