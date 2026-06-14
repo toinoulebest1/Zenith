@@ -60,9 +60,14 @@ except ImportError:
     FUZZ_AVAILABLE = False
 
 # --- CONFIGURATION (chargée depuis .env ou variables d'environnement) ---
-USER_ID = os.getenv('QOBUZ_USER_ID', '')
-TOKEN   = os.getenv('QOBUZ_TOKEN', '')
-APP_ID  = os.getenv('QOBUZ_APP_ID', '')
+# Identifiants Qobuz officiels. Le token est lié à l'app_id : app_id + secret + token
+# doivent être cohérents. Surcharge possible via variables d'environnement.
+USER_ID      = os.getenv('QOBUZ_USER_ID', '3317884')
+TOKEN        = os.getenv('QOBUZ_TOKEN', 'N-6BS7eXzhLLp2hyeyIpL7kb-1XxiKV3W-wRVHPFzT3KaZCXVMv8-66tCb4y40-NwwGkGz10lqjlkLyo3rS6iA')
+APP_ID       = os.getenv('QOBUZ_APP_ID', '798273057')
+QOBUZ_SECRET = os.getenv('QOBUZ_SECRET', 'abb21364945c0583309667d13ca3d93a')
+
+TIDAL_HUND_BASE = "https://api.monochrome.tf"
 
 TIDAL_HUND_BASE = "https://api.monochrome.tf"
 
@@ -79,8 +84,8 @@ AMAZON_MUSIC_API_BASE = "https://t2tunes.site/api/amazon-music"
 # --- QOBUZ ALTERNATIVE API (source principale : recherche + audio) ---
 # Renvoie une URL CDN directe (redirigeable) : compatible Vercel serverless.
 QOBUZ_ALT_API_BASE = "https://qobuz.kennyy.com.br"
-QOBUZ_ENABLED = True   # Qobuz (via l'API alt kennyy) gère recherche + audio
-QOBUZ_OFFICIAL_ENABLED = False  # Client Qobuz officiel (credentials) : non utilisé
+QOBUZ_ENABLED = True   # Qobuz : recherche + audio
+QOBUZ_OFFICIAL_ENABLED = True  # API Qobuz officielle (token+secret) en priorité ; kennyy = repli
 
 # --- SQUID.WTF (Amazon Music) API ---
 # EN PAUSE : incompatible Vercel (déchiffrement ffmpeg + flux >4.5 Mo).
@@ -385,15 +390,20 @@ def is_asin(track_id):
 
 # --- CLIENT QOBUZ ---
 class TokenQobuzClient(QobuzClient):
-    def __init__(self, app_id, secrets, token):
-        self.secrets = secrets
+    def __init__(self, app_id, token, secret=None, secrets=None):
         self.id = str(app_id)
         self.session = self._make_session()
         self.base = "https://www.qobuz.com/api.json/0.2/"
-        self.sec = None
         self.uat = token
         self.session.headers.update({"X-User-Auth-Token": self.uat})
-        self.cfg_setup()
+        if secret:
+            # app_id + secret connus et cohérents avec le token → pas de scraping/test
+            self.sec = secret
+            self.secrets = {"fixed": secret}
+        else:
+            self.secrets = secrets or {}
+            self.sec = None
+            self.cfg_setup()
 
     def _make_session(self):
         s = requests.Session()
@@ -407,12 +417,11 @@ class TokenQobuzClient(QobuzClient):
 client = None
 if QOBUZ_OFFICIAL_ENABLED:
     try:
-        logger.info("Init Qobuz (client officiel)...")
-        fetched_app_id, secrets = get_app_credentials()
-        client = TokenQobuzClient(APP_ID, secrets, TOKEN)
-        logger.info("Ready.")
+        logger.info(f"Init Qobuz officiel (app_id {APP_ID})...")
+        client = TokenQobuzClient(APP_ID, TOKEN, secret=QOBUZ_SECRET)
+        logger.info("Qobuz officiel prêt.")
     except Exception as e:
-        logger.error(f"Init Error: {e}")
+        logger.error(f"Init Error Qobuz officiel: {e}")
 else:
     logger.info("Qobuz via API alt (kennyy) — pas de client officiel requis.")
 
@@ -1016,35 +1025,62 @@ def sync_search_deezer_artists(query, limit=15):
     except Exception as e: return []
 
 def sync_qobuz_search(query, limit=25, type='track'):
-    """Recherche Qobuz via l'API alt (kennyy) : titres ou albums."""
+    """Recherche Qobuz : API officielle en priorité, repli sur l'API alt (kennyy)."""
+    coll = 'tracks' if type == 'track' else 'albums'
+    # 1. API officielle
+    if QOBUZ_OFFICIAL_ENABLED and client:
+        try:
+            r = client.api_call("catalog/search", query=query, limit=max(limit, 20), offset=0)
+            items = (r.get(coll) or {}).get('items', [])[:limit]
+            for it in items:
+                it['source'] = 'qobuz'
+                if type == 'track':
+                    fix_qobuz_title(it)
+                it['date'] = it.get('release_date_original') or it.get('released_at')
+            if items:
+                return items
+        except Exception as e:
+            logger.error(f"[Qobuz Search officiel] {e}")
+    # 2. Repli API alt (kennyy)
     try:
-        url = f"{QOBUZ_ALT_API_BASE}/api/get-music"
-        params = {'q': query, 'offset': 0}
-        r = requests.get(url, params=params, timeout=15)
+        r = requests.get(f"{QOBUZ_ALT_API_BASE}/api/get-music",
+                         params={'q': query, 'offset': 0}, timeout=15)
         if r.status_code != 200:
             return []
         data = r.json()
         if not data.get('success'):
             return []
-        if type == 'track':
-            items = data.get('data', {}).get('tracks', {}).get('items', [])[:limit]
-            for t in items:
-                t['source'] = 'qobuz'
-                fix_qobuz_title(t)
-                t['date'] = t.get('release_date_original') or t.get('released_at')
-            return items
-        elif type == 'album':
-            items = data.get('data', {}).get('albums', {}).get('items', [])[:limit]
-            for a in items:
-                a['source'] = 'qobuz'
-                a['date'] = a.get('release_date_original') or a.get('released_at')
-            return items
+        items = data.get('data', {}).get(coll, {}).get('items', [])[:limit]
+        for it in items:
+            it['source'] = 'qobuz'
+            if type == 'track':
+                fix_qobuz_title(it)
+            it['date'] = it.get('release_date_original') or it.get('released_at')
+        return items
     except Exception as e:
-        logger.error(f"[Qobuz Search] Error: {e}")
+        logger.error(f"[Qobuz Search alt] {e}")
     return []
 
 def sync_get_qobuz_album(album_id):
-    """Détails d'un album Qobuz via l'API alt (kennyy). album_id = UPC."""
+    """Détails album Qobuz : API officielle en priorité, repli kennyy (album_id = UPC)."""
+    # 1. API officielle (album_id = id Qobuz)
+    if QOBUZ_OFFICIAL_ENABLED and client:
+        try:
+            d = client.get_album_meta(album_id)
+            if d and d.get('id'):
+                d['source'] = 'qobuz'
+                img = (d.get('image') or {})
+                cover = img.get('large') or img.get('small')
+                for t in d.get('tracks', {}).get('items', []):
+                    t['source'] = 'qobuz'
+                    fix_qobuz_title(t)
+                    t.setdefault('album', {'title': d.get('title'), 'image': {'large': cover}})
+                    if not t.get('performer'):
+                        t['performer'] = {'name': (d.get('artist') or {}).get('name', 'Inconnu')}
+                return d
+        except Exception as e:
+            logger.error(f"[Qobuz Album officiel] {e}")
+    # 2. Repli API alt (kennyy, album_id = UPC)
     try:
         r = requests.get(f"{QOBUZ_ALT_API_BASE}/api/get-album",
                          params={'album_id': album_id}, timeout=15)
@@ -1656,9 +1692,18 @@ async def get_artist(id: str):
     except: raise HTTPException(404)
 
 def _resolve_qobuz_url(track_id: str):
-    """Résout l'URL CDN Qobuz via l'API alt (kennyy). Renvoie l'URL ou None."""
+    """Résout l'URL CDN Qobuz. API officielle (getFileUrl signé) en priorité, repli kennyy."""
     if not QOBUZ_ENABLED:
         return None
+    # 1. API officielle (getFileUrl signé) — qualité décroissante
+    if QOBUZ_OFFICIAL_ENABLED and client:
+        for fmt in [27, 7, 6, 5]:
+            try:
+                d = client.get_track_url(track_id, fmt)
+                if d.get('url'):
+                    return d['url']
+            except: continue
+    # 2. Repli API alt (kennyy)
     for fmt in [27, 7, 6, 5]:
         try:
             r = requests.get(
@@ -1671,12 +1716,6 @@ def _resolve_qobuz_url(track_id: str):
                 if data.get('success') and data.get('data', {}).get('url'):
                     return data['data']['url']
         except: continue
-    if client:
-        for fmt in [27, 7, 6, 5]:
-            try:
-                d = client.get_track_url(track_id, fmt)
-                if 'url' in d: return d['url']
-            except: continue
     return None
 
 def squid_decrypt_audio(asin: str):
