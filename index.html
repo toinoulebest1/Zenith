@@ -2130,17 +2130,25 @@
             }
         }
 
-        // --- TOP DES PAYS ---
+        // --- TOP DES PAYS (charts Shazam, slugs = noms de pays) ---
         const TOP_COUNTRIES = [
-            { code: 'fr', name: '🇫🇷 France' }, { code: 'us', name: '🇺🇸 États-Unis' },
-            { code: 'gb', name: '🇬🇧 Royaume-Uni' }, { code: 'de', name: '🇩🇪 Allemagne' },
-            { code: 'es', name: '🇪🇸 Espagne' }, { code: 'it', name: '🇮🇹 Italie' },
-            { code: 'be', name: '🇧🇪 Belgique' }, { code: 'ca', name: '🇨🇦 Canada' },
-            { code: 'br', name: '🇧🇷 Brésil' }, { code: 'mx', name: '🇲🇽 Mexique' },
-            { code: 'jp', name: '🇯🇵 Japon' }, { code: 'kr', name: '🇰🇷 Corée du Sud' },
-            { code: 'nl', name: '🇳🇱 Pays-Bas' }, { code: 'au', name: '🇦🇺 Australie' },
-            { code: 'pt', name: '🇵🇹 Portugal' }, { code: 'ma', name: '🇲🇦 Maroc' },
+            { code: 'world', name: '🌍 Monde' }, { code: 'france', name: '🇫🇷 France' },
+            { code: 'united-states', name: '🇺🇸 États-Unis' }, { code: 'united-kingdom', name: '🇬🇧 Royaume-Uni' },
+            { code: 'germany', name: '🇩🇪 Allemagne' }, { code: 'spain', name: '🇪🇸 Espagne' },
+            { code: 'italy', name: '🇮🇹 Italie' }, { code: 'belgium', name: '🇧🇪 Belgique' },
+            { code: 'canada', name: '🇨🇦 Canada' }, { code: 'brazil', name: '🇧🇷 Brésil' },
+            { code: 'mexico', name: '🇲🇽 Mexique' }, { code: 'japan', name: '🇯🇵 Japon' },
+            { code: 'south-korea', name: '🇰🇷 Corée du Sud' }, { code: 'netherlands', name: '🇳🇱 Pays-Bas' },
+            { code: 'australia', name: '🇦🇺 Australie' }, { code: 'portugal', name: '🇵🇹 Portugal' },
+            { code: 'morocco', name: '🇲🇦 Maroc' },
         ];
+        // Code langue ISO (navigator) -> slug Shazam, pour le pays par défaut
+        const LANG_TO_SLUG = {
+            fr: 'france', us: 'united-states', en: 'united-states', gb: 'united-kingdom',
+            de: 'germany', es: 'spain', it: 'italy', be: 'belgium', ca: 'canada',
+            br: 'brazil', pt: 'portugal', mx: 'mexico', jp: 'japan', kr: 'south-korea',
+            nl: 'netherlands', au: 'australia', ma: 'morocco',
+        };
 
         function showTopCountries() {
             resetNavStack();
@@ -2148,7 +2156,7 @@
             document.getElementById('searchBarContainer').style.display = 'none';
             // Pays par défaut : déduit de la langue du navigateur, sinon France
             const navCC = (navigator.language || 'fr').split('-').pop().toLowerCase();
-            const def = TOP_COUNTRIES.some(c => c.code === navCC) ? navCC : 'fr';
+            const def = LANG_TO_SLUG[navCC] || 'france';
             const opts = TOP_COUNTRIES.map(c => `<option value="${c.code}"${c.code === def ? ' selected' : ''}>${c.name}</option>`).join('');
             document.getElementById('viewTitle').innerHTML =
                 `<i class="fas fa-globe-americas"></i> Top des pays &nbsp;` +
