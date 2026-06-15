@@ -960,102 +960,56 @@ def sync_search_deezer_tracks(query, limit=25):
         logger.error(f"[Deezer Search] {e}")
         return []
 
-# --- TOP PAYS (classements Shazam par pays) ---
-# Le classement vient du CSV public Shazam (Top 200 par pays, sans auth). Shazam ne
-# fournit que Artiste + Titre, donc on enrichit via Deezer (ISRC + pochette propre).
+# --- TOP PAYS (classements par pays) ---
+# Liste classée fournie par le flux RSS Apple Music (par pays, sans auth, max 100).
+# Apple ne fournit pas l'ISRC, donc on l'enrichit via Deezer (ISRC + pochette propre).
 # La piste est marquée 'chart_lazy' : la LECTURE est résolue à la demande (Qobuz
 # d'abord par ISRC, fallback Deezer) par le pipeline /resolve_metadata existant.
-# Clé = slug Shazam (nom de pays). Cache par pays.
+# Clé = code pays ISO alpha-2. Cache par pays.
 TOP_COUNTRIES = {
-    'world': 'Monde', 'france': 'France', 'united-states': 'États-Unis',
-    'united-kingdom': 'Royaume-Uni', 'germany': 'Allemagne', 'spain': 'Espagne',
-    'italy': 'Italie', 'belgium': 'Belgique', 'canada': 'Canada', 'brazil': 'Brésil',
-    'mexico': 'Mexique', 'japan': 'Japon', 'south-korea': 'Corée du Sud',
-    'netherlands': 'Pays-Bas', 'australia': 'Australie', 'portugal': 'Portugal',
-    'morocco': 'Maroc',
+    'fr': 'France', 'us': 'États-Unis', 'gb': 'Royaume-Uni', 'de': 'Allemagne',
+    'es': 'Espagne', 'it': 'Italie', 'be': 'Belgique', 'ca': 'Canada',
+    'br': 'Brésil', 'mx': 'Mexique', 'jp': 'Japon', 'kr': 'Corée du Sud',
+    'nl': 'Pays-Bas', 'au': 'Australie', 'pt': 'Portugal', 'ma': 'Maroc',
 }
-SHAZAM_CSV = "https://www.shazam.com/services/charts/csv/top-200/{slug}/"
 TOP_COUNTRY_TTL = 60 * 30
-_top_country_cache: dict = {}  # slug -> {'ts', 'tracks'}
+_top_country_cache: dict = {}  # cc -> {'ts', 'tracks'}
 
-def _resolve_chart_entry(name, artist):
-    """Enrichit un titre du classement via Deezer (ISRC + métadonnées).
-    Source 'chart_lazy' -> la lecture sera résolue Qobuz d'abord, fallback Deezer."""
-    try:
-        r = requests.get("https://api.deezer.com/search",
-                         params={'q': f'{name} {artist}', 'index': 0, 'limit': 5}, timeout=8)
-        for t in r.json().get('data', []):
-            isrc = t.get('isrc')
-            if not isrc:
-                continue
-            alb = t.get('album', {}) or {}
-            cover = alb.get('cover_xl') or alb.get('cover_big') or alb.get('cover_medium')
-            return {
-                'id': isrc,
-                'title': t.get('title'),
-                'performer': {'name': t.get('artist', {}).get('name', artist or 'Inconnu')},
-                'album': {'title': alb.get('title'), 'image': {'large': cover}},
-                'duration': t.get('duration', 0),
-                'isrc': isrc,
-                'maximum_bit_depth': 16,
-                'source': 'chart_lazy',  # résolu Qobuz->Deezer à la lecture
-            }
-    except Exception:
-        pass
-    return None
-
-def _parse_shazam_csv(text, limit):
-    """CSV Shazam -> liste de (rank, artist, title). En-tête : Rank,Artist,Title."""
-    import csv, io
-    rows = list(csv.reader(io.StringIO(text)))
-    start = 0
-    for i, row in enumerate(rows):
-        if len(row) >= 3 and row[0].strip().lower() == 'rank':
-            start = i + 1
-            break
-    entries = []
-    for row in rows[start:]:
-        if len(row) < 3:
-            continue
-        rank, artist, title = row[0].strip(), row[1].strip(), row[2].strip()
-        if not title or not rank.isdigit():
-            continue
-        entries.append((int(rank), artist, title))
-        if len(entries) >= limit:
-            break
-    return entries
-
-def sync_get_top_country(country, limit=50):
-    cc = (country or 'world').lower()
+def sync_get_top_country(country, limit=100):
+    cc = (country or 'fr').lower()
     if cc not in TOP_COUNTRIES:
-        cc = 'world'
+        cc = 'fr'
     cached = _top_country_cache.get(cc)
     if cached and (time.time() - cached['ts']) < TOP_COUNTRY_TTL:
         return cached['tracks']
     try:
-        r = requests.get(SHAZAM_CSV.format(slug=cc),
-                         headers={'User-Agent': SQUID_UA}, timeout=15)
-        r.encoding = 'utf-8-sig'
-        entries = _parse_shazam_csv(r.text, limit)
+        r = requests.get(
+            f'https://rss.applemarketingtools.com/api/v2/{cc}/music/most-played/{limit}/songs.json',
+            timeout=10)
+        entries = r.json().get('feed', {}).get('results', [])
     except Exception as e:
-        logger.error(f"[TopCountry] Shazam {cc}: {e}")
+        logger.error(f"[TopCountry] RSS {cc}: {e}")
         return []
-    out = [None] * len(entries)
-    with ThreadPoolExecutor(max_workers=10) as ex:
-        # _resolve_chart_entry(name=titre, artist) -> recherche Deezer "titre artiste"
-        futs = {ex.submit(_resolve_chart_entry, title, artist): i
-                for i, (rank, artist, title) in enumerate(entries)}
-        for fut in futs:
-            i = futs[fut]
-            try:
-                res = fut.result()
-            except Exception:
-                res = None
-            if not res:
-                continue
-            res['rank'] = entries[i][0]  # rang réel du classement Shazam
-            out[i] = res
-    tracks = [t for t in out if t]
+    # La liste vient directement d'Apple (titre + artiste + pochette) : pas de
+    # résolution up-front (éviterait le throttling Deezer sur 100 titres). La lecture
+    # résout Qobuz->Deezer à la demande via 'chart_lazy' (par titre/artiste).
+    tracks = []
+    for i, e in enumerate(entries):
+        title = e.get('name')
+        artist = e.get('artistName')
+        if not title or not artist:
+            continue
+        art = (e.get('artworkUrl100') or '').replace('100x100', '600x600')
+        tracks.append({
+            'id': str(e.get('id') or f'{cc}-{i}'),
+            'title': title,
+            'performer': {'name': artist},
+            'album': {'title': '', 'image': {'large': art}},
+            'duration': 0,  # rempli à la résolution
+            'maximum_bit_depth': 16,
+            'source': 'chart_lazy',  # résolu Qobuz->Deezer à la lecture
+            'rank': i + 1,
+        })
     _top_country_cache[cc] = {'ts': time.time(), 'tracks': tracks}
     return tracks
 
@@ -1669,8 +1623,8 @@ async def get_top_countries_list():
     return JSONResponse([{'code': c, 'name': n} for c, n in TOP_COUNTRIES.items()])
 
 @app.get('/top_country')
-async def get_top_country_route(country: str = 'france'):
-    tracks = await run_in_threadpool(sync_get_top_country, country, 50)
+async def get_top_country_route(country: str = 'fr'):
+    tracks = await run_in_threadpool(sync_get_top_country, country, 100)
     return JSONResponse({'country': country.lower(), 'tracks': tracks})
 
 @app.get('/deezer_playlist')
