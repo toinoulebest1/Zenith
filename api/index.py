@@ -1988,23 +1988,39 @@ def _yt_resolve(video_id):
     except ImportError:
         logger.error("[YT] yt-dlp non installé (pip install yt-dlp)")
         return None
-    try:
-        opts = {"format": "bestaudio[ext=m4a]/bestaudio/best",
-                "quiet": True, "no_warnings": True, "noplaylist": True}
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(f"https://music.youtube.com/watch?v={video_id}", download=False)
-        url = info.get('url')
-        if not url:
-            return None
-        ext = (info.get('ext') or '').lower()
-        mt = 'audio/mp4' if ext in ('m4a', 'mp4') else ('audio/webm' if ext == 'webm' else 'audio/mpeg')
-        size = int(info.get('filesize') or info.get('filesize_approx') or 0)
-        c = {'url': url, 'mt': mt, 'size': size, 'ts': time.time()}
-        _yt_url_cache[video_id] = c
-        return c
-    except Exception as e:
-        logger.error(f"[YT] resolve {video_id}: {e}")
-        return None
+    # On essaie plusieurs "player clients" : les clients mobiles/embarqués sont
+    # nettement moins sujets à la bot-detection que le client web (utile sur les
+    # IP datacenter type Vercel). Cookies optionnels via env YT_COOKIES_FILE.
+    cookiefile = os.getenv('YT_COOKIES_FILE') or None
+    clients = ['ios', 'android_music', 'tv', 'web']
+    last_err = None
+    for client in clients:
+        try:
+            opts = {
+                "format": "bestaudio[ext=m4a]/bestaudio/best",
+                "quiet": True, "no_warnings": True, "noplaylist": True,
+                "extractor_args": {"youtube": {"player_client": [client]}},
+            }
+            if cookiefile:
+                opts["cookiefile"] = cookiefile
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(f"https://music.youtube.com/watch?v={video_id}", download=False)
+            url = info.get('url')
+            if not url:
+                continue
+            ext = (info.get('ext') or '').lower()
+            mt = 'audio/mp4' if ext in ('m4a', 'mp4') else ('audio/webm' if ext == 'webm' else 'audio/mpeg')
+            size = int(info.get('filesize') or info.get('filesize_approx') or 0)
+            c = {'url': url, 'mt': mt, 'size': size, 'ts': time.time()}
+            _yt_url_cache[video_id] = c
+            logger.info(f"[YT] resolve {video_id} OK via client={client}")
+            return c
+        except Exception as e:
+            last_err = e
+            logger.warning(f"[YT] resolve {video_id} client={client} KO: {e}")
+            continue
+    logger.error(f"[YT] resolve {video_id} échec tous clients: {last_err}")
+    return None
 
 @app.get('/yt_stream/{video_id}')
 async def yt_stream(video_id: str, request: Request):
