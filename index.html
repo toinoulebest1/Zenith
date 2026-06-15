@@ -218,6 +218,7 @@
             <div class="nav-item" onclick="showPlaylists()" title="Mes Playlists"><i class="fas fa-list"></i></div>
             <div class="nav-item" onclick="toggleQueue()" title="File d'attente"><i class="fas fa-list-ol"></i></div>
             <div class="nav-item" onclick="showWeeklyTop()" title="Top 10 Semaine"><i class="fas fa-trophy"></i></div>
+            <div class="nav-item" onclick="showTopCountries()" title="Top des pays"><i class="fas fa-globe-americas"></i></div>
             <div class="nav-item" onclick="showMemories()" title="Mes Souvenirs"><i class="fas fa-bookmark"></i></div>
             <div class="nav-item lyrics-btn" onclick="toggleLyrics()" title="Paroles (V)"><i
                     class="fas fa-microphone-alt"></i></div>
@@ -1244,7 +1245,7 @@
             // FINAL CHECK BEFORE PLAYING
             if (thisLoadId !== currentLoadId) return;
 
-            if (nextTrack.source !== 'yt_lazy' && nextTrack.source !== 'spotify_lazy' && nextTrack.source !== 'deezer' && nextTrack.source !== 'deezer_flac' && nextTrack.source !== 'subsonic' && nextTrack.source !== 'amazon_music') safePushState({}, "", `/?track=${nextTrack.id}&source=${nextTrack.source}`);
+            if (nextTrack.source !== 'yt_lazy' && nextTrack.source !== 'spotify_lazy' && nextTrack.source !== 'chart_lazy' && nextTrack.source !== 'deezer' && nextTrack.source !== 'deezer_flac' && nextTrack.source !== 'subsonic' && nextTrack.source !== 'amazon_music') safePushState({}, "", `/?track=${nextTrack.id}&source=${nextTrack.source}`);
 
             // Force disable crossfade if direct audio
             startCrossfade(prevAudio, nextAudio, useCrossfade && !userSettings.directAudio);
@@ -2126,6 +2127,46 @@
             } catch (e) {
                 console.error("Top 10 Error", e);
                 showToast("Erreur récupération Top 10");
+            }
+        }
+
+        // --- TOP DES PAYS ---
+        const TOP_COUNTRIES = [
+            { code: 'fr', name: '🇫🇷 France' }, { code: 'us', name: '🇺🇸 États-Unis' },
+            { code: 'gb', name: '🇬🇧 Royaume-Uni' }, { code: 'de', name: '🇩🇪 Allemagne' },
+            { code: 'es', name: '🇪🇸 Espagne' }, { code: 'it', name: '🇮🇹 Italie' },
+            { code: 'be', name: '🇧🇪 Belgique' }, { code: 'ca', name: '🇨🇦 Canada' },
+            { code: 'br', name: '🇧🇷 Brésil' }, { code: 'mx', name: '🇲🇽 Mexique' },
+            { code: 'jp', name: '🇯🇵 Japon' }, { code: 'kr', name: '🇰🇷 Corée du Sud' },
+            { code: 'nl', name: '🇳🇱 Pays-Bas' }, { code: 'au', name: '🇦🇺 Australie' },
+            { code: 'pt', name: '🇵🇹 Portugal' }, { code: 'ma', name: '🇲🇦 Maroc' },
+        ];
+
+        function showTopCountries() {
+            resetNavStack();
+            showTracks();
+            document.getElementById('searchBarContainer').style.display = 'none';
+            // Pays par défaut : déduit de la langue du navigateur, sinon France
+            const navCC = (navigator.language || 'fr').split('-').pop().toLowerCase();
+            const def = TOP_COUNTRIES.some(c => c.code === navCC) ? navCC : 'fr';
+            const opts = TOP_COUNTRIES.map(c => `<option value="${c.code}"${c.code === def ? ' selected' : ''}>${c.name}</option>`).join('');
+            document.getElementById('viewTitle').innerHTML =
+                `<i class="fas fa-globe-americas"></i> Top des pays &nbsp;` +
+                `<select class="search-select" id="topCountrySelect" onchange="loadTopCountry(this.value)" style="margin-left:8px;vertical-align:middle;">${opts}</select>`;
+            loadTopCountry(def);
+        }
+
+        async function loadTopCountry(cc) {
+            const g = document.getElementById('trackGrid');
+            g.innerHTML = '<p style="text-align:center;margin-top:50px;">Chargement du classement...</p>';
+            try {
+                const r = await fetch(`${API_BASE}/top_country?country=${encodeURIComponent(cc)}`);
+                const d = await r.json();
+                if (d.tracks && d.tracks.length) renderGrid(d.tracks, false);
+                else g.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:50px;color:#555;">Classement indisponible pour ce pays.</div>';
+            } catch (e) {
+                console.error('Top pays', e);
+                g.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:50px;color:#555;">Erreur de chargement du classement.</div>';
             }
         }
 

@@ -960,6 +960,83 @@ def sync_search_deezer_tracks(query, limit=25):
         logger.error(f"[Deezer Search] {e}")
         return []
 
+# --- TOP PAYS (classements par pays) ---
+# Liste classée fournie par le flux RSS Apple Music (par pays, sans auth). Apple ne
+# fournit pas l'ISRC, donc on l'enrichit via Deezer (ISRC + pochette propre). La piste
+# est marquée 'chart_lazy' : la LECTURE est résolue à la demande (Qobuz d'abord par
+# ISRC, fallback Deezer) par le pipeline /resolve_metadata existant. Cache par pays.
+TOP_COUNTRIES = {
+    'fr': 'France', 'us': 'États-Unis', 'gb': 'Royaume-Uni', 'de': 'Allemagne',
+    'es': 'Espagne', 'it': 'Italie', 'be': 'Belgique', 'ca': 'Canada',
+    'br': 'Brésil', 'mx': 'Mexique', 'jp': 'Japon', 'kr': 'Corée du Sud',
+    'nl': 'Pays-Bas', 'au': 'Australie', 'pt': 'Portugal', 'ma': 'Maroc',
+}
+TOP_COUNTRY_TTL = 60 * 30
+_top_country_cache: dict = {}  # cc -> {'ts', 'tracks'}
+
+def _resolve_chart_entry(name, artist):
+    """Enrichit un titre du classement via Deezer (ISRC + métadonnées).
+    Source 'chart_lazy' -> la lecture sera résolue Qobuz d'abord, fallback Deezer."""
+    try:
+        r = requests.get("https://api.deezer.com/search",
+                         params={'q': f'{name} {artist}', 'index': 0, 'limit': 5}, timeout=8)
+        for t in r.json().get('data', []):
+            isrc = t.get('isrc')
+            if not isrc:
+                continue
+            alb = t.get('album', {}) or {}
+            cover = alb.get('cover_xl') or alb.get('cover_big') or alb.get('cover_medium')
+            return {
+                'id': isrc,
+                'title': t.get('title'),
+                'performer': {'name': t.get('artist', {}).get('name', artist or 'Inconnu')},
+                'album': {'title': alb.get('title'), 'image': {'large': cover}},
+                'duration': t.get('duration', 0),
+                'isrc': isrc,
+                'maximum_bit_depth': 16,
+                'source': 'chart_lazy',  # résolu Qobuz->Deezer à la lecture
+            }
+    except Exception:
+        pass
+    return None
+
+def sync_get_top_country(country, limit=50):
+    cc = (country or 'fr').lower()
+    if cc not in TOP_COUNTRIES:
+        cc = 'fr'
+    cached = _top_country_cache.get(cc)
+    if cached and (time.time() - cached['ts']) < TOP_COUNTRY_TTL:
+        return cached['tracks']
+    try:
+        r = requests.get(
+            f'https://rss.applemarketingtools.com/api/v2/{cc}/music/most-played/{limit}/songs.json',
+            timeout=10)
+        entries = r.json().get('feed', {}).get('results', [])
+    except Exception as e:
+        logger.error(f"[TopCountry] RSS {cc}: {e}")
+        return []
+    out = [None] * len(entries)
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        futs = {ex.submit(_resolve_chart_entry, e.get('name'), e.get('artistName')): i
+                for i, e in enumerate(entries)}
+        for fut in futs:
+            i = futs[fut]
+            try:
+                res = fut.result()
+            except Exception:
+                res = None
+            if not res:
+                continue
+            res['rank'] = i + 1  # position réelle dans le classement
+            if not res['album']['image']['large']:
+                art = (entries[i].get('artworkUrl100') or '')
+                if art:
+                    res['album']['image']['large'] = art.replace('100x100', '600x600')
+            out[i] = res
+    tracks = [t for t in out if t]
+    _top_country_cache[cc] = {'ts': time.time(), 'tracks': tracks}
+    return tracks
+
 def sync_search_deezer_albums(query, limit=15):
     try:
         url = "https://api.deezer.com/search/album"
@@ -1564,6 +1641,16 @@ async def get_yt_playlist_details_route(id: str):
     if "error" in res: raise HTTPException(500, res["error"])
     return JSONResponse(res)
     
+@app.get('/top_countries')
+async def get_top_countries_list():
+    """Liste des pays disponibles pour les classements."""
+    return JSONResponse([{'code': c, 'name': n} for c, n in TOP_COUNTRIES.items()])
+
+@app.get('/top_country')
+async def get_top_country_route(country: str = 'fr'):
+    tracks = await run_in_threadpool(sync_get_top_country, country, 50)
+    return JSONResponse({'country': country.lower(), 'tracks': tracks})
+
 @app.get('/deezer_playlist')
 async def get_deezer_playlist_details_route(id: str):
     def _fetch():
