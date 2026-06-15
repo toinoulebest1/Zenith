@@ -975,6 +975,16 @@ TOP_COUNTRIES = {
 TOP_COUNTRY_TTL = 60 * 30
 _top_country_cache: dict = {}  # cc -> {'ts', 'tracks'}
 
+def _primary_artist(artist):
+    """Ne garde que l'artiste principal (avant &, feat., ft., x, vs, with…)
+    pour que la résolution titre+artiste fonctionne."""
+    if not artist:
+        return artist
+    parts = re.split(r'\s*(?:&|×|\bfeat\.?\b|\bft\.?\b|\bfeaturing\b|\bvs\.?\b| x )\s*',
+                     artist, maxsplit=1, flags=re.IGNORECASE)
+    primary = parts[0].strip()
+    return primary or artist.strip()
+
 def sync_get_top_country(country, limit=100):
     cc = (country or 'fr').lower()
     if cc not in TOP_COUNTRIES:
@@ -996,7 +1006,7 @@ def sync_get_top_country(country, limit=100):
     tracks = []
     for i, e in enumerate(entries):
         title = e.get('name')
-        artist = e.get('artistName')
+        artist = _primary_artist(e.get('artistName'))
         if not title or not artist:
             continue
         art = (e.get('artworkUrl100') or '').replace('100x100', '600x600')
