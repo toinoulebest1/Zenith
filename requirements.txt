@@ -9,4 +9,3 @@ python-dotenv
 pydantic
 pycryptodome
 python-multipart
-yt-dlp
