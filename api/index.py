@@ -1173,11 +1173,12 @@ def _amz_deeplink_track(deeplink):
     return None
 
 def _amz_cover(url, size=1000):
-    """Pochette Amazon Music HD : on remonte juste le AA### (ex. AA256 → AA1000),
-    le reste de l'URL (dont le _SL_) est conservé tel quel."""
+    """Pochette Amazon Music HD : on remonte les dimensions SX###/SY### à {size}
+    (ex. SX472_SY472 → SX1000_SY1000), le reste de l'URL est conservé tel quel."""
     if not url: return ''
     url = url.replace('{size}', str(size)).replace('{jpegQuality}', '95').replace('{format}', 'jpg')
-    url = re.sub(r'AA\d+', f'AA{size}', url)
+    url = re.sub(r'SX\d+', f'SX{size}', url)
+    url = re.sub(r'SY\d+', f'SY{size}', url)
     return url
 
 def _amz_dur(v):
