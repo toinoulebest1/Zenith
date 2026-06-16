@@ -1173,11 +1173,24 @@
                 }
             }
 
-            // Gestion Source AMAZON MUSIC (server-side decryption, simple audio playback)
+            // Gestion Source AMAZON MUSIC (FLAC chiffré CENC — Shaka déchiffre en ClearKey)
             if (nextTrack.source === 'amazon_music') {
-                await nextShaka.unload();
-                nextAudio.src = `${API_BASE}/amazon_stream/${nextTrack.id}`;
-                console.log("✅ Loading Amazon Music (server-side decrypt) for:", nextTrack.title);
+                try {
+                    await nextShaka.unload();
+                    const res = await fetch(`${API_BASE}/amazon_manifest/${nextTrack.id}`);
+                    if (thisLoadId !== currentLoadId) return;
+                    if (!res.ok) throw new Error("manifest HTTP " + res.status);
+                    const md = await res.json();
+                    // Clé ClearKey { kidHex: keyHex } → Shaka déchiffre côté client
+                    nextShaka.configure({ drm: { clearKeys: { [md.kid]: md.key } } });
+                    const dashUri = 'data:application/dash+xml;base64,' + md.manifest;
+                    await nextShaka.load(dashUri);
+                    console.log("✅ Loaded Amazon Music (ClearKey FLAC) for:", nextTrack.title);
+                } catch (e) {
+                    console.error("Amazon Load Error", e);
+                    handlePlaybackError(index);
+                    return;
+                }
             }
             // Gestion Source DEEZER FLAC (secours quand Qobuz n'a pas le titre — déchiffré par plages)
             else if (nextTrack.source === 'deezer_flac') {

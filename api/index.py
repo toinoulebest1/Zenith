@@ -1023,6 +1023,226 @@ def sync_get_top_country(country, limit=100):
     _top_country_cache[cc] = {'ts': time.time(), 'tracks': tracks}
     return tracks
 
+# === AMAZON MUSIC (recherche API skill + lecture ClearKey via Shaka) ===
+# Recherche : API web Amazon (skill.music.a2z.com), session anonyme via config.json.
+# Lecture : un mirror communautaire (DMLS+Widevine côté serveur) résout, par ASIN, un
+# MP4 fragmenté CENC (FLAC) + la clé ClearKey — sans cooldown ni identifiants. Repli sur
+# zarz.moe. Le serveur proxifie les octets CHIFFRÉS par plages (compatible Vercel) et
+# génère un manifeste DASH ; Shaka déchiffre en ClearKey dans le navigateur (ni ffmpeg
+# ni téléchargement complet).
+AMZ_SKILL_BASE = "https://na.mesk.skill.music.a2z.com/api"
+AMZ_MUSIC_BASE = "https://music.amazon.com"
+AMZ_MIRROR_BASE = os.getenv('AMZ_MIRROR_BASE', "https://amazon.anandserver.cfd")
+AMZ_MIRROR_KEY = os.getenv('AMZ_MIRROR_KEY', "ak_8e3f1a7c2b5d9e4f0a6c3b8d1e5f2a9c7b4d0e6f")
+AMZ_ZARZ_BASE = "https://api.zarz.moe/v1/dl/amazeamazeamaze"
+AMZ_APP_UA = "Zenith/1.0"  # zarz.moe exige un User-Agent au format "AppName/Version"
+AMZ_SESSION_TTL = 30 * 60
+AMZ_MEDIA_TTL = 20 * 60
+_amz_session = {'data': None, 'ts': 0}
+_amz_media_cache: dict = {}    # asin -> {'url','key','kid',...,'bd','sr','ts'}
+_amz_quality_cache: dict = {}  # asin -> (bit_depth, sample_rate_hz)
+
+def _amz_quality_from_url(url):
+    """Déduit (bit_depth, sample_rate_hz) du paramètre ql= de l'URL CloudFront Amazon.
+    ex: ql=UHD_48 → (24, 48000) ; ql=HD → (16, 44100)."""
+    m = re.search(r'[?&]ql=([A-Za-z]+)_?(\d*)', url or '')
+    if not m:
+        return (16, 44100)
+    tier = m.group(1).upper()
+    sr = int(m.group(2)) * 1000 if m.group(2) else 0
+    bd = 24 if tier == 'UHD' else 16
+    if not sr:
+        sr = 96000 if tier == 'UHD' else 44100
+    return (bd, sr)
+
+def _amz_resolve_source(asin):
+    """Résout (streamUrl, key) pour un ASIN : mirror communautaire puis repli zarz.moe."""
+    try:
+        r = requests.get(f"{AMZ_MIRROR_BASE}/api/track/{asin}",
+                         headers={'X-API-Key': AMZ_MIRROR_KEY, 'User-Agent': SQUID_UA}, timeout=25)
+        if r.status_code == 200:
+            d = r.json()
+            if d.get('streamUrl') and d.get('decryptionKey'):
+                return d['streamUrl'], d['decryptionKey'].strip()
+    except Exception as e:
+        logger.warning(f"[Amazon] mirror {asin}: {e}")
+    try:
+        r = requests.get(f"{AMZ_ZARZ_BASE}/media", params={'asin': asin, 'codec': 'flac'},
+                         headers={'User-Agent': AMZ_APP_UA, 'Accept': 'application/json'}, timeout=25)
+        if r.status_code == 200:
+            data = r.json()
+            if isinstance(data, list):
+                data = data[0] if data else {}
+            audio = (data or {}).get('audio') or {}
+            if audio.get('url') and audio.get('key'):
+                return audio['url'], audio['key'].strip()
+    except Exception as e:
+        logger.warning(f"[Amazon] zarz {asin}: {e}")
+    return None, None
+
+def _amz_quality(asin):
+    """Qualité Amazon (bit_depth, sr_hz) via un seul appel mirror (mis en cache)."""
+    if asin in _amz_quality_cache:
+        return _amz_quality_cache[asin]
+    url, _ = _amz_resolve_source(asin)
+    q = _amz_quality_from_url(url) if url else (0, 0)
+    _amz_quality_cache[asin] = q
+    return q
+
+def _amz_get_session():
+    if _amz_session['data'] and (time.time() - _amz_session['ts']) < AMZ_SESSION_TTL:
+        return _amz_session['data']
+    try:
+        r = requests.get(AMZ_MUSIC_BASE + "/config.json",
+                         headers={'User-Agent': SQUID_UA, 'Accept': 'application/json'}, timeout=12)
+        cfg = r.json()
+        s = {'deviceId': cfg.get('deviceId', ''), 'sessionId': cfg.get('sessionId', ''),
+             'appVersion': cfg.get('version', '1.0.9678.0'), 'lang': cfg.get('displayLanguage', 'en_US'),
+             'csrf': cfg.get('csrf', {}) or {}}
+        _amz_session['data'] = s; _amz_session['ts'] = time.time()
+        return s
+    except Exception as e:
+        logger.error(f"[Amazon] session: {e}")
+        return None
+
+def _amz_headers(s, page_url):
+    csrf = s.get('csrf', {})
+    csrf_h = json.dumps({"interface": "CSRFInterface.v1_0.CSRFHeaderElement", "token": csrf.get('token', ''),
+                         "timestamp": str(csrf.get('ts', int(time.time()))),
+                         "rndNonce": str(csrf.get('rnd', random.randint(0, 2000000000)))})
+    auth = json.dumps({"interface": "ClientAuthenticationInterface.v1_0.ClientTokenElement", "accessToken": ""})
+    return json.dumps({
+        "x-amzn-authentication": auth, "x-amzn-device-model": "WEBPLAYER", "x-amzn-device-width": "1920",
+        "x-amzn-device-family": "WebPlayer", "x-amzn-device-id": s.get('deviceId', ''), "x-amzn-user-agent": SQUID_UA,
+        "x-amzn-session-id": s.get('sessionId', ''), "x-amzn-device-height": "1080",
+        "x-amzn-request-id": f"{str(random.random())[2:]}-{int(time.time()*1000)}",
+        "x-amzn-device-language": s.get('lang', 'en_US'), "x-amzn-currency-of-preference": "USD",
+        "x-amzn-os-version": "1.0", "x-amzn-application-version": s.get('appVersion', '1.0.9678.0'),
+        "x-amzn-device-time-zone": "UTC", "x-amzn-timestamp": str(int(time.time() * 1000)), "x-amzn-csrf": csrf_h,
+        "x-amzn-music-domain": "music.amazon.com", "x-amzn-referer": "", "x-amzn-affiliate-tags": "",
+        "x-amzn-ref-marker": "", "x-amzn-page-url": page_url, "x-amzn-weblab-id-overrides": "",
+        "x-amzn-video-player-token": "", "x-amzn-feature-flags": "", "x-amzn-has-profile-id": "", "x-amzn-age-band": ""})
+
+def _amz_text(v):
+    if v is None: return ""
+    if isinstance(v, str): return v
+    if isinstance(v, (int, float)): return str(v)
+    if isinstance(v, dict):
+        if isinstance(v.get('text'), str) and v['text']: return v['text']
+        if v.get('defaultValue'):
+            t = _amz_text(v['defaultValue'])
+            if t: return t
+        obs = v.get('observer')
+        if isinstance(obs, dict) and obs.get('defaultValue'):
+            t = _amz_text(obs['defaultValue'])
+            if t: return t
+    return ""
+
+def _amz_find_by_interface(obj, target, out, depth=0):
+    if depth > 40 or obj is None: return out
+    if isinstance(obj, dict):
+        iface = obj.get('interface')
+        if isinstance(iface, str) and target in iface:
+            out.append(obj)
+        for v in obj.values():
+            _amz_find_by_interface(v, target, out, depth + 1)
+    elif isinstance(obj, list):
+        for v in obj:
+            _amz_find_by_interface(v, target, out, depth + 1)
+    return out
+
+def _amz_deeplink_track(deeplink):
+    if not deeplink: return None
+    try:
+        p = urllib.parse.urlparse(deeplink)
+        qs = urllib.parse.parse_qs(p.query)
+        seg = [x for x in p.path.split('/') if x]
+        kind = seg[0].lower() if seg else ''
+        raw = seg[1] if len(seg) > 1 else ''
+        if kind == 'albums' and qs.get('trackAsin'):
+            return qs['trackAsin'][0]
+        if kind == 'tracks' and raw:
+            return raw
+    except Exception:
+        pass
+    return None
+
+def _amz_cover(url):
+    if not url: return ''
+    url = url.replace('{size}', '1000').replace('{jpegQuality}', '90').replace('{format}', 'jpg')
+    url = re.sub(r'\._S[XY]\d+_', '._SX1000_', url)
+    return url
+
+def _amz_dur(v):
+    t = _amz_text(v)
+    m = re.match(r'(\d+):(\d{2})', t or '')
+    return int(m.group(1)) * 60 + int(m.group(2)) if m else 0
+
+def sync_search_amazon(query, limit=15):
+    """Recherche Amazon Music (API skill, session anonyme) → objets 'amazon_music' (id = ASIN)."""
+    s = _amz_get_session()
+    if not s:
+        return []
+    page = f"{AMZ_MUSIC_BASE}/search/{urllib.parse.quote(query)}"
+    body = json.dumps({
+        "filter": json.dumps({"IsLibrary": ["false"]}),
+        "keyword": json.dumps({"interface": "Web.TemplatesInterface.v1_0.Touch.SearchTemplateInterface.SearchKeywordClientInformation", "keyword": query}),
+        "suggestedKeyword": query,
+        "userHash": json.dumps({"level": "LIBRARY_MEMBER"}),
+        "headers": _amz_headers(s, page)})
+    try:
+        r = requests.post(AMZ_SKILL_BASE + "/showSearch",
+                          headers={"Content-Type": "text/plain;charset=UTF-8", "User-Agent": SQUID_UA,
+                                   "Origin": AMZ_MUSIC_BASE, "Referer": page}, data=body, timeout=15)
+        if r.status_code != 200:
+            logger.warning(f"[Amazon Search] HTTP {r.status_code}")
+            return []
+        data = r.json()
+    except Exception as e:
+        logger.error(f"[Amazon Search] {e}")
+        return []
+    shovelers = []
+    for ifc in ("VisualShovelerWidgetElement", "FeaturedShovelerWidgetElement", "DescriptiveShowcaseWidgetElement"):
+        _amz_find_by_interface(data, ifc, shovelers)
+    out = []; seen = set()
+    for sh in shovelers:
+        items = sh.get('items')
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            iface = item.get('interface', '') or ''
+            if 'DescriptiveRowItemElement' not in iface and 'SquareHorizontalItemElement' not in iface:
+                continue
+            deeplink = ''
+            ptl = item.get('primaryTextLink') or {}
+            if isinstance(ptl, dict):
+                deeplink = ptl.get('deeplink', '') or ''
+            if not deeplink:
+                pl = item.get('primaryLink') or {}
+                if isinstance(pl, dict):
+                    deeplink = pl.get('deeplink', '') or ''
+            asin = _amz_deeplink_track(deeplink)
+            if not asin or asin in seen:
+                continue
+            name = _amz_text(item.get('primaryText'))
+            if not name:
+                continue
+            artist = _amz_text(item.get('secondaryText1')) or _amz_text(item.get('secondaryText'))
+            img = _amz_cover(item.get('image') if isinstance(item.get('image'), str) else '')
+            seen.add(asin)
+            out.append({
+                'id': asin, 'title': name,
+                'performer': {'name': artist or 'Inconnu'},
+                'album': {'title': '', 'image': {'large': img}},
+                'duration': _amz_dur(item.get('secondaryText3') or item.get('duration')),
+                'maximum_bit_depth': 16, 'source': 'amazon_music',
+            })
+            if len(out) >= limit:
+                return out
+    return out
+
 def sync_search_deezer_albums(query, limit=15):
     try:
         url = "https://api.deezer.com/search/album"
@@ -1488,6 +1708,7 @@ async def search_tracks(q: str, type: str = 'all'):
     if type in ['track', 'all']:
         tasks.append(run_in_threadpool(sync_qobuz_search, q, 50, 'track'))
         tasks.append(run_in_threadpool(sync_search_deezer_tracks, q, 25))
+        tasks.append(run_in_threadpool(sync_search_amazon, q, 15))
     if type in ['album', 'all']:
         tasks.append(run_in_threadpool(sync_qobuz_search, q, 15, 'album'))
         tasks.append(run_in_threadpool(sync_search_deezer_albums, q, 15))
@@ -1503,6 +1724,7 @@ async def search_tracks(q: str, type: str = 'all'):
     if type in ['track', 'all']:
         r1 = finished[idx]; idx += 1; qobuz_tracks = r1 if isinstance(r1, list) else []
         r2 = finished[idx]; idx += 1; deezer_tracks = r2 if isinstance(r2, list) else []
+        r3 = finished[idx]; idx += 1; amazon_tracks = r3 if isinstance(r3, list) else []
     if type in ['album', 'all']:
         r4 = finished[idx]; idx += 1; qobuz_albums = r4 if isinstance(r4, list) else []
         r6 = finished[idx]; idx += 1; deezer_albums = r6 if isinstance(r6, list) else []
@@ -1514,35 +1736,68 @@ async def search_tracks(q: str, type: str = 'all'):
         deezer_playlists = await run_in_threadpool(sync_search_deezer_playlists, q, 100)
 
     # DEDUPLICATION AVANCÉE POUR LES TITRES
-    combined_tracks = []
-    combined_tracks.extend(qobuz_tracks)
-    
-    sigs = set()
-    
     def get_dedup_sig(track):
         t = track.get('title', '').lower()
         t = re.sub(r'\s*[\(\[].*?[\)\]]', '', t)
         t = re.sub(r'\s*-\s*.*', '', t)
         t = clean_string(t)
-        
+
         p = track.get('performer', {}).get('name', '')
         if not p: p = track.get('artist', {}).get('name', '')
         p = clean_string(p)
-        
+
         return f"{t}|{p}"
 
-    for t in qobuz_tracks:
-        sigs.add(get_dedup_sig(t))
-    
-    # Insertion Amazon Music (si pas de doublon)
+    # PRIORITÉ QUALITÉ : pour les doublons Qobuz↔Amazon, on compare la qualité Amazon
+    # (via le mirror, sans cooldown) et on affiche Amazon si elle est supérieure.
+    amazon_by_sig = {}
     for t in amazon_tracks:
-        s = get_dedup_sig(t)
-        if s not in sigs: 
-            combined_tracks.append(t)
-            sigs.add(s)
-        
+        amazon_by_sig.setdefault(get_dedup_sig(t), t)
+    qobuz_sigs = [get_dedup_sig(t) for t in qobuz_tracks]
+
+    def _qobuz_q(t):
+        try: bd = int(t.get('maximum_bit_depth') or 16)
+        except: bd = 16
+        try: sr = float(t.get('maximum_sampling_rate') or 44.1) * 1000
+        except: sr = 44100.0
+        return (bd, sr)
+
+    dup_asins = []
+    for i, s in enumerate(qobuz_sigs):
+        amz = amazon_by_sig.get(s)
+        if amz:
+            dup_asins.append(amz['id'])
+    dup_asins = list(dict.fromkeys(dup_asins))[:6]  # borne : 6 comparaisons max
+    amz_q = {}
+    if dup_asins:
+        res = await asyncio.gather(*[run_in_threadpool(_amz_quality, a) for a in dup_asins],
+                                   return_exceptions=True)
+        for a, q in zip(dup_asins, res):
+            amz_q[a] = q if isinstance(q, tuple) else (0, 0)
+
+    combined_tracks = []
+    sigs = set()
+    for i, t in enumerate(qobuz_tracks):
+        s = qobuz_sigs[i]
+        chosen = t
+        amz = amazon_by_sig.get(s)
+        if amz:
+            aq = amz_q.get(amz['id'], (0, 0))
+            if aq[0] > 0 and aq > _qobuz_q(t):  # Amazon de meilleure qualité
+                chosen = dict(amz)
+                chosen['maximum_bit_depth'] = aq[0]
+        combined_tracks.append(chosen)
+        sigs.add(s)
+
     # Insertion Deezer (si pas de doublon)
     for t in deezer_tracks:
+        s = get_dedup_sig(t)
+        if s not in sigs:
+            combined_tracks.append(t)
+            sigs.add(s)
+
+    # Insertion Amazon (titres absents de Qobuz/Deezer ; lecture FLAC ClearKey)
+    for t in amazon_tracks:
         s = get_dedup_sig(t)
         if s not in sigs:
             combined_tracks.append(t)
@@ -2006,6 +2261,143 @@ async def deezer_stream(isrc: str, request: Request):
             'Access-Control-Allow-Origin': '*',
         },
     )
+
+def _amz_parse_head(head):
+    """Parse l'en-tête MP4 fragmenté Amazon → (init_end, sidx_start, sidx_end, kid_hex, dur_s, sr)."""
+    moov_end = 0; sidx_start = None; sidx_end = None
+    off = 0; n = len(head)
+    while off + 8 <= n:
+        size = struct.unpack(">I", head[off:off+4])[0]
+        typ = head[off+4:off+8]
+        if size < 8:
+            break
+        if typ == b'moov':
+            moov_end = off + size
+        if typ == b'sidx':
+            sidx_start = off; sidx_end = off + size
+            break
+        off += size
+    # KID dans la box tenc (par défaut)
+    kid = None
+    ti = head.find(b'tenc')
+    if ti != -1:
+        kid = head[ti+12:ti+28].hex()
+    # Durée : somme des subsegment_duration de la sidx / timescale
+    # (mvhd vaut 0 en MP4 fragmenté Amazon).
+    dur_s = 0
+    if sidx_start is not None:
+        try:
+            o = sidx_start + 8
+            ver = head[o]; o += 4  # version+flags
+            o += 4               # reference_ID
+            ts = struct.unpack(">I", head[o:o+4])[0]; o += 4  # timescale
+            o += 8 if ver == 0 else 16  # earliest_presentation_time + first_offset
+            o += 2               # reserved
+            ref_count = struct.unpack(">H", head[o:o+2])[0]; o += 2
+            total = 0
+            for _ in range(ref_count):
+                o += 4  # reference_type + referenced_size
+                total += struct.unpack(">I", head[o:o+4])[0]; o += 4  # subsegment_duration
+                o += 4  # SAP
+            if ts:
+                dur_s = total / ts
+        except Exception:
+            pass
+    init_end = (moov_end - 1) if moov_end else None
+    return init_end, sidx_start, sidx_end, kid, dur_s
+
+def _amz_resolve(asin):
+    """Résout l'ASIN (mirror puis zarz) → infos pour le manifeste DASH ClearKey (cache)."""
+    c = _amz_media_cache.get(asin)
+    if c and (time.time() - c['ts']) < AMZ_MEDIA_TTL:
+        return c
+    url, key = _amz_resolve_source(asin)
+    if not url or not key:
+        return None
+    bd, sr = _amz_quality_from_url(url)
+    _amz_quality_cache[asin] = (bd, sr)
+    # En-tête du MP4 chiffré : KID, ranges init/sidx, durée, taille totale
+    try:
+        h = requests.get(url, headers={'User-Agent': AMZ_APP_UA, 'Range': 'bytes=0-16383'}, timeout=20)
+        head = h.content
+        cr = h.headers.get('Content-Range', '')
+        size = int(cr.rsplit('/', 1)[-1]) if '/' in cr else 0
+    except Exception as e:
+        logger.error(f"[Amazon] head {asin}: {e}")
+        return None
+    init_end, sidx_start, sidx_end, kid, dur_s = _amz_parse_head(head)
+    if init_end is None or sidx_start is None or not kid:
+        logger.warning(f"[Amazon] head parse incomplet {asin}: init={init_end} sidx={sidx_start} kid={bool(kid)}")
+        return None
+    info = {'url': url, 'key': key, 'kid': kid, 'init_end': init_end,
+            'sidx_start': sidx_start, 'sidx_end': sidx_end, 'dur': dur_s,
+            'size': size, 'sr': sr, 'bd': bd, 'ts': time.time()}
+    _amz_media_cache[asin] = info
+    return info
+
+def _amz_build_mpd(info):
+    """Manifeste DASH (SegmentBase) pour un MP4 fragmenté FLAC chiffré CENC."""
+    kid = info['kid']
+    kid_uuid = f"{kid[0:8]}-{kid[8:12]}-{kid[12:16]}-{kid[16:20]}-{kid[20:32]}"
+    dur = info['dur'] or 0
+    bw = int(info['size'] * 8 / dur) if dur else 320000
+    sr = info['sr'] or 44100
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" xmlns:cenc="urn:mpeg:cenc:2013" '
+        'profiles="urn:mpeg:dash:profile:isoff-on-demand:2011" type="static" minBufferTime="PT2S" '
+        f'mediaPresentationDuration="PT{dur:.3f}S">'
+        '<Period>'
+        '<AdaptationSet mimeType="audio/mp4" contentType="audio" segmentAlignment="true">'
+        f'<ContentProtection schemeIdUri="urn:mpeg:dash:mp4protection:2011" value="cenc" cenc:default_KID="{kid_uuid}"/>'
+        '<ContentProtection schemeIdUri="urn:uuid:e2719d58-a985-b3c9-781a-b030af78d30e"/>'
+        f'<Representation id="1" codecs="flac" audioSamplingRate="{sr}" bandwidth="{bw}">'
+        f'<BaseURL>/amazon_proxy/{info["asin"]}</BaseURL>'
+        f'<SegmentBase indexRange="{info["sidx_start"]}-{info["sidx_end"]-1}">'
+        f'<Initialization range="0-{info["init_end"]}"/>'
+        '</SegmentBase>'
+        '</Representation>'
+        '</AdaptationSet>'
+        '</Period>'
+        '</MPD>'
+    )
+
+@app.get('/amazon_manifest/{asin}')
+async def amazon_manifest(asin: str):
+    """Manifeste DASH + clé ClearKey pour la lecture Amazon (Shaka déchiffre côté client)."""
+    info = await run_in_threadpool(_amz_resolve, asin)
+    if not info:
+        raise HTTPException(404, "Amazon stream not found")
+    info = dict(info); info['asin'] = asin
+    mpd = _amz_build_mpd(info)
+    manifest_b64 = base64.b64encode(mpd.encode('utf-8')).decode('ascii')
+    # clé ClearKey au format attendu par Shaka : { kidHex: keyHex }
+    return JSONResponse({'manifest': manifest_b64, 'kid': info['kid'], 'key': info['key'],
+                         'mimeType': 'application/dash+xml'})
+
+@app.get('/amazon_proxy/{asin}')
+async def amazon_proxy(asin: str, request: Request):
+    """Proxy par plages des octets CHIFFRÉS Amazon (passthrough, compatible Vercel)."""
+    info = await run_in_threadpool(_amz_resolve, asin)
+    if not info:
+        raise HTTPException(404, "Amazon stream not found")
+    url = info['url']
+    rng = request.headers.get('range') or request.headers.get('Range') or 'bytes=0-'
+
+    def _fetch():
+        return requests.get(url, headers={'User-Agent': AMZ_APP_UA, 'Range': rng}, timeout=40)
+
+    r = await run_in_threadpool(_fetch)
+    headers = {
+        'Accept-Ranges': 'bytes',
+        'Content-Length': str(len(r.content)),
+        'Cache-Control': 'no-store',
+        'Access-Control-Allow-Origin': '*',
+    }
+    cr = r.headers.get('Content-Range')
+    if cr:
+        headers['Content-Range'] = cr
+    return Response(content=r.content, status_code=r.status_code, media_type='audio/mp4', headers=headers)
 
 @app.get('/stream_url/{track_id}')
 async def get_stream_url(track_id: str):

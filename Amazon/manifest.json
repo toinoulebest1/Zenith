@@ -1,0 +1,119 @@
+{
+  "name": "amazon",
+  "displayName": "Amazon Music",
+  "version": "2.1.4",
+  "description": "Amazon Music metadata & download provider for SpotiFLAC. Browse tracks, albums, artists, playlists from Amazon Music links and search. Downloads lossless and Dolby Atmos audio.",
+  "type": [
+    "metadata_provider",
+    "download_provider"
+  ],
+  "minAppVersion": "4.2.3",
+  "permissions": {
+    "network": [
+      "na.mesk.skill.music.a2z.com",
+      "na.web.skill.music.a2z.com",
+      "music.amazon.com",
+      "music.amazon.co",
+      "music.amazon.de",
+      "music.amazon.co.uk",
+      "music.amazon.co.jp",
+      "music.amazon.fr",
+      "music.amazon.it",
+      "music.amazon.es",
+      "music.amazon.in",
+      "music.amazon.com.br",
+      "music.amazon.com.mx",
+      "music.amazon.com.au",
+      "m.media-amazon.com",
+      "api.zarz.moe",
+      "song.link",
+      "api.song.link",
+      "odesli.io",
+      "api.deezer.com",
+      "open.spotify.com",
+      "songstats.com",
+      "*.cloudfront.net"
+    ],
+    "storage": true,
+    "file": true
+  },
+  "qualityOptions": [
+    {
+      "id": "best",
+      "label": "FLAC Best Available",
+      "description": "Best available quality (up to 24-bit/96kHz)"
+    },
+    {
+      "id": "opus",
+      "label": "Opus 320kbps",
+      "description": "High quality Opus audio at 320kbps"
+    },
+    {
+      "id": "eac3",
+      "label": "Dolby Digital Plus",
+      "description": "Dolby Digital Plus surround sound (E-AC-3)"
+    }
+  ],
+  "searchBehavior": {
+    "enabled": true,
+    "placeholder": "Search Amazon Music...",
+    "icon": "amazon",
+    "thumbnailRatio": "square",
+    "filters": [
+      {
+        "id": "songs",
+        "label": "Songs"
+      },
+      {
+        "id": "albums",
+        "label": "Albums"
+      },
+      {
+        "id": "artists",
+        "label": "Artists"
+      },
+      {
+        "id": "playlists",
+        "label": "Playlists"
+      }
+    ]
+  },
+  "urlHandler": {
+    "enabled": true,
+    "patterns": [
+      "music.amazon.com",
+      "music.amazon.co",
+      "music.amazon.de",
+      "music.amazon.co.uk",
+      "music.amazon.co.jp",
+      "music.amazon.fr",
+      "music.amazon.it",
+      "music.amazon.es",
+      "music.amazon.in",
+      "music.amazon.com.br",
+      "music.amazon.com.mx",
+      "music.amazon.com.au"
+    ]
+  },
+  "capabilities": {
+    "homeFeed": true,
+    "downloadFallbackTier": "hi_res",
+    "requiresNativeContainerConversion": true,
+    "shareUrlTemplates": {
+      "album": "https://music.amazon.com/albums/{id}",
+      "artist": "https://music.amazon.com/artists/{id}"
+    }
+  },
+  "serviceHealth": [
+    {
+      "id": "zarz-api",
+      "label": "Zarz API",
+      "url": "https://api.zarz.moe/v1/health",
+      "method": "GET",
+      "serviceKey": "amazon",
+      "timeoutMs": 4000,
+      "cacheTtlSeconds": 60,
+      "required": true
+    }
+  ]
+}
