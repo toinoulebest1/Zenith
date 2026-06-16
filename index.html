@@ -1145,7 +1145,7 @@
 
             // On résout ce qui est marqué comme "lazy" ou ce qui vient de sources instables (Tidal)
             // On exclut maintenant QUE Qobuz et Amazon Music qui sont fiables.
-            if (nextTrack.source !== 'qobuz' && nextTrack.source !== 'amazon_music' && nextTrack.source !== 'deezer_flac') {
+            if (nextTrack.source !== 'qobuz' && nextTrack.source !== 'amazon_music' && nextTrack.source !== 'deezer_flac' && nextTrack.source !== 'youtube') {
                 try {
                     const artist = nextTrack.performer ? nextTrack.performer.name : (nextTrack.artist ? nextTrack.artist.name : 'Inconnu');
                     const resolveParams = new URLSearchParams({ title: nextTrack.title || '', artist, ...(nextTrack.isrc && { isrc: nextTrack.isrc }) });
@@ -1184,6 +1184,12 @@
                 await nextShaka.unload();
                 nextAudio.src = `${API_BASE}/deezer_stream/${nextTrack.id}`;
                 console.log("✅ Loading Deezer FLAC fallback for:", nextTrack.title);
+            }
+            // Gestion Source YOUTUBE (streaming via InnerTube, proxy par plages)
+            else if (nextTrack.source === 'youtube') {
+                await nextShaka.unload();
+                nextAudio.src = `${API_BASE}/yt_stream/${nextTrack.id}`;
+                console.log("✅ Loading YouTube stream for:", nextTrack.title);
             }
             // Gestion Source TIDAL (DISABLED)
             else if (nextTrack.source === 'tidal_hund') {
@@ -1245,7 +1251,7 @@
             // FINAL CHECK BEFORE PLAYING
             if (thisLoadId !== currentLoadId) return;
 
-            if (nextTrack.source !== 'yt_lazy' && nextTrack.source !== 'spotify_lazy' && nextTrack.source !== 'chart_lazy' && nextTrack.source !== 'deezer' && nextTrack.source !== 'deezer_flac' && nextTrack.source !== 'subsonic' && nextTrack.source !== 'amazon_music') safePushState({}, "", `/?track=${nextTrack.id}&source=${nextTrack.source}`);
+            if (nextTrack.source !== 'yt_lazy' && nextTrack.source !== 'spotify_lazy' && nextTrack.source !== 'chart_lazy' && nextTrack.source !== 'deezer' && nextTrack.source !== 'deezer_flac' && nextTrack.source !== 'youtube' && nextTrack.source !== 'subsonic' && nextTrack.source !== 'amazon_music') safePushState({}, "", `/?track=${nextTrack.id}&source=${nextTrack.source}`);
 
             // Force disable crossfade if direct audio
             startCrossfade(prevAudio, nextAudio, useCrossfade && !userSettings.directAudio);
