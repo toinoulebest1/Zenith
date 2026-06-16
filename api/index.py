@@ -975,13 +975,18 @@ TOP_COUNTRIES = {
 TOP_COUNTRY_TTL = 60 * 30
 _top_country_cache: dict = {}  # cc -> {'ts', 'tracks'}
 
-def _primary_artist(artist):
-    """Ne garde que l'artiste principal (avant &, feat., ft., x, vs, with…)
-    pour que la résolution titre+artiste fonctionne."""
+def _primary_artist(artist, aggressive=False):
+    """Ne garde que l'artiste principal (avant &, feat., ft., x, vs…).
+    aggressive=True coupe aussi sur la virgule et '/' (pour Amazon, où l'on veut
+    strictement l'artiste principal) ; sinon on les préserve (noms de groupes
+    type « Tyler, The Creator », « AC/DC »)."""
     if not artist:
         return artist
-    parts = re.split(r'\s*(?:&|×|\bfeat\.?\b|\bft\.?\b|\bfeaturing\b|\bvs\.?\b| x )\s*',
-                     artist, maxsplit=1, flags=re.IGNORECASE)
+    if aggressive:
+        sep = r'\s*(?:,|&|×|/|\bfeat\.?\b|\bft\.?\b|\bfeaturing\b|\bvs\.?\b| x )\s*'
+    else:
+        sep = r'\s*(?:&|×|\bfeat\.?\b|\bft\.?\b|\bfeaturing\b|\bvs\.?\b| x )\s*'
+    parts = re.split(sep, artist, maxsplit=1, flags=re.IGNORECASE)
     primary = parts[0].strip()
     return primary or artist.strip()
 
@@ -1167,11 +1172,15 @@ def _amz_deeplink_track(deeplink):
         pass
     return None
 
-def _amz_cover(url):
+def _amz_cover(url, size=1500):
+    """Force la pochette Amazon en haute résolution (retire le modificateur de taille)."""
     if not url: return ''
-    url = url.replace('{size}', '1000').replace('{jpegQuality}', '90').replace('{format}', 'jpg')
-    url = re.sub(r'\._S[XY]\d+_', '._SX1000_', url)
-    return url
+    url = url.replace('{size}', str(size)).replace('{jpegQuality}', '95').replace('{format}', 'jpg')
+    cleaned = re.sub(r'\._[^.]+_\.', '.', url)  # ._SX300_. / ._SX300_SY300_QL70_. → .
+    if 'images/I/' in cleaned or 'images/S/' in cleaned:
+        base, ext = os.path.splitext(cleaned)
+        return f"{base}._SL{size}_{ext}"
+    return cleaned
 
 def _amz_dur(v):
     t = _amz_text(v)
@@ -1230,6 +1239,7 @@ def sync_search_amazon(query, limit=15):
             if not name:
                 continue
             artist = _amz_text(item.get('secondaryText1')) or _amz_text(item.get('secondaryText'))
+            artist = _primary_artist(artist, aggressive=True)  # strictement l'artiste principal
             img = _amz_cover(item.get('image') if isinstance(item.get('image'), str) else '')
             seen.add(asin)
             out.append({

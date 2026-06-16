@@ -1181,8 +1181,13 @@
                     if (thisLoadId !== currentLoadId) return;
                     if (!res.ok) throw new Error("manifest HTTP " + res.status);
                     const md = await res.json();
-                    // Clé ClearKey { kidHex: keyHex } → Shaka déchiffre côté client
-                    nextShaka.configure({ drm: { clearKeys: { [md.kid]: md.key } } });
+                    // Clé ClearKey { kidHex: keyHex } → Shaka déchiffre côté client.
+                    // Buffering agressif : démarre la lecture dès ~1,5 s au lieu d'attendre
+                    // un gros tampon (Amazon n'a qu'un seul gros segment, on veut jouer vite).
+                    nextShaka.configure({
+                        drm: { clearKeys: { [md.kid]: md.key } },
+                        streaming: { rebufferingGoal: 1.5, bufferingGoal: 8, bufferBehind: 30 }
+                    });
                     const dashUri = 'data:application/dash+xml;base64,' + md.manifest;
                     await nextShaka.load(dashUri);
                     console.log("✅ Loaded Amazon Music (ClearKey FLAC) for:", nextTrack.title);
