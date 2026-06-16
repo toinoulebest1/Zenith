@@ -1172,14 +1172,14 @@ def _amz_deeplink_track(deeplink):
         pass
     return None
 
-def _amz_cover(url, size=1500):
-    """Force la pochette Amazon en haute résolution (retire le modificateur de taille)."""
+def _amz_cover(url, size=1000):
+    """Force la pochette Amazon Music en haute résolution via le modificateur _AA{size}_."""
     if not url: return ''
     url = url.replace('{size}', str(size)).replace('{jpegQuality}', '95').replace('{format}', 'jpg')
-    cleaned = re.sub(r'\._[^.]+_\.', '.', url)  # ._SX300_. / ._SX300_SY300_QL70_. → .
+    cleaned = re.sub(r'\._[^.]+_\.', '.', url)  # retire ._SX300_. / ._SX300_SY300_QL70_. → .
     if 'images/I/' in cleaned or 'images/S/' in cleaned:
         base, ext = os.path.splitext(cleaned)
-        return f"{base}._SL{size}_{ext}"
+        return f"{base}._AA{size}_{ext}"
     return cleaned
 
 def _amz_dur(v):
