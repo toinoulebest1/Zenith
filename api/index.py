@@ -1023,34 +1023,6 @@ def sync_get_top_country(country, limit=100):
     _top_country_cache[cc] = {'ts': time.time(), 'tracks': tracks}
     return tracks
 
-def sync_search_youtube(query, limit=10):
-    """Recherche YouTube Music (ytmusicapi) → objets 'youtube' (id = videoId).
-    Comble les titres absents de Qobuz/Deezer. Lecture via /yt_stream (InnerTube)."""
-    try:
-        results = yt.search(query, filter="songs", limit=limit)
-        out = []
-        for r in results:
-            vid = r.get('videoId')
-            if r.get('resultType') != 'song' or not vid:
-                continue
-            artists = ", ".join(a['name'] for a in r.get('artists', []) if a.get('name')) or 'Inconnu'
-            img = extract_thumbnail_hd(r)
-            out.append({
-                'id': vid,
-                'title': r.get('title', 'Inconnu'),
-                'performer': {'name': artists},
-                'album': {'title': (r.get('album') or {}).get('name', ''), 'image': {'large': img}},
-                'duration': parse_duration(r.get('duration_seconds') or r.get('duration')),
-                'maximum_bit_depth': 16,  # YouTube n'est pas lossless (pas de badge HI-RES)
-                'source': 'youtube',
-            })
-            if len(out) >= limit:
-                break
-        return out
-    except Exception as e:
-        logger.error(f"[YT Search] {e}")
-        return []
-
 def sync_search_deezer_albums(query, limit=15):
     try:
         url = "https://api.deezer.com/search/album"
@@ -1516,7 +1488,6 @@ async def search_tracks(q: str, type: str = 'all'):
     if type in ['track', 'all']:
         tasks.append(run_in_threadpool(sync_qobuz_search, q, 50, 'track'))
         tasks.append(run_in_threadpool(sync_search_deezer_tracks, q, 25))
-        tasks.append(run_in_threadpool(sync_search_youtube, q, 10))
     if type in ['album', 'all']:
         tasks.append(run_in_threadpool(sync_qobuz_search, q, 15, 'album'))
         tasks.append(run_in_threadpool(sync_search_deezer_albums, q, 15))
@@ -1525,14 +1496,13 @@ async def search_tracks(q: str, type: str = 'all'):
 
     finished = await asyncio.gather(*tasks, return_exceptions=True)
     idx = 0
-    qobuz_tracks = []; amazon_tracks = []; deezer_tracks = []; youtube_tracks = []
+    qobuz_tracks = []; amazon_tracks = []; deezer_tracks = []
     qobuz_albums = []; amazon_albums = []; deezer_albums = []
     deezer_artists = []
 
     if type in ['track', 'all']:
         r1 = finished[idx]; idx += 1; qobuz_tracks = r1 if isinstance(r1, list) else []
         r2 = finished[idx]; idx += 1; deezer_tracks = r2 if isinstance(r2, list) else []
-        r3 = finished[idx]; idx += 1; youtube_tracks = r3 if isinstance(r3, list) else []
     if type in ['album', 'all']:
         r4 = finished[idx]; idx += 1; qobuz_albums = r4 if isinstance(r4, list) else []
         r6 = finished[idx]; idx += 1; deezer_albums = r6 if isinstance(r6, list) else []
@@ -1573,13 +1543,6 @@ async def search_tracks(q: str, type: str = 'all'):
         
     # Insertion Deezer (si pas de doublon)
     for t in deezer_tracks:
-        s = get_dedup_sig(t)
-        if s not in sigs:
-            combined_tracks.append(t)
-            sigs.add(s)
-
-    # Insertion YouTube (en dernier : ne comble que les titres absents ailleurs)
-    for t in youtube_tracks:
         s = get_dedup_sig(t)
         if s not in sigs:
             combined_tracks.append(t)
@@ -2033,113 +1996,6 @@ async def deezer_stream(isrc: str, request: Request):
 
     body = await run_in_threadpool(_fetch_dec)
     total = str(size) if size else '*'
-    return Response(
-        content=body, status_code=206, media_type=mt,
-        headers={
-            'Content-Range': f'bytes {start}-{start + len(body) - 1}/{total}',
-            'Accept-Ranges': 'bytes',
-            'Content-Length': str(len(body)),
-            'Cache-Control': 'no-store',
-            'Access-Control-Allow-Origin': '*',
-        },
-    )
-
-# --- YOUTUBE (résolution audio via InnerTube ANDROID_VR, streaming pur) ---
-# Le client android_vr ne nécessite PAS de PO token : avec un visitorData (extrait du
-# HTML YouTube), youtubei/v1/player renvoie une URL googlevideo directe (Range OK).
-# On la proxifie en même-origine par plages (googlevideo n'a pas de CORS ; le lecteur
-# utilise crossOrigin="anonymous"). Aucun téléchargement, que du streaming.
-YT_INNERTUBE_KEY = "AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w"
-YT_AUDIO_PREF = [140, 251, 250, 249, 139, 18]  # m4a/AAC d'abord (compat. navigateurs, Safari inclus)
-YT_VR_UA = "com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip"
-YT_URL_TTL = 30 * 60
-YT_VISITOR_TTL = 6 * 60 * 60
-YT_MAX_RANGE = 1024 * 1024
-_yt_url_cache: dict = {}              # video_id -> {'url','mt','size','ts'}
-_yt_visitor = {'data': '', 'ts': 0}  # visitorData partagé (token de session, pas lié à la vidéo)
-
-def _yt_get_visitor(video_id):
-    if _yt_visitor['data'] and (time.time() - _yt_visitor['ts']) < YT_VISITOR_TTL:
-        return _yt_visitor['data']
-    try:
-        r = requests.get(f"https://www.youtube.com/watch?v={video_id}",
-                         headers={'User-Agent': SQUID_UA, 'Accept': 'text/html'}, timeout=12)
-        m = re.search(r'"visitorData"\s*:\s*"([^"]+)"', r.text)
-        if m:
-            _yt_visitor['data'] = m.group(1).replace('\\u0026', '&')
-            _yt_visitor['ts'] = time.time()
-    except Exception as e:
-        logger.warning(f"[YT] visitorData: {e}")
-    return _yt_visitor['data']
-
-def _yt_resolve(video_id):
-    c = _yt_url_cache.get(video_id)
-    if c and (time.time() - c['ts']) < YT_URL_TTL:
-        return c
-    visitor = _yt_get_visitor(video_id)
-    body = {"context": {"client": {
-        "clientName": "ANDROID_VR", "clientVersion": "1.65.10", "androidSdkVersion": 32,
-        "hl": "en", "gl": "US", "timeZone": "UTC", "utcOffsetMinutes": 0,
-        "osName": "Android", "osVersion": "12L", "platform": "MOBILE",
-        "deviceMake": "Oculus", "deviceModel": "Quest 3"}},
-        "videoId": video_id, "contentCheckOk": True, "racyCheckOk": True}
-    headers = {"Content-Type": "application/json", "User-Agent": YT_VR_UA,
-               "Origin": "https://www.youtube.com",
-               "X-YouTube-Client-Name": "28", "X-YouTube-Client-Version": "1.65.10"}
-    if visitor:
-        body["context"]["client"]["visitorData"] = visitor
-        headers["X-Goog-Visitor-Id"] = visitor
-    try:
-        r = requests.post(
-            f"https://www.youtube.com/youtubei/v1/player?key={YT_INNERTUBE_KEY}&prettyPrint=false",
-            headers=headers, data=json.dumps(body), timeout=15)
-        data = r.json()
-    except Exception as e:
-        logger.error(f"[YT] player {video_id}: {e}")
-        return None
-    status = (data.get('playabilityStatus') or {}).get('status')
-    if status != 'OK':
-        logger.warning(f"[YT] {video_id} not playable: {status}")
-        return None
-    sd = data.get('streamingData') or {}
-    fmts = (sd.get('formats') or []) + (sd.get('adaptiveFormats') or [])
-    audio = [f for f in fmts if 'audio' in str(f.get('mimeType', '')).lower() and f.get('url')]
-    if not audio:
-        return None
-    audio.sort(key=lambda f: YT_AUDIO_PREF.index(f['itag']) if f.get('itag') in YT_AUDIO_PREF else 999)
-    best = audio[0]
-    mime = str(best.get('mimeType', '')).lower()
-    mt = 'audio/mp4' if 'mp4' in mime else ('audio/webm' if 'webm' in mime else 'audio/mpeg')
-    info = {'url': best['url'], 'mt': mt, 'size': int(best.get('contentLength') or 0), 'ts': time.time()}
-    _yt_url_cache[video_id] = info
-    return info
-
-@app.get('/yt_stream/{video_id}')
-async def yt_stream(video_id: str, request: Request):
-    info = await run_in_threadpool(_yt_resolve, video_id)
-    if not info or not info.get('url'):
-        raise HTTPException(404, "YouTube stream not found")
-    url = info['url']; mt = info['mt']; size = info.get('size') or 0
-
-    start = 0; end = None
-    rng = request.headers.get('range') or request.headers.get('Range') or ''
-    m = re.match(r'bytes=(\d+)-(\d*)', rng)
-    if m:
-        start = int(m.group(1))
-        if m.group(2):
-            end = int(m.group(2))
-    if end is None:
-        end = start + YT_MAX_RANGE - 1
-    end = min(end, start + YT_MAX_RANGE - 1)
-    if size:
-        end = min(end, size - 1)
-
-    def _fetch():
-        r = requests.get(url, headers={'User-Agent': YT_VR_UA, 'Range': f'bytes={start}-{end}'}, timeout=40)
-        return r.content, r.headers.get('Content-Range')
-
-    body, cr = await run_in_threadpool(_fetch)
-    total = (cr.rsplit('/', 1)[-1] if cr and '/' in cr else (str(size) if size else '*'))
     return Response(
         content=body, status_code=206, media_type=mt,
         headers={
