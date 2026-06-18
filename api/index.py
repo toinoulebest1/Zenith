@@ -71,6 +71,11 @@ TIDAL_HUND_BASE = "https://api.monochrome.tf"
 
 TIDAL_HUND_BASE = "https://api.monochrome.tf"
 
+# API Tidal hifi-api (recherche + lecture). Instance auto-hébergée (HTTP → appelée
+# uniquement côté serveur ; l'audio est proxifié, le navigateur n'y touche jamais).
+TIDAL_HIFI_BASE = os.getenv('TIDAL_HIFI_BASE', "http://rgoggwgg0ws4ks0gogw8o0s8.46.224.72.133.sslip.io")
+TIDAL_HIFI_KEY = os.getenv('TIDAL_HIFI_KEY', "")
+
 # Credentials Tidal chargés uniquement depuis les variables d'environnement ou token.json
 FALLBACK_TIDAL_CREDENTIALS = {
     "client_ID":      os.getenv('CLIENT_ID', ''),
@@ -490,11 +495,51 @@ def tidal_uuid_to_url(uuid):
 
 # --- TIDAL OFFICIAL SEARCH & HUND AUDIO ---
 
-def sync_search_tidal(query, limit=50):
-    """
-    DISABLED: Tidal search is paused. Returns empty list.
-    Original code kept below for re-activation.
-    """
+def _tidal_headers():
+    h = {'User-Agent': SQUID_UA, 'Accept': 'application/json'}
+    if TIDAL_HIFI_KEY:
+        h['X-API-Key'] = TIDAL_HIFI_KEY
+    return h
+
+def sync_search_tidal(query, limit=25):
+    """Recherche Tidal via hifi-api → objets 'tidal_hund' avec qualité (tags).
+    HIRES_LOSSLESS/MQA → 24 bits ; LOSSLESS → 16 bits. Lecture via /tidal_manifest."""
+    try:
+        r = requests.get(f"{TIDAL_HIFI_BASE.rstrip('/')}/search/",
+                         params={'s': query, 'limit': limit},
+                         headers=_tidal_headers(), timeout=12)
+        if r.status_code != 200:
+            logger.warning(f"[Tidal Search] HTTP {r.status_code}")
+            return []
+        items = (r.json().get('data') or {}).get('items', []) or []
+    except Exception as e:
+        logger.error(f"[Tidal Search] {e}")
+        return []
+    out = []
+    for t in items:
+        if not t.get('id') or not t.get('title'):
+            continue
+        tags = (t.get('mediaMetadata') or {}).get('tags') or []
+        hires = ('HIRES_LOSSLESS' in tags) or ('MQA' in tags)
+        bd = 24 if hires else 16
+        sr = 96.0 if hires else 44.1  # approximation (Tidal n'expose pas le sr en recherche)
+        alb = t.get('album') or {}
+        out.append({
+            'id': str(t['id']),
+            'title': t.get('title'),
+            'performer': {'name': (t.get('artist') or {}).get('name', 'Inconnu')},
+            'album': {'title': alb.get('title'), 'image': {'large': tidal_uuid_to_url(alb.get('cover'))}},
+            'duration': t.get('duration', 0),
+            'isrc': t.get('isrc'),
+            'maximum_bit_depth': bd,
+            'maximum_sampling_rate': sr,
+            'source': 'tidal_hund',
+        })
+        if len(out) >= limit:
+            break
+    return out
+
+def _sync_search_tidal_DISABLED(query, limit=50):
     return []
     # --- ORIGINAL TIDAL SEARCH CODE (PAUSED) ---
     # token = tidal_auth.get_token()
@@ -1719,6 +1764,7 @@ async def search_tracks(q: str, type: str = 'all'):
         tasks.append(run_in_threadpool(sync_qobuz_search, q, 50, 'track'))
         tasks.append(run_in_threadpool(sync_search_deezer_tracks, q, 25))
         tasks.append(run_in_threadpool(sync_search_amazon, q, 15))
+        tasks.append(run_in_threadpool(sync_search_tidal, q, 25))
     if type in ['album', 'all']:
         tasks.append(run_in_threadpool(sync_qobuz_search, q, 15, 'album'))
         tasks.append(run_in_threadpool(sync_search_deezer_albums, q, 15))
@@ -1727,7 +1773,7 @@ async def search_tracks(q: str, type: str = 'all'):
 
     finished = await asyncio.gather(*tasks, return_exceptions=True)
     idx = 0
-    qobuz_tracks = []; amazon_tracks = []; deezer_tracks = []
+    qobuz_tracks = []; amazon_tracks = []; deezer_tracks = []; tidal_tracks = []
     qobuz_albums = []; amazon_albums = []; deezer_albums = []
     deezer_artists = []
 
@@ -1735,6 +1781,7 @@ async def search_tracks(q: str, type: str = 'all'):
         r1 = finished[idx]; idx += 1; qobuz_tracks = r1 if isinstance(r1, list) else []
         r2 = finished[idx]; idx += 1; deezer_tracks = r2 if isinstance(r2, list) else []
         r3 = finished[idx]; idx += 1; amazon_tracks = r3 if isinstance(r3, list) else []
+        r3b = finished[idx]; idx += 1; tidal_tracks = r3b if isinstance(r3b, list) else []
     if type in ['album', 'all']:
         r4 = finished[idx]; idx += 1; qobuz_albums = r4 if isinstance(r4, list) else []
         r6 = finished[idx]; idx += 1; deezer_albums = r6 if isinstance(r6, list) else []
@@ -1758,26 +1805,27 @@ async def search_tracks(q: str, type: str = 'all'):
 
         return f"{t}|{p}"
 
-    # PRIORITÉ QUALITÉ : pour les doublons Qobuz↔Amazon, on compare la qualité Amazon
-    # (via le mirror, sans cooldown) et on affiche Amazon si elle est supérieure.
+    # PRIORITÉ QUALITÉ : pour les doublons, on compare Qobuz / Amazon / Tidal et on
+    # affiche la source de meilleure qualité (bit depth puis échantillonnage).
+    # Tidal : qualité connue dès la recherche (tags). Amazon : résolue via le mirror (bornée).
     amazon_by_sig = {}
     for t in amazon_tracks:
         amazon_by_sig.setdefault(get_dedup_sig(t), t)
+    tidal_by_sig = {}
+    for t in tidal_tracks:
+        tidal_by_sig.setdefault(get_dedup_sig(t), t)
     qobuz_sigs = [get_dedup_sig(t) for t in qobuz_tracks]
 
-    def _qobuz_q(t):
+    def _track_q(t):  # (bit_depth, sample_rate_hz)
         try: bd = int(t.get('maximum_bit_depth') or 16)
         except: bd = 16
         try: sr = float(t.get('maximum_sampling_rate') or 44.1) * 1000
         except: sr = 44100.0
         return (bd, sr)
 
-    dup_asins = []
-    for i, s in enumerate(qobuz_sigs):
-        amz = amazon_by_sig.get(s)
-        if amz:
-            dup_asins.append(amz['id'])
-    dup_asins = list(dict.fromkeys(dup_asins))[:6]  # borne : 6 comparaisons max
+    # Amazon : résolution qualité bornée (réseau) uniquement pour les doublons Qobuz
+    dup_asins = list(dict.fromkeys(
+        amazon_by_sig[s]['id'] for s in qobuz_sigs if s in amazon_by_sig))[:6]
     amz_q = {}
     if dup_asins:
         res = await asyncio.gather(*[run_in_threadpool(_amz_quality, a) for a in dup_asins],
@@ -1785,17 +1833,30 @@ async def search_tracks(q: str, type: str = 'all'):
         for a, q in zip(dup_asins, res):
             amz_q[a] = q if isinstance(q, tuple) else (0, 0)
 
+    def _has_cover(tr):
+        img = ((tr.get('album') or {}).get('image') or {}).get('large') or ''
+        return bool(img) and 'placehold' not in img
+
     combined_tracks = []
     sigs = set()
     for i, t in enumerate(qobuz_tracks):
         s = qobuz_sigs[i]
-        chosen = t
+        chosen = t; best_q = _track_q(t)
+        # Tidal (qualité gratuite via tags)
+        tid = tidal_by_sig.get(s)
+        if tid:
+            tq = _track_q(tid)
+            if tq > best_q:
+                chosen = dict(tid); best_q = tq
+        # Amazon (qualité résolue)
         amz = amazon_by_sig.get(s)
         if amz:
             aq = amz_q.get(amz['id'], (0, 0))
-            if aq[0] > 0 and aq > _qobuz_q(t):  # Amazon de meilleure qualité
-                chosen = dict(amz)
-                chosen['maximum_bit_depth'] = aq[0]
+            if aq[0] > 0 and aq > best_q:
+                chosen = dict(amz); chosen['maximum_bit_depth'] = aq[0]; best_q = aq
+        # Si on a changé de source et que la nouvelle n'a pas de pochette, garder celle de Qobuz
+        if chosen is not t and not _has_cover(chosen) and _has_cover(t):
+            chosen.setdefault('album', {}).setdefault('image', {})['large'] = t['album']['image']['large']
         combined_tracks.append(chosen)
         sigs.add(s)
 
@@ -1808,6 +1869,13 @@ async def search_tracks(q: str, type: str = 'all'):
 
     # Insertion Amazon (titres absents de Qobuz/Deezer ; lecture FLAC ClearKey)
     for t in amazon_tracks:
+        s = get_dedup_sig(t)
+        if s not in sigs:
+            combined_tracks.append(t)
+            sigs.add(s)
+
+    # Insertion Tidal (titres absents ailleurs ; lecture non câblée pour l'instant)
+    for t in tidal_tracks:
         s = get_dedup_sig(t)
         if s not in sigs:
             combined_tracks.append(t)
@@ -2827,10 +2895,64 @@ async def get_amazon_stream_info_route(asin: str):
         return JSONResponse(stream_data)
     raise HTTPException(404, "Amazon Music stream not found")
 
+# --- TIDAL (lecture via hifi-api : manifeste DASH FLAC non chiffré + proxy segments) ---
+_tidal_mpd_cache: dict = {}   # track_id -> {'mpd', 'ts'}
+TIDAL_MPD_TTL = 15 * 60
+
+def _tidal_resolve_mpd(track_id):
+    c = _tidal_mpd_cache.get(track_id)
+    if c and (time.time() - c['ts']) < TIDAL_MPD_TTL:
+        return c['mpd']
+    try:
+        r = requests.get(f"{TIDAL_HIFI_BASE.rstrip('/')}/track/",
+                         params={'id': track_id, 'quality': 'HI_RES_LOSSLESS'},
+                         headers=_tidal_headers(), timeout=20)
+        if r.status_code != 200:
+            logger.warning(f"[Tidal] track {track_id} -> {r.status_code}: {r.text[:120]}")
+            return None
+        d = (r.json() or {}).get('data') or {}
+        if 'dash' not in (d.get('manifestMimeType') or ''):
+            logger.info(f"[Tidal] {track_id}: manifest {d.get('manifestMimeType')} non géré")
+            return None
+        mpd = base64.b64decode(d.get('manifest', '')).decode('utf-8', 'replace')
+        _tidal_mpd_cache[track_id] = {'mpd': mpd, 'ts': time.time()}
+        return mpd
+    except Exception as e:
+        logger.error(f"[Tidal] resolve {track_id}: {e}")
+        return None
+
 @app.get('/tidal_manifest/{track_id}')
 async def get_tidal_manifest_route(track_id: str):
-    # DISABLED: Tidal streaming is paused
-    raise HTTPException(404, "Tidal streaming is currently disabled")
+    """Manifeste DASH Tidal (FLAC non chiffré) pour Shaka. Les segments passent par /tidal_proxy."""
+    mpd = await run_in_threadpool(_tidal_resolve_mpd, track_id)
+    if not mpd:
+        raise HTTPException(404, "Tidal stream not found")
+    b64 = base64.b64encode(mpd.encode('utf-8')).decode('ascii')
+    return JSONResponse({'mimeType': 'application/dash+xml', 'manifest': b64})
+
+@app.get('/tidal_proxy')
+async def tidal_proxy(url: str, request: Request):
+    """Proxy par plages des segments audio Tidal (CDN sans CORS). Restreint au CDN Tidal."""
+    host = (urllib.parse.urlparse(url).hostname or '').lower()
+    if not (host.endswith('.audio.tidal.com') or host.endswith('.tidal.com')):
+        raise HTTPException(403, "host not allowed")
+    rng = request.headers.get('range') or request.headers.get('Range') or 'bytes=0-'
+
+    def _fetch():
+        return requests.get(url, headers={'User-Agent': SQUID_UA, 'Range': rng}, timeout=40)
+
+    r = await run_in_threadpool(_fetch)
+    headers = {
+        'Accept-Ranges': 'bytes',
+        'Content-Length': str(len(r.content)),
+        'Cache-Control': 'no-store',
+        'Access-Control-Allow-Origin': '*',
+    }
+    cr = r.headers.get('Content-Range')
+    if cr:
+        headers['Content-Range'] = cr
+    return Response(content=r.content, status_code=r.status_code,
+                    media_type=r.headers.get('Content-Type', 'audio/mp4'), headers=headers)
 
 @app.get('/lyrics')
 async def get_lyrics(artist: str, title: str, album: str = None, duration: str = None):

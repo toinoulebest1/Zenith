@@ -833,6 +833,17 @@
                 };
                 shakaPlayerA.addEventListener('error', onShakaError);
                 shakaPlayerB.addEventListener('error', onShakaError);
+
+                // Les segments Tidal (CDN sans CORS) sont réécrits vers notre proxy même-origine
+                const tidalProxyFilter = (type, request) => {
+                    request.uris = request.uris.map(u =>
+                        u.includes('audio.tidal.com')
+                            ? `${API_BASE}/tidal_proxy?url=${encodeURIComponent(u)}`
+                            : u
+                    );
+                };
+                shakaPlayerA.getNetworkingEngine().registerRequestFilter(tidalProxyFilter);
+                shakaPlayerB.getNetworkingEngine().registerRequestFilter(tidalProxyFilter);
                 console.log("✅ Shaka Player Ready");
             } else {
                 console.error('Browser not supported for Shaka Player');
@@ -1145,7 +1156,7 @@
 
             // On résout ce qui est marqué comme "lazy" ou ce qui vient de sources instables (Tidal)
             // On exclut maintenant QUE Qobuz et Amazon Music qui sont fiables.
-            if (nextTrack.source !== 'qobuz' && nextTrack.source !== 'amazon_music' && nextTrack.source !== 'deezer_flac') {
+            if (nextTrack.source !== 'qobuz' && nextTrack.source !== 'amazon_music' && nextTrack.source !== 'deezer_flac' && nextTrack.source !== 'tidal_hund') {
                 try {
                     const artist = nextTrack.performer ? nextTrack.performer.name : (nextTrack.artist ? nextTrack.artist.name : 'Inconnu');
                     const resolveParams = new URLSearchParams({ title: nextTrack.title || '', artist, ...(nextTrack.isrc && { isrc: nextTrack.isrc }) });
@@ -1203,33 +1214,36 @@
                 nextAudio.src = `${API_BASE}/deezer_stream/${nextTrack.id}`;
                 console.log("✅ Loading Deezer FLAC fallback for:", nextTrack.title);
             }
-            // Gestion Source TIDAL (DISABLED)
+            // Gestion Source TIDAL (FLAC non chiffré via hifi-api ; segments proxifiés)
             else if (nextTrack.source === 'tidal_hund') {
+                await nextShaka.unload();
+                let tidalOk = false;
                 try {
-                    await nextShaka.unload();
-
                     const res = await fetch(`${API_BASE}/tidal_manifest/${nextTrack.id}`);
-
                     if (thisLoadId !== currentLoadId) return;
-
-                    const manifestData = await res.json();
-
-                    if (manifestData.mimeType === 'application/dash+xml') {
-                        const dashUri = 'data:application/dash+xml;base64,' + manifestData.manifest;
-                        await nextShaka.load(dashUri);
-                        console.log("✅ Loaded DASH manifest for Tidal Hi-Res");
-                    }
-                    else if (manifestData.url) {
-                        nextAudio.src = manifestData.url;
-                        console.log("✅ Loaded Direct URL for Tidal Lossless (16-bit)");
-                    }
-                    else {
-                        throw new Error("No valid manifest or URL");
+                    if (res.ok) {
+                        const manifestData = await res.json();
+                        if (manifestData.mimeType === 'application/dash+xml') {
+                            // Pas de DRM ; démarrage rapide (on réinitialise un éventuel ClearKey Amazon)
+                            nextShaka.configure({ drm: { clearKeys: {} }, streaming: { rebufferingGoal: 1.5, bufferingGoal: 8, bufferBehind: 30 } });
+                            await nextShaka.load('data:application/dash+xml;base64,' + manifestData.manifest);
+                            tidalOk = true;
+                            console.log("✅ Loaded Tidal (FLAC DASH) for:", nextTrack.title);
+                        } else if (manifestData.url) {
+                            nextAudio.src = manifestData.url;
+                            tidalOk = true;
+                        }
                     }
                 } catch (e) {
-                    console.error("Tidal Load Error", e);
-                    handlePlaybackError(index);
-                    return;
+                    console.warn("Tidal load failed, fallback Qobuz/Deezer", e);
+                }
+                if (thisLoadId !== currentLoadId) return;
+                if (!tidalOk) {
+                    // Repli : lecture via Qobuz/Deezer (résolu par titre/artiste)
+                    const artist = nextTrack.performer ? nextTrack.performer.name : 'Inconnu';
+                    const p = new URLSearchParams({ title: nextTrack.title || '', artist });
+                    nextAudio.src = `${API_BASE}/resolve_stream?${p}`;
+                    console.log("↪️ Tidal indisponible → repli resolve_stream pour:", nextTrack.title);
                 }
             } else {
                 // Standard Track (URL directe)
@@ -1263,7 +1277,7 @@
             // FINAL CHECK BEFORE PLAYING
             if (thisLoadId !== currentLoadId) return;
 
-            if (nextTrack.source !== 'yt_lazy' && nextTrack.source !== 'spotify_lazy' && nextTrack.source !== 'chart_lazy' && nextTrack.source !== 'deezer' && nextTrack.source !== 'deezer_flac' && nextTrack.source !== 'subsonic' && nextTrack.source !== 'amazon_music') safePushState({}, "", `/?track=${nextTrack.id}&source=${nextTrack.source}`);
+            if (nextTrack.source !== 'yt_lazy' && nextTrack.source !== 'spotify_lazy' && nextTrack.source !== 'chart_lazy' && nextTrack.source !== 'deezer' && nextTrack.source !== 'deezer_flac' && nextTrack.source !== 'tidal_hund' && nextTrack.source !== 'subsonic' && nextTrack.source !== 'amazon_music') safePushState({}, "", `/?track=${nextTrack.id}&source=${nextTrack.source}`);
 
             // Force disable crossfade if direct audio
             startCrossfade(prevAudio, nextAudio, useCrossfade && !userSettings.directAudio);
