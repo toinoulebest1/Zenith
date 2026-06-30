@@ -76,6 +76,10 @@ TIDAL_HUND_BASE = "https://api.monochrome.tf"
 TIDAL_HIFI_BASE = os.getenv('TIDAL_HIFI_BASE', "http://rgoggwgg0ws4ks0gogw8o0s8.46.224.72.133.sslip.io")
 TIDAL_HIFI_KEY = os.getenv('TIDAL_HIFI_KEY', "")
 
+# MODE DEBUG : Qobuz en pause, la recherche ne renvoie QUE des titres Tidal (pour
+# isoler/analyser la lecture Tidal). Remettre à False pour réactiver toutes les sources.
+TIDAL_ONLY_MODE = os.getenv('TIDAL_ONLY_MODE', '1') == '1'
+
 # Credentials Tidal chargés uniquement depuis les variables d'environnement ou token.json
 FALLBACK_TIDAL_CREDENTIALS = {
     "client_ID":      os.getenv('CLIENT_ID', ''),
@@ -1759,6 +1763,11 @@ async def get_radio_queue(artist: str, title: str):
 
 @app.get('/search')
 async def search_tracks(q: str, type: str = 'all'):
+    # MODE DEBUG TIDAL : Qobuz en pause, on ne renvoie que des titres Tidal
+    if TIDAL_ONLY_MODE:
+        tidal = await run_in_threadpool(sync_search_tidal, q, 50) if type in ['track', 'all'] else []
+        return JSONResponse({"tracks": tidal, "albums": [], "external_playlists": [], "artists": []})
+
     tasks = []
     if type in ['track', 'all']:
         tasks.append(run_in_threadpool(sync_qobuz_search, q, 50, 'track'))
