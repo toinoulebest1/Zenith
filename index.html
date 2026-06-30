@@ -1215,35 +1215,30 @@
                 console.log("✅ Loading Deezer FLAC fallback for:", nextTrack.title);
             }
             // Gestion Source TIDAL (FLAC non chiffré via hifi-api ; segments proxifiés)
+            // PAS de repli Qobuz : un titre Tidal se lit en Tidal, ou pas du tout.
             else if (nextTrack.source === 'tidal_hund') {
                 await nextShaka.unload();
-                let tidalOk = false;
                 try {
                     const res = await fetch(`${API_BASE}/tidal_manifest/${nextTrack.id}`);
                     if (thisLoadId !== currentLoadId) return;
-                    if (res.ok) {
-                        const manifestData = await res.json();
-                        if (manifestData.mimeType === 'application/dash+xml') {
-                            // Pas de DRM ; démarrage rapide (on réinitialise un éventuel ClearKey Amazon)
-                            nextShaka.configure({ drm: { clearKeys: {} }, streaming: { rebufferingGoal: 1.5, bufferingGoal: 8, bufferBehind: 30 } });
-                            await nextShaka.load('data:application/dash+xml;base64,' + manifestData.manifest);
-                            tidalOk = true;
-                            console.log("✅ Loaded Tidal (FLAC DASH) for:", nextTrack.title);
-                        } else if (manifestData.url) {
-                            nextAudio.src = manifestData.url;
-                            tidalOk = true;
-                        }
+                    if (!res.ok) throw new Error("tidal_manifest HTTP " + res.status);
+                    const manifestData = await res.json();
+                    if (manifestData.mimeType === 'application/dash+xml') {
+                        // Pas de DRM ; démarrage rapide (on réinitialise un éventuel ClearKey Amazon)
+                        nextShaka.configure({ drm: { clearKeys: {} }, streaming: { rebufferingGoal: 1.5, bufferingGoal: 8, bufferBehind: 30 } });
+                        await nextShaka.load('data:application/dash+xml;base64,' + manifestData.manifest);
+                        console.log("✅ Loaded Tidal (FLAC DASH) for:", nextTrack.title);
+                    } else if (manifestData.url) {
+                        nextAudio.src = manifestData.url;
+                    } else {
+                        throw new Error("No Tidal manifest");
                     }
                 } catch (e) {
-                    console.warn("Tidal load failed, fallback Qobuz/Deezer", e);
-                }
-                if (thisLoadId !== currentLoadId) return;
-                if (!tidalOk) {
-                    // Repli : lecture via Qobuz/Deezer (résolu par titre/artiste)
-                    const artist = nextTrack.performer ? nextTrack.performer.name : 'Inconnu';
-                    const p = new URLSearchParams({ title: nextTrack.title || '', artist });
-                    nextAudio.src = `${API_BASE}/resolve_stream?${p}`;
-                    console.log("↪️ Tidal indisponible → repli resolve_stream pour:", nextTrack.title);
+                    console.error("Tidal Load Error", e);
+                    if (thisLoadId !== currentLoadId) return;
+                    showToast(`❌ Tidal indisponible pour ce titre : ${nextTrack.title}`);
+                    document.getElementById('playIcon').className = 'fas fa-exclamation-triangle';
+                    return;  // surtout PAS de repli Qobuz
                 }
             } else {
                 // Standard Track (URL directe)
