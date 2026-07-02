@@ -1756,6 +1756,9 @@ async def translate_lines_route(req: TranslationRequest):
 
 @app.get('/radio_queue')
 async def get_radio_queue(artist: str, title: str):
+    # Mode debug Tidal : pas de radio (évite d'enchaîner sur des titres Qobuz/lazy)
+    if TIDAL_ONLY_MODE:
+        raise HTTPException(404, "Radio disabled (Tidal-only mode)")
     if not artist or not title: raise HTTPException(400, "Missing params")
     tracks = await run_in_threadpool(sync_get_radio_queue, title, artist)
     if not tracks: raise HTTPException(404, "No results")
@@ -2014,6 +2017,8 @@ async def get_deezer_playlist_details_route(id: str):
 
 @app.get('/resolve_stream')
 async def resolve_and_stream(title: str, artist: str):
+    if TIDAL_ONLY_MODE:
+        raise HTTPException(404, "Qobuz/Deezer paused (Tidal-only mode)")
     match = await run_in_threadpool(sync_resolve_track, title, artist)
     if match:
         rid = match['id']
@@ -2029,6 +2034,8 @@ async def resolve_metadata_route(title: str = '', artist: str = '', isrc: str = 
     Retourne l'objet track complet (ID, source, image, etc.).
     Accepte title+artist et/ou isrc (ISRC est prioritaire).
     """
+    if TIDAL_ONLY_MODE:
+        raise HTTPException(404, "Qobuz/Deezer paused (Tidal-only mode)")
     match = await run_in_threadpool(sync_resolve_track, title, artist, isrc)
     if match: return JSONResponse(match)
     raise HTTPException(404, "Not found")
@@ -2489,6 +2496,8 @@ async def amazon_proxy(asin: str, request: Request):
 @app.get('/stream_url/{track_id}')
 async def get_stream_url(track_id: str):
     """Retourne l'URL CDN Qobuz en JSON (pour le pré-fetch frontend)."""
+    if TIDAL_ONLY_MODE:
+        raise HTTPException(404, "Qobuz paused (Tidal-only mode)")
     if SQUID_ENABLED and is_asin(track_id):
         return JSONResponse({'url': f"/stream/{track_id}"})
     url = await run_in_threadpool(_resolve_qobuz_url, track_id)
@@ -2498,6 +2507,8 @@ async def get_stream_url(track_id: str):
 
 @app.get('/stream/{track_id}')
 async def stream_track(track_id: str):
+    if TIDAL_ONLY_MODE:
+        raise HTTPException(404, "Qobuz paused (Tidal-only mode)")
     # squid (Amazon Music) en pause : déchiffrement serveur uniquement si réactivé
     if SQUID_ENABLED and is_asin(track_id):
         result = await run_in_threadpool(squid_decrypt_audio, track_id)
