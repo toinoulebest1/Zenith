@@ -548,12 +548,23 @@ def sync_search_tidal(query, limit=25):
             break
     return out
 
-def sync_get_tidal_radio(title, artist, limit=25):
-    """Radio 100 % Tidal : trouve la piste seed puis renvoie ses recommandations Tidal."""
+def _tidal_resolve_one(title, artist):
+    """Cherche un titre sur Tidal (par titre+artiste) → objet 'tidal_hund' ou None."""
     try:
         q = f"{title} {artist}".strip()
         r = requests.get(f"{TIDAL_HIFI_BASE.rstrip('/')}/search/",
-                         params={'s': q, 'limit': 1}, headers=_tidal_headers(), timeout=12)
+                         params={'s': q, 'limit': 1}, headers=_tidal_headers(), timeout=10)
+        items = (r.json().get('data') or {}).get('items', []) or []
+        return _tidal_track_obj(items[0]) if items else None
+    except Exception:
+        return None
+
+def _tidal_native_radio(title, artist, limit=25):
+    """Radio native Tidal (recommandations de la piste seed). Repli si YouTube échoue."""
+    try:
+        r = requests.get(f"{TIDAL_HIFI_BASE.rstrip('/')}/search/",
+                         params={'s': f"{title} {artist}".strip(), 'limit': 1},
+                         headers=_tidal_headers(), timeout=12)
         items = (r.json().get('data') or {}).get('items', []) or []
         if not items:
             return []
@@ -573,8 +584,35 @@ def sync_get_tidal_radio(title, artist, limit=25):
                 break
         return out
     except Exception as e:
-        logger.error(f"[Tidal Radio] {e}")
+        logger.error(f"[Tidal Native Radio] {e}")
         return []
+
+def sync_get_tidal_radio(title, artist, limit=25):
+    """Radio : recommandations trouvées via YouTube (Automix), puis RÉSOLUES en titres
+    Tidal (donc lecture 100 % Tidal). Repli sur les recommandations natives Tidal."""
+    try:
+        yt_tracks = sync_get_radio_queue(title, artist)  # YTMusic → titres + artistes
+    except Exception as e:
+        logger.warning(f"[Tidal Radio] YouTube seed KO: {e}")
+        yt_tracks = []
+    if yt_tracks:
+        pairs = [(t.get('title'), (t.get('performer') or {}).get('name', '')) for t in yt_tracks[:limit]]
+        results = [None] * len(pairs)
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            futs = {ex.submit(_tidal_resolve_one, tt, aa): i for i, (tt, aa) in enumerate(pairs)}
+            for f in futs:
+                try:
+                    results[futs[f]] = f.result()
+                except Exception:
+                    pass
+        out, seen = [], set()
+        for r in results:
+            if r and r['id'] not in seen:
+                out.append(r); seen.add(r['id'])
+        if out:
+            return out
+    # Repli : recommandations natives Tidal
+    return _tidal_native_radio(title, artist, limit)
 
 def _sync_search_tidal_DISABLED(query, limit=50):
     return []
