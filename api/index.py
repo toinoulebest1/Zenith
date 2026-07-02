@@ -548,12 +548,23 @@ def sync_search_tidal(query, limit=25):
             break
     return out
 
-def _tidal_resolve_one(title, artist):
-    """Cherche un titre sur Tidal (par titre+artiste) → objet 'tidal_hund' ou None."""
+def _tidal_resolve_one(title, artist, isrc=None):
+    """Cherche un titre sur Tidal (ISRC prioritaire, sinon titre+artiste) → 'tidal_hund'."""
+    base = TIDAL_HIFI_BASE.rstrip('/')
+    # 1. ISRC (plus fiable)
+    if isrc:
+        try:
+            r = requests.get(f"{base}/search/", params={'i': isrc, 'limit': 1},
+                             headers=_tidal_headers(), timeout=10)
+            items = (r.json().get('data') or {}).get('items', []) or []
+            if items:
+                return _tidal_track_obj(items[0])
+        except Exception:
+            pass
+    # 2. Titre + artiste
     try:
-        q = f"{title} {artist}".strip()
-        r = requests.get(f"{TIDAL_HIFI_BASE.rstrip('/')}/search/",
-                         params={'s': q, 'limit': 1}, headers=_tidal_headers(), timeout=10)
+        r = requests.get(f"{base}/search/", params={'s': f"{title} {artist}".strip(), 'limit': 1},
+                         headers=_tidal_headers(), timeout=10)
         items = (r.json().get('data') or {}).get('items', []) or []
         return _tidal_track_obj(items[0]) if items else None
     except Exception:
@@ -678,12 +689,66 @@ def _sync_search_tidal_DISABLED(query, limit=50):
     #     return []
 
 def sync_search_tidal_albums(query, limit=15):
-    """DISABLED: Tidal album search is paused."""
-    return []
+    """Recherche d'albums Tidal via hifi-api (?al=) → objets album 'tidal_hund'."""
+    try:
+        r = requests.get(f"{TIDAL_HIFI_BASE.rstrip('/')}/search/",
+                         params={'al': query, 'limit': limit}, headers=_tidal_headers(), timeout=12)
+        albs = ((r.json().get('data') or {}).get('albums') or {}).get('items') or []
+    except Exception as e:
+        logger.error(f"[Tidal Albums] {e}")
+        return []
+    out = []
+    for a in albs:
+        if not a.get('id') or not a.get('title'):
+            continue
+        artist = (a.get('artist') or {}).get('name') or ((a.get('artists') or [{}])[0] or {}).get('name') or 'Inconnu'
+        tags = (a.get('mediaMetadata') or {}).get('tags') or []
+        out.append({
+            'id': str(a['id']),
+            'title': a.get('title'),
+            'artist': {'name': artist},
+            'image': {'large': tidal_uuid_to_url(a.get('cover'))},
+            'source': 'tidal_hund',
+            'type': 'album',
+            'maximum_bit_depth': 24 if ('HIRES_LOSSLESS' in tags or 'MQA' in tags) else 16,
+            'date': a.get('releaseDate') or a.get('streamStartDate'),
+        })
+        if len(out) >= limit:
+            break
+    return out
 
 def sync_get_tidal_album(album_id):
-    """DISABLED: Tidal album details is paused."""
-    return None
+    """Détails d'un album Tidal via hifi-api (/album/?id=) → pistes 'tidal_hund'."""
+    try:
+        r = requests.get(f"{TIDAL_HIFI_BASE.rstrip('/')}/album/",
+                         params={'id': album_id, 'limit': 250}, headers=_tidal_headers(), timeout=20)
+        d = (r.json() or {}).get('data') or {}
+        if not d.get('id'):
+            return None
+        cover = tidal_uuid_to_url(d.get('cover'))
+        tracks = []
+        for it in d.get('items', []):
+            t = it.get('item') or it
+            obj = _tidal_track_obj(t)
+            if not obj:
+                continue
+            if not obj['album']['image']['large'] or 'placehold' in obj['album']['image']['large']:
+                obj['album']['image']['large'] = cover
+            obj['track_number'] = t.get('trackNumber')
+            tracks.append(obj)
+        tags = (d.get('mediaMetadata') or {}).get('tags') or []
+        return {
+            'id': str(d.get('id')),
+            'title': d.get('title'),
+            'artist': {'name': (d.get('artist') or {}).get('name', 'Inconnu')},
+            'image': {'large': cover},
+            'source': 'tidal_hund',
+            'maximum_bit_depth': 24 if ('HIRES_LOSSLESS' in tags or 'MQA' in tags) else 16,
+            'tracks': {'items': tracks},
+        }
+    except Exception as e:
+        logger.error(f"[Tidal Album] {e}")
+        return None
 
 def get_tidal_stream_manifest(track_id):
     """DISABLED: Tidal stream manifest is paused."""
@@ -1840,10 +1905,21 @@ async def get_radio_queue(artist: str, title: str):
 
 @app.get('/search')
 async def search_tracks(q: str, type: str = 'all'):
-    # MODE DEBUG TIDAL : Qobuz en pause, on ne renvoie que des titres Tidal
+    # MODE TIDAL : titres + albums via Tidal, playlists via Deezer (lues via Tidal au clic)
     if TIDAL_ONLY_MODE:
-        tidal = await run_in_threadpool(sync_search_tidal, q, 50) if type in ['track', 'all'] else []
-        return JSONResponse({"tracks": tidal, "albums": [], "external_playlists": [], "artists": []})
+        subtasks, kinds = [], []
+        if type in ['track', 'all']:
+            subtasks.append(run_in_threadpool(sync_search_tidal, q, 50)); kinds.append('tracks')
+        if type in ['album', 'all']:
+            subtasks.append(run_in_threadpool(sync_search_tidal_albums, q, 15)); kinds.append('albums')
+        if type in ['playlist', 'all']:
+            subtasks.append(run_in_threadpool(sync_search_deezer_playlists, q, 50)); kinds.append('playlists')
+        done = await asyncio.gather(*subtasks, return_exceptions=True)
+        res = {'tracks': [], 'albums': [], 'playlists': []}
+        for k, r in zip(kinds, done):
+            res[k] = r if isinstance(r, list) else []
+        return JSONResponse({"tracks": res['tracks'], "albums": res['albums'],
+                             "external_playlists": res['playlists'], "artists": []})
 
     tasks = []
     if type in ['track', 'all']:
@@ -2108,9 +2184,9 @@ async def resolve_metadata_route(title: str = '', artist: str = '', isrc: str = 
     Retourne l'objet track complet (ID, source, image, etc.).
     Accepte title+artist et/ou isrc (ISRC est prioritaire).
     """
-    # Mode Tidal-only : on résout vers Tidal (recherche par titre+artiste), jamais Qobuz
+    # Mode Tidal-only : on résout vers Tidal (ISRC prioritaire), jamais Qobuz
     if TIDAL_ONLY_MODE:
-        match = await run_in_threadpool(_tidal_resolve_one, title, artist)
+        match = await run_in_threadpool(_tidal_resolve_one, title, artist, isrc)
         if match: return JSONResponse(match)
         raise HTTPException(404, "Not found on Tidal")
     match = await run_in_threadpool(sync_resolve_track, title, artist, isrc)
