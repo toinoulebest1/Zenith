@@ -1828,9 +1828,10 @@ async def translate_lines_route(req: TranslationRequest):
 @app.get('/radio_queue')
 async def get_radio_queue(artist: str, title: str):
     if not artist or not title: raise HTTPException(400, "Missing params")
-    # Mode Tidal-only : radio 100 % Tidal (recommandations Tidal, jamais de Qobuz/lazy)
+    # Mode Tidal-only : radio brute YouTube (Automix). La lecture est résolue en Tidal
+    # au clic, via /resolve_metadata (voir plus bas). On ne résout donc que le titre joué.
     if TIDAL_ONLY_MODE:
-        tracks = await run_in_threadpool(sync_get_tidal_radio, title, artist)
+        tracks = await run_in_threadpool(sync_get_radio_queue, title, artist)
         if not tracks: raise HTTPException(404, "No results")
         return JSONResponse(tracks)
     tracks = await run_in_threadpool(sync_get_radio_queue, title, artist)
@@ -2107,8 +2108,11 @@ async def resolve_metadata_route(title: str = '', artist: str = '', isrc: str = 
     Retourne l'objet track complet (ID, source, image, etc.).
     Accepte title+artist et/ou isrc (ISRC est prioritaire).
     """
+    # Mode Tidal-only : on résout vers Tidal (recherche par titre+artiste), jamais Qobuz
     if TIDAL_ONLY_MODE:
-        raise HTTPException(404, "Qobuz/Deezer paused (Tidal-only mode)")
+        match = await run_in_threadpool(_tidal_resolve_one, title, artist)
+        if match: return JSONResponse(match)
+        raise HTTPException(404, "Not found on Tidal")
     match = await run_in_threadpool(sync_resolve_track, title, artist, isrc)
     if match: return JSONResponse(match)
     raise HTTPException(404, "Not found")
