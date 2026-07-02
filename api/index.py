@@ -505,9 +505,29 @@ def _tidal_headers():
         h['X-API-Key'] = TIDAL_HIFI_KEY
     return h
 
+def _tidal_track_obj(t):
+    """Mappe un track Tidal (hifi-api) → objet 'tidal_hund' avec qualité (tags)."""
+    if not t or not t.get('id') or not t.get('title'):
+        return None
+    tags = (t.get('mediaMetadata') or {}).get('tags') or []
+    hires = ('HIRES_LOSSLESS' in tags) or ('MQA' in tags)
+    bd = 24 if hires else 16
+    sr = 96.0 if hires else 44.1  # approximation (Tidal n'expose pas le sr en recherche)
+    alb = t.get('album') or {}
+    return {
+        'id': str(t['id']),
+        'title': t.get('title'),
+        'performer': {'name': (t.get('artist') or {}).get('name', 'Inconnu')},
+        'album': {'title': alb.get('title'), 'image': {'large': tidal_uuid_to_url(alb.get('cover'))}},
+        'duration': t.get('duration', 0),
+        'isrc': t.get('isrc'),
+        'maximum_bit_depth': bd,
+        'maximum_sampling_rate': sr,
+        'source': 'tidal_hund',
+    }
+
 def sync_search_tidal(query, limit=25):
-    """Recherche Tidal via hifi-api → objets 'tidal_hund' avec qualité (tags).
-    HIRES_LOSSLESS/MQA → 24 bits ; LOSSLESS → 16 bits. Lecture via /tidal_manifest."""
+    """Recherche Tidal via hifi-api → objets 'tidal_hund'. Lecture via /tidal_manifest."""
     try:
         r = requests.get(f"{TIDAL_HIFI_BASE.rstrip('/')}/search/",
                          params={'s': query, 'limit': limit},
@@ -521,27 +541,40 @@ def sync_search_tidal(query, limit=25):
         return []
     out = []
     for t in items:
-        if not t.get('id') or not t.get('title'):
-            continue
-        tags = (t.get('mediaMetadata') or {}).get('tags') or []
-        hires = ('HIRES_LOSSLESS' in tags) or ('MQA' in tags)
-        bd = 24 if hires else 16
-        sr = 96.0 if hires else 44.1  # approximation (Tidal n'expose pas le sr en recherche)
-        alb = t.get('album') or {}
-        out.append({
-            'id': str(t['id']),
-            'title': t.get('title'),
-            'performer': {'name': (t.get('artist') or {}).get('name', 'Inconnu')},
-            'album': {'title': alb.get('title'), 'image': {'large': tidal_uuid_to_url(alb.get('cover'))}},
-            'duration': t.get('duration', 0),
-            'isrc': t.get('isrc'),
-            'maximum_bit_depth': bd,
-            'maximum_sampling_rate': sr,
-            'source': 'tidal_hund',
-        })
+        obj = _tidal_track_obj(t)
+        if obj:
+            out.append(obj)
         if len(out) >= limit:
             break
     return out
+
+def sync_get_tidal_radio(title, artist, limit=25):
+    """Radio 100 % Tidal : trouve la piste seed puis renvoie ses recommandations Tidal."""
+    try:
+        q = f"{title} {artist}".strip()
+        r = requests.get(f"{TIDAL_HIFI_BASE.rstrip('/')}/search/",
+                         params={'s': q, 'limit': 1}, headers=_tidal_headers(), timeout=12)
+        items = (r.json().get('data') or {}).get('items', []) or []
+        if not items:
+            return []
+        seed_id = items[0].get('id')
+        rr = requests.get(f"{TIDAL_HIFI_BASE.rstrip('/')}/recommendations/",
+                          params={'id': seed_id}, headers=_tidal_headers(), timeout=20)
+        recs = (rr.json().get('data') or {}).get('items', []) or []
+        out = []
+        for it in recs:
+            t = it.get('track') or it
+            if str(t.get('id')) == str(seed_id):
+                continue
+            obj = _tidal_track_obj(t)
+            if obj:
+                out.append(obj)
+            if len(out) >= limit:
+                break
+        return out
+    except Exception as e:
+        logger.error(f"[Tidal Radio] {e}")
+        return []
 
 def _sync_search_tidal_DISABLED(query, limit=50):
     return []
@@ -1756,10 +1789,12 @@ async def translate_lines_route(req: TranslationRequest):
 
 @app.get('/radio_queue')
 async def get_radio_queue(artist: str, title: str):
-    # Mode debug Tidal : pas de radio (évite d'enchaîner sur des titres Qobuz/lazy)
-    if TIDAL_ONLY_MODE:
-        raise HTTPException(404, "Radio disabled (Tidal-only mode)")
     if not artist or not title: raise HTTPException(400, "Missing params")
+    # Mode Tidal-only : radio 100 % Tidal (recommandations Tidal, jamais de Qobuz/lazy)
+    if TIDAL_ONLY_MODE:
+        tracks = await run_in_threadpool(sync_get_tidal_radio, title, artist)
+        if not tracks: raise HTTPException(404, "No results")
+        return JSONResponse(tracks)
     tracks = await run_in_threadpool(sync_get_radio_queue, title, artist)
     if not tracks: raise HTTPException(404, "No results")
     return JSONResponse(tracks)
