@@ -1454,6 +1454,13 @@
             const track = tracks[index];
             if (!track) return;
 
+            // Tidal : jamais de repli Qobuz/Deezer — un titre Tidal se lit en Tidal ou pas du tout
+            if (track.source === 'tidal_hund') {
+                showToast(`❌ Tidal indisponible pour ce titre : ${track.title}`);
+                document.getElementById('playIcon').className = 'fas fa-exclamation-triangle';
+                return;
+            }
+
             // Éviter les boucles infinies
             if (fallbackRetries[index] && fallbackRetries[index] >= 1) {
                 console.warn("Échec définitif du fallback pour ce titre.");
