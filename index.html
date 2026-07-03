@@ -1133,6 +1133,10 @@
             const nextAudio = (activeAudio === playerA) ? playerB : playerA;
             const prevAudio = activeAudio;
 
+            // Coupe IMMÉDIATEMENT la piste en cours (silence pendant que la nouvelle se charge),
+            // au lieu de la laisser jouer pendant la latence de résolution/chargement.
+            try { if (prevAudio && !prevAudio.paused) prevAudio.pause(); } catch (e) {}
+
             // Determine Shaka Player instance
             const nextShaka = (nextAudio === playerA) ? shakaPlayerA : shakaPlayerB;
             const prevShaka = (prevAudio === playerA) ? shakaPlayerA : shakaPlayerB;
