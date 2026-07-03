@@ -1123,7 +1123,7 @@
                 if (audioCtx && audioCtx.state === 'suspended') await audioCtx.resume();
             }
 
-            nextTrackTriggered = false;
+            nextTrackTriggered = true;  // bloque l'avance auto pendant TOUT le chargement
             let nextTrack = tracks[index]; // Use let to allow modification
 
             // Reset history save state for the new track
@@ -1290,6 +1290,7 @@
             startCrossfade(prevAudio, nextAudio, useCrossfade && !userSettings.directAudio);
 
             activeAudio = nextAudio;
+            nextTrackTriggered = false;  // nouvelle piste active → on ré-autorise l'avance auto
 
             setupMediaSession(nextTrack); fetchLyrics(nextTrack, nextTrack.performer ? nextTrack.performer.name : 'Artiste');
 
