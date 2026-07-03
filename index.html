@@ -662,6 +662,7 @@
         // Optimization: Cache lyrics elements
         let lyricsElements = [];
         let lastLyricsUpdate = 0;
+        let lastUiUpdate = 0;
 
         // Translation State
         let originalLyricsData = [];
@@ -1097,6 +1098,26 @@
         let currentLoadId = 0;
         let currentHistorySaveState = { id: null, saved: false };
 
+        // Charge une piste Tidal (par ID Tidal) dans une instance Shaka (FLAC DASH, segments proxifiés).
+        async function loadTidalIntoShaka(shakaInstance, tidalId) {
+            const mres = await fetch(`${API_BASE}/tidal_manifest/${tidalId}`);
+            if (!mres.ok) throw new Error("tidal_manifest HTTP " + mres.status);
+            const md = await mres.json();
+            if (md.mimeType !== 'application/dash+xml') throw new Error("Tidal: pas de manifeste DASH");
+            // Pas de DRM ; Shaka patient (le proxy ajoute de la latence).
+            shakaInstance.configure({
+                drm: { clearKeys: {} },
+                streaming: {
+                    // Gros tampon : Shaka garde ~40 s d'avance en mémoire, donc une saturation
+                    // passagère du thread principal (PC chargé) ne vide pas le buffer → pas de coupure.
+                    rebufferingGoal: 4, bufferingGoal: 40, bufferBehind: 30, stallEnabled: false,
+                    retryParameters: { maxAttempts: 8, baseDelay: 500, backoffFactor: 2, fuzzFactor: 0.5, timeout: 60000, stallTimeout: 0, connectionTimeout: 0 }
+                },
+                manifest: { retryParameters: { maxAttempts: 5, baseDelay: 500, backoffFactor: 2, timeout: 40000 } }
+            });
+            await shakaInstance.load('data:application/dash+xml;base64,' + md.manifest);
+        }
+
         async function loadTrack(index, autoPlay = true, useCrossfade = true) {
             if (index < 0 || index >= tracks.length) return;
 
@@ -1223,38 +1244,41 @@
             else if (nextTrack.source === 'tidal_hund') {
                 await nextShaka.unload();
                 try {
-                    const res = await fetch(`${API_BASE}/tidal_manifest/${nextTrack.id}`);
+                    await loadTidalIntoShaka(nextShaka, nextTrack.id);
                     if (thisLoadId !== currentLoadId) return;
-                    if (!res.ok) throw new Error("tidal_manifest HTTP " + res.status);
-                    const manifestData = await res.json();
-                    if (manifestData.mimeType === 'application/dash+xml') {
-                        // Pas de DRM. Le proxy Tidal ajoute de la latence (le serveur récupère
-                        // chaque segment) → on rend Shaka très patient : longs timeouts + retries,
-                        // et on ne coupe jamais sur un ralentissement réseau.
-                        nextShaka.configure({
-                            drm: { clearKeys: {} },
-                            streaming: {
-                                rebufferingGoal: 2, bufferingGoal: 12, bufferBehind: 30,
-                                stallEnabled: false,
-                                retryParameters: { maxAttempts: 8, baseDelay: 500, backoffFactor: 2, fuzzFactor: 0.5, timeout: 60000, stallTimeout: 0, connectionTimeout: 0 }
-                            },
-                            manifest: {
-                                retryParameters: { maxAttempts: 5, baseDelay: 500, backoffFactor: 2, timeout: 40000 }
-                            }
-                        });
-                        await nextShaka.load('data:application/dash+xml;base64,' + manifestData.manifest);
-                        console.log("✅ Loaded Tidal (FLAC DASH) for:", nextTrack.title);
-                    } else if (manifestData.url) {
-                        nextAudio.src = manifestData.url;
-                    } else {
-                        throw new Error("No Tidal manifest");
-                    }
+                    console.log("✅ Loaded Tidal (FLAC DASH) for:", nextTrack.title);
                 } catch (e) {
                     console.error("Tidal Load Error", e);
                     if (thisLoadId !== currentLoadId) return;
                     showToast(`❌ Tidal indisponible pour ce titre : ${nextTrack.title}`);
                     document.getElementById('playIcon').className = 'fas fa-exclamation-triangle';
                     return;  // surtout PAS de repli Qobuz
+                }
+            }
+            // Gestion Source QOBUZ : Qobuz est en pause → on joue via TIDAL en résolvant par
+            // métadonnées (ISRC/titre+artiste). On NE touche PAS l'objet piste : ni l'ID, ni la
+            // source, ni l'image, et on NE sauvegarde RIEN (les favoris restent intacts).
+            else if (nextTrack.source === 'qobuz') {
+                await nextShaka.unload();
+                try {
+                    const artist = nextTrack.performer ? nextTrack.performer.name : (nextTrack.artist ? nextTrack.artist.name : 'Inconnu');
+                    const p = new URLSearchParams({ title: nextTrack.title || '', artist });
+                    if (nextTrack.isrc) p.set('isrc', nextTrack.isrc);
+                    const res = await fetch(`${API_BASE}/resolve_metadata?${p}`);
+                    if (thisLoadId !== currentLoadId) return;
+                    if (!res.ok) throw new Error("resolve HTTP " + res.status);
+                    const meta = await res.json();
+                    if (meta.source !== 'tidal_hund' || !meta.id) throw new Error("Pas trouvé sur Tidal");
+                    // On lit l'audio Tidal SANS modifier nextTrack (image/titre/favori conservés)
+                    await loadTidalIntoShaka(nextShaka, meta.id);
+                    if (thisLoadId !== currentLoadId) return;
+                    console.log("✅ Favori Qobuz joué via Tidal :", nextTrack.title);
+                } catch (e) {
+                    console.error("Qobuz→Tidal Load Error", e);
+                    if (thisLoadId !== currentLoadId) return;
+                    showToast(`❌ Indisponible sur Tidal : ${nextTrack.title}`);
+                    document.getElementById('playIcon').className = 'fas fa-exclamation-triangle';
+                    return;
                 }
             } else {
                 // Standard Track (URL directe)
@@ -1471,9 +1495,10 @@
             const track = tracks[index];
             if (!track) return;
 
-            // Tidal : jamais de repli Qobuz/Deezer — un titre Tidal se lit en Tidal ou pas du tout
-            if (track.source === 'tidal_hund') {
-                showToast(`❌ Tidal indisponible pour ce titre : ${track.title}`);
+            // Tidal (et favoris Qobuz joués via Tidal) : PAS de repli/réparation/sauvegarde.
+            // On ne touche jamais au favori (ni image, ni source en base). Juste un message.
+            if (track.source === 'tidal_hund' || track.source === 'qobuz') {
+                showToast(`❌ Indisponible sur Tidal : ${track.title}`);
                 document.getElementById('playIcon').className = 'fas fa-exclamation-triangle';
                 return;
             }
@@ -1613,9 +1638,14 @@
                     }
                 }
                 if (audioObj === activeAudio && !document.hidden) {
-                    let d = audioObj.duration; if ((!d || !isFinite(d)) && tracks[currentIndex] && tracks[currentIndex].duration) d = tracks[currentIndex].duration;
-                    if (d && isFinite(d)) { document.getElementById('progressFill').style.width = (audioObj.currentTime / d) * 100 + '%'; }
-                    document.getElementById('currTime').innerText = fmtTime(audioObj.currentTime);
+                    // On limite les écritures DOM (barre + temps) à ~4/s pour alléger le thread principal
+                    const _nowUi = Date.now();
+                    if (_nowUi - lastUiUpdate > 250) {
+                        lastUiUpdate = _nowUi;
+                        let d = audioObj.duration; if ((!d || !isFinite(d)) && tracks[currentIndex] && tracks[currentIndex].duration) d = tracks[currentIndex].duration;
+                        if (d && isFinite(d)) { document.getElementById('progressFill').style.width = (audioObj.currentTime / d) * 100 + '%'; }
+                        document.getElementById('currTime').innerText = fmtTime(audioObj.currentTime);
+                    }
 
                     // HISTORIQUE 10s CHECK
                     // Si on a écouté plus de 10s et qu'on n'a pas encore sauvegardé
