@@ -1224,8 +1224,20 @@
                     if (!res.ok) throw new Error("tidal_manifest HTTP " + res.status);
                     const manifestData = await res.json();
                     if (manifestData.mimeType === 'application/dash+xml') {
-                        // Pas de DRM ; démarrage rapide (on réinitialise un éventuel ClearKey Amazon)
-                        nextShaka.configure({ drm: { clearKeys: {} }, streaming: { rebufferingGoal: 1.5, bufferingGoal: 8, bufferBehind: 30 } });
+                        // Pas de DRM. Le proxy Tidal ajoute de la latence (le serveur récupère
+                        // chaque segment) → on rend Shaka très patient : longs timeouts + retries,
+                        // et on ne coupe jamais sur un ralentissement réseau.
+                        nextShaka.configure({
+                            drm: { clearKeys: {} },
+                            streaming: {
+                                rebufferingGoal: 2, bufferingGoal: 12, bufferBehind: 30,
+                                stallEnabled: false,
+                                retryParameters: { maxAttempts: 8, baseDelay: 500, backoffFactor: 2, fuzzFactor: 0.5, timeout: 60000, stallTimeout: 0, connectionTimeout: 0 }
+                            },
+                            manifest: {
+                                retryParameters: { maxAttempts: 5, baseDelay: 500, backoffFactor: 2, timeout: 40000 }
+                            }
+                        });
                         await nextShaka.load('data:application/dash+xml;base64,' + manifestData.manifest);
                         console.log("✅ Loaded Tidal (FLAC DASH) for:", nextTrack.title);
                     } else if (manifestData.url) {
@@ -2109,16 +2121,12 @@
             const currentTrack = tracks[currentIndex];
             if (!currentTrackId || !currentTrack) return;
 
-            // Signature unique (Titre|Artiste) pour identifier la même chanson
-            // même si l'ID a changé (fallback) ou si vient d'une plateforme différente
-            const currentSig = getTrackSignature(currentTrack);
-
-            // 2. Recherche et marquage des éléments correspondants (par ID ou Signature)
+            // 2. Marquage UNIQUEMENT par l'ID du titre écouté (pas par titre/artiste),
+            // sinon plusieurs cartes du même titre s'allument en même temps.
             document.querySelectorAll('.track-card, .track-row').forEach(el => {
                 const elId = el.dataset.id;
-                const elSig = el.dataset.sig;
 
-                if (elId === String(currentTrackId) || (elSig && elSig === currentSig)) {
+                if (elId === String(currentTrackId)) {
                     if (el.classList.contains('track-card')) {
                         el.classList.add('active-track');
                         if (!el.querySelector('.playing-indicator')) {
