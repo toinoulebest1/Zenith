@@ -677,7 +677,7 @@
         let compressor;
 
         // --- NEW: DIRECT AUDIO SETTING ---
-        let userSettings = { limiter: false, crossfade: 0, magic: true, eco: false, directAudio: false };
+        let userSettings = { limiter: false, crossfade: 0, magic: true, eco: false, directAudio: true };
         let magicEnabled = true;
 
         let favorites = [];
@@ -708,8 +708,8 @@
         }
 
         function applySettings(settings) {
-            // DIRECT AUDIO LOGIC
-            const isDirect = (settings.directAudio === true || settings.directAudio === 'true');
+            // DIRECT AUDIO LOGIC — FORCÉ pour tout le monde (lecture sans coupure), sans exception
+            const isDirect = true;
             userSettings.directAudio = isDirect;
             document.getElementById('settingDirectAudio').checked = isDirect;
 
@@ -796,7 +796,7 @@
             const sXfade = localStorage.getItem('zenith_pref_crossfade'); if (sXfade !== null) userSettings.crossfade = parseInt(sXfade);
             const sMagic = localStorage.getItem('zenith_pref_magic'); if (sMagic !== null) userSettings.magic = (sMagic === 'true');
             const sEco = localStorage.getItem('zenith_pref_eco'); if (sEco !== null) userSettings.eco = (sEco === 'true');
-            const sDirect = localStorage.getItem('zenith_pref_directAudio'); if (sDirect !== null) userSettings.directAudio = (sDirect === 'true');
+            userSettings.directAudio = true;  // Direct Audio forcé pour tout le monde (lecture fluide)
 
             applySettings(userSettings);
         }

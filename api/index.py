@@ -75,6 +75,8 @@ TIDAL_HUND_BASE = "https://api.monochrome.tf"
 # uniquement côté serveur ; l'audio est proxifié, le navigateur n'y touche jamais).
 TIDAL_HIFI_BASE = os.getenv('TIDAL_HIFI_BASE', "http://rgoggwgg0ws4ks0gogw8o0s8.46.224.72.133.sslip.io")
 TIDAL_HIFI_KEY = os.getenv('TIDAL_HIFI_KEY', "")
+# Qualité de lecture Tidal : 24 bits hi-res par défaut.
+TIDAL_QUALITY = os.getenv('TIDAL_QUALITY', 'HI_RES_LOSSLESS')
 
 # MODE DEBUG : Qobuz en pause, la recherche ne renvoie QUE des titres Tidal (pour
 # isoler/analyser la lecture Tidal). Remettre à False pour réactiver toutes les sources.
@@ -3078,7 +3080,7 @@ def _tidal_resolve_mpd(track_id):
         return c['mpd']
     try:
         r = requests.get(f"{TIDAL_HIFI_BASE.rstrip('/')}/track/",
-                         params={'id': track_id, 'quality': 'HI_RES_LOSSLESS'},
+                         params={'id': track_id, 'quality': TIDAL_QUALITY},
                          headers=_tidal_headers(), timeout=20)
         if r.status_code != 200:
             logger.warning(f"[Tidal] track {track_id} -> {r.status_code}: {r.text[:120]}")
