@@ -1107,6 +1107,9 @@
             // Pas de DRM ; Shaka patient (le proxy ajoute de la latence).
             shakaInstance.configure({
                 drm: { clearKeys: {} },
+                // Bitrate adaptatif : démarre en 24-bit (estimation haute) et ne descend en 16-bit/AAC
+                // que si la connexion/CPU ne suit pas → qualité max SANS jamais couper.
+                abr: { enabled: true, defaultBandwidthEstimate: 5000000, restrictToElementSize: false },
                 streaming: {
                     // Gros tampon : Shaka garde ~40 s d'avance en mémoire, donc une saturation
                     // passagère du thread principal (PC chargé) ne vide pas le buffer → pas de coupure.

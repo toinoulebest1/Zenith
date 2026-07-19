@@ -73,7 +73,7 @@ TIDAL_HUND_BASE = "https://api.monochrome.tf"
 
 # API Tidal hifi-api (recherche + lecture). Instance auto-hébergée (HTTP → appelée
 # uniquement côté serveur ; l'audio est proxifié, le navigateur n'y touche jamais).
-TIDAL_HIFI_BASE = os.getenv('TIDAL_HIFI_BASE', "http://rgoggwgg0ws4ks0gogw8o0s8.46.224.72.133.sslip.io")
+TIDAL_HIFI_BASE = os.getenv('TIDAL_HIFI_BASE', "http://k9zejj70jg59p0qeo95lzpel.46.224.72.133.sslip.io")
 TIDAL_HIFI_KEY = os.getenv('TIDAL_HIFI_KEY', "")
 # Qualité de lecture Tidal : 24 bits hi-res par défaut.
 TIDAL_QUALITY = os.getenv('TIDAL_QUALITY', 'HI_RES_LOSSLESS')
@@ -3074,27 +3074,53 @@ async def get_amazon_stream_info_route(asin: str):
 _tidal_mpd_cache: dict = {}   # track_id -> {'mpd', 'ts'}
 TIDAL_MPD_TTL = 15 * 60
 
-def _tidal_resolve_mpd(track_id):
-    c = _tidal_mpd_cache.get(track_id)
-    if c and (time.time() - c['ts']) < TIDAL_MPD_TTL:
-        return c['mpd']
+# Formats demandés pour le manifeste adaptatif (SANS Atmos EAC3_JOC, non lisible en navigateur).
+# Ordre = 24 bits FLAC → 16 bits FLAC → AAC : Shaka joue le meilleur tenable, descend au lieu de couper.
+TIDAL_ADAPTIVE_FORMATS = os.getenv('TIDAL_ADAPTIVE_FORMATS', 'FLAC_HIRES,FLAC,AACLC,HEAACV1')
+
+def _tidal_resolve_mpd_single(track_id):
+    """Repli : manifeste mono-qualité via /track (une seule représentation)."""
     try:
         r = requests.get(f"{TIDAL_HIFI_BASE.rstrip('/')}/track/",
                          params={'id': track_id, 'quality': TIDAL_QUALITY},
                          headers=_tidal_headers(), timeout=20)
         if r.status_code != 200:
-            logger.warning(f"[Tidal] track {track_id} -> {r.status_code}: {r.text[:120]}")
             return None
         d = (r.json() or {}).get('data') or {}
         if 'dash' not in (d.get('manifestMimeType') or ''):
-            logger.info(f"[Tidal] {track_id}: manifest {d.get('manifestMimeType')} non géré")
             return None
-        mpd = base64.b64decode(d.get('manifest', '')).decode('utf-8', 'replace')
-        _tidal_mpd_cache[track_id] = {'mpd': mpd, 'ts': time.time()}
-        return mpd
+        return base64.b64decode(d.get('manifest', '')).decode('utf-8', 'replace')
     except Exception as e:
-        logger.error(f"[Tidal] resolve {track_id}: {e}")
+        logger.error(f"[Tidal] resolve single {track_id}: {e}")
         return None
+
+def _tidal_resolve_mpd(track_id):
+    """Manifeste DASH ADAPTATIF (plusieurs qualités : 24/16 bits FLAC + AAC) via /trackManifests.
+    Shaka choisit la meilleure qualité tenable et descend au lieu de couper. Repli /track."""
+    c = _tidal_mpd_cache.get(track_id)
+    if c and (time.time() - c['ts']) < TIDAL_MPD_TTL:
+        return c['mpd']
+    mpd = None
+    try:
+        r = requests.get(f"{TIDAL_HIFI_BASE.rstrip('/')}/trackManifests/",
+                         params={'id': track_id, 'formats': TIDAL_ADAPTIVE_FORMATS,
+                                 'adaptive': 'true', 'manifestType': 'MPEG_DASH', 'uriScheme': 'DATA'},
+                         headers=_tidal_headers(), timeout=20)
+        if r.status_code == 200:
+            attrs = (((r.json() or {}).get('data') or {}).get('data') or {}).get('attributes') or {}
+            uri = attrs.get('uri', '') or ''
+            if uri.startswith('data:') and 'base64,' in uri:
+                mpd = base64.b64decode(uri.split('base64,', 1)[1]).decode('utf-8', 'replace')
+        else:
+            logger.warning(f"[Tidal] trackManifests {track_id} -> {r.status_code}")
+    except Exception as e:
+        logger.warning(f"[Tidal] trackManifests {track_id}: {e}")
+    # Repli sur la version mono-qualité si l'adaptatif échoue
+    if not mpd:
+        mpd = _tidal_resolve_mpd_single(track_id)
+    if mpd:
+        _tidal_mpd_cache[track_id] = {'mpd': mpd, 'ts': time.time()}
+    return mpd
 
 @app.get('/tidal_manifest/{track_id}')
 async def get_tidal_manifest_route(track_id: str):
