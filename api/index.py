@@ -62,10 +62,10 @@ except ImportError:
 # --- CONFIGURATION (chargée depuis .env ou variables d'environnement) ---
 # Identifiants Qobuz officiels. Le token est lié à l'app_id : app_id + secret + token
 # doivent être cohérents. Surcharge possible via variables d'environnement.
-USER_ID      = os.getenv('QOBUZ_USER_ID', '3317884')
-TOKEN        = os.getenv('QOBUZ_TOKEN', 'N-6BS7eXzhLLp2hyeyIpL7kb-1XxiKV3W-wRVHPFzT3KaZCXVMv8-66tCb4y40-NwwGkGz10lqjlkLyo3rS6iA')
-APP_ID       = os.getenv('QOBUZ_APP_ID', '798273057')
-QOBUZ_SECRET = os.getenv('QOBUZ_SECRET', 'abb21364945c0583309667d13ca3d93a')
+USER_ID      = os.getenv('QOBUZ_USER_ID', '2759740')
+TOKEN        = os.getenv('QOBUZ_TOKEN', 'nIZdVRJBsPsaKMPCl1Mmy_X-A6fE82BHBJRw2omHJjjD8MvVjdotB3uPBxfHn6J9yXY6pjb9s5yNUEe-0h92ww')
+APP_ID       = os.getenv('QOBUZ_APP_ID', '950096963')
+QOBUZ_SECRET = os.getenv('QOBUZ_SECRET', '979549437fcc4a3faad4867b5cd25dcb')
 
 TIDAL_HUND_BASE = "https://api.monochrome.tf"
 
@@ -78,9 +78,9 @@ TIDAL_HIFI_KEY = os.getenv('TIDAL_HIFI_KEY', "")
 # Qualité de lecture Tidal : 24 bits hi-res par défaut.
 TIDAL_QUALITY = os.getenv('TIDAL_QUALITY', 'HI_RES_LOSSLESS')
 
-# MODE DEBUG : Qobuz en pause, la recherche ne renvoie QUE des titres Tidal (pour
-# isoler/analyser la lecture Tidal). Remettre à False pour réactiver toutes les sources.
-TIDAL_ONLY_MODE = os.getenv('TIDAL_ONLY_MODE', '1') == '1'
+# MODE DEBUG : si activé, la recherche ne renvoie QUE du Tidal et Qobuz/Deezer sont coupés.
+# Désactivé : toutes les sources (Qobuz + Deezer + Amazon + Tidal) avec priorité qualité.
+TIDAL_ONLY_MODE = os.getenv('TIDAL_ONLY_MODE', '0') == '1'
 
 # Credentials Tidal chargés uniquement depuis les variables d'environnement ou token.json
 FALLBACK_TIDAL_CREDENTIALS = {

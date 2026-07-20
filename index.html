@@ -1258,32 +1258,7 @@
                     return;  // surtout PAS de repli Qobuz
                 }
             }
-            // Gestion Source QOBUZ : Qobuz est en pause → on joue via TIDAL en résolvant par
-            // métadonnées (ISRC/titre+artiste). On NE touche PAS l'objet piste : ni l'ID, ni la
-            // source, ni l'image, et on NE sauvegarde RIEN (les favoris restent intacts).
-            else if (nextTrack.source === 'qobuz') {
-                await nextShaka.unload();
-                try {
-                    const artist = nextTrack.performer ? nextTrack.performer.name : (nextTrack.artist ? nextTrack.artist.name : 'Inconnu');
-                    const p = new URLSearchParams({ title: nextTrack.title || '', artist });
-                    if (nextTrack.isrc) p.set('isrc', nextTrack.isrc);
-                    const res = await fetch(`${API_BASE}/resolve_metadata?${p}`);
-                    if (thisLoadId !== currentLoadId) return;
-                    if (!res.ok) throw new Error("resolve HTTP " + res.status);
-                    const meta = await res.json();
-                    if (meta.source !== 'tidal_hund' || !meta.id) throw new Error("Pas trouvé sur Tidal");
-                    // On lit l'audio Tidal SANS modifier nextTrack (image/titre/favori conservés)
-                    await loadTidalIntoShaka(nextShaka, meta.id);
-                    if (thisLoadId !== currentLoadId) return;
-                    console.log("✅ Favori Qobuz joué via Tidal :", nextTrack.title);
-                } catch (e) {
-                    console.error("Qobuz→Tidal Load Error", e);
-                    if (thisLoadId !== currentLoadId) return;
-                    showToast(`❌ Indisponible sur Tidal : ${nextTrack.title}`);
-                    document.getElementById('playIcon').className = 'fas fa-exclamation-triangle';
-                    return;
-                }
-            } else {
+            else {
                 // Standard Track (URL directe)
                 await nextShaka.unload();
 
@@ -1498,10 +1473,9 @@
             const track = tracks[index];
             if (!track) return;
 
-            // Tidal (et favoris Qobuz joués via Tidal) : PAS de repli/réparation/sauvegarde.
-            // On ne touche jamais au favori (ni image, ni source en base). Juste un message.
-            if (track.source === 'tidal_hund' || track.source === 'qobuz') {
-                showToast(`❌ Indisponible sur Tidal : ${track.title}`);
+            // Tidal : jamais de repli/réparation Qobuz — un titre Tidal se lit en Tidal ou pas du tout.
+            if (track.source === 'tidal_hund') {
+                showToast(`❌ Tidal indisponible pour ce titre : ${track.title}`);
                 document.getElementById('playIcon').className = 'fas fa-exclamation-triangle';
                 return;
             }
