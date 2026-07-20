@@ -1927,7 +1927,6 @@ async def search_tracks(q: str, type: str = 'all'):
     if type in ['track', 'all']:
         tasks.append(run_in_threadpool(sync_qobuz_search, q, 50, 'track'))
         tasks.append(run_in_threadpool(sync_search_deezer_tracks, q, 25))
-        tasks.append(run_in_threadpool(sync_search_amazon, q, 15))
         tasks.append(run_in_threadpool(sync_search_tidal, q, 25))
     if type in ['album', 'all']:
         tasks.append(run_in_threadpool(sync_qobuz_search, q, 15, 'album'))
@@ -1944,7 +1943,6 @@ async def search_tracks(q: str, type: str = 'all'):
     if type in ['track', 'all']:
         r1 = finished[idx]; idx += 1; qobuz_tracks = r1 if isinstance(r1, list) else []
         r2 = finished[idx]; idx += 1; deezer_tracks = r2 if isinstance(r2, list) else []
-        r3 = finished[idx]; idx += 1; amazon_tracks = r3 if isinstance(r3, list) else []
         r3b = finished[idx]; idx += 1; tidal_tracks = r3b if isinstance(r3b, list) else []
     if type in ['album', 'all']:
         r4 = finished[idx]; idx += 1; qobuz_albums = r4 if isinstance(r4, list) else []
@@ -1969,12 +1967,8 @@ async def search_tracks(q: str, type: str = 'all'):
 
         return f"{t}|{p}"
 
-    # PRIORITÉ QUALITÉ : pour les doublons, on compare Qobuz / Amazon / Tidal et on
-    # affiche la source de meilleure qualité (bit depth puis échantillonnage).
-    # Tidal : qualité connue dès la recherche (tags). Amazon : résolue via le mirror (bornée).
-    amazon_by_sig = {}
-    for t in amazon_tracks:
-        amazon_by_sig.setdefault(get_dedup_sig(t), t)
+    # PRIORITÉ QUALITÉ : pour les doublons, on compare Qobuz / Tidal (qualité connue dès la
+    # recherche via les tags) et on affiche la source de meilleure qualité.
     tidal_by_sig = {}
     for t in tidal_tracks:
         tidal_by_sig.setdefault(get_dedup_sig(t), t)
@@ -1986,16 +1980,6 @@ async def search_tracks(q: str, type: str = 'all'):
         try: sr = float(t.get('maximum_sampling_rate') or 44.1) * 1000
         except: sr = 44100.0
         return (bd, sr)
-
-    # Amazon : résolution qualité bornée (réseau) uniquement pour les doublons Qobuz
-    dup_asins = list(dict.fromkeys(
-        amazon_by_sig[s]['id'] for s in qobuz_sigs if s in amazon_by_sig))[:6]
-    amz_q = {}
-    if dup_asins:
-        res = await asyncio.gather(*[run_in_threadpool(_amz_quality, a) for a in dup_asins],
-                                   return_exceptions=True)
-        for a, q in zip(dup_asins, res):
-            amz_q[a] = q if isinstance(q, tuple) else (0, 0)
 
     def _has_cover(tr):
         img = ((tr.get('album') or {}).get('image') or {}).get('large') or ''
@@ -2012,12 +1996,6 @@ async def search_tracks(q: str, type: str = 'all'):
             tq = _track_q(tid)
             if tq > best_q:
                 chosen = dict(tid); best_q = tq
-        # Amazon (qualité résolue)
-        amz = amazon_by_sig.get(s)
-        if amz:
-            aq = amz_q.get(amz['id'], (0, 0))
-            if aq[0] > 0 and aq > best_q:
-                chosen = dict(amz); chosen['maximum_bit_depth'] = aq[0]; best_q = aq
         # Si on a changé de source et que la nouvelle n'a pas de pochette, garder celle de Qobuz
         if chosen is not t and not _has_cover(chosen) and _has_cover(t):
             chosen.setdefault('album', {}).setdefault('image', {})['large'] = t['album']['image']['large']
@@ -2031,14 +2009,7 @@ async def search_tracks(q: str, type: str = 'all'):
             combined_tracks.append(t)
             sigs.add(s)
 
-    # Insertion Amazon (titres absents de Qobuz/Deezer ; lecture FLAC ClearKey)
-    for t in amazon_tracks:
-        s = get_dedup_sig(t)
-        if s not in sigs:
-            combined_tracks.append(t)
-            sigs.add(s)
-
-    # Insertion Tidal (titres absents ailleurs ; lecture non câblée pour l'instant)
+    # Insertion Tidal (titres absents ailleurs)
     for t in tidal_tracks:
         s = get_dedup_sig(t)
         if s not in sigs:
