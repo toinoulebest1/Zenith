@@ -581,27 +581,85 @@ def sync_search_tidal(query, limit=25):
             break
     return out
 
-def _tidal_resolve_one(title, artist, isrc=None):
-    """Cherche un titre sur Tidal (ISRC prioritaire, sinon titre+artiste) → 'tidal_hund'."""
-    base = TIDAL_HIFI_BASE.rstrip('/')
-    # 1. ISRC (plus fiable)
+# --- CACHE DE RÉSOLUTION (clé = isrc, sinon titre|artiste) ---
+# Une piste déjà résolue (favori rejoué, radio, retour arrière, autre utilisateur…) est
+# renvoyée instantanément sans aucun appel réseau. Le cache négatif évite de refaire
+# 4 appels pour un titre qu'on sait introuvable.
+# Pool partagé pour les résolutions : permet de lancer 2 recherches en parallèle et de
+# RENDRE LA MAIN dès que la meilleure (ISRC) a répondu, sans attendre l'autre.
+_RESOLVE_POOL = ThreadPoolExecutor(max_workers=12, thread_name_prefix='resolve')
+
+_resolve_cache: dict = {}          # key -> (result_or_None, ts)
+RESOLVE_CACHE_TTL = 30 * 60
+RESOLVE_NEG_TTL = 3 * 60
+RESOLVE_CACHE_MAX = 500
+_resolve_locks: dict = {}
+_resolve_locks_guard = threading.Lock()
+
+def _resolve_key(title, artist, isrc):
     if isrc:
+        return f"isrc:{isrc.upper()}"
+    return f"ta:{clean_string(title or '')}|{clean_string(artist or '')}"
+
+def _resolve_cache_get(key):
+    hit = _resolve_cache.get(key)
+    if not hit:
+        return (False, None)
+    res, ts = hit
+    ttl = RESOLVE_CACHE_TTL if res else RESOLVE_NEG_TTL
+    if (time.time() - ts) < ttl:
+        return (True, res)
+    return (False, None)
+
+def _resolve_cache_put(key, res):
+    if len(_resolve_cache) >= RESOLVE_CACHE_MAX:
         try:
-            r = HTTP.get(f"{base}/search/", params={'i': isrc, 'limit': 1},
-                             headers=_tidal_headers(), timeout=10)
-            items = (r.json().get('data') or {}).get('items', []) or []
-            if items:
-                return _tidal_track_obj(items[0])
+            del _resolve_cache[min(_resolve_cache, key=lambda k: _resolve_cache[k][1])]
         except Exception:
-            pass
-    # 2. Titre + artiste
+            _resolve_cache.clear()
+    _resolve_cache[key] = (res, time.time())
+
+def _tidal_search_one(params):
+    """Un appel de recherche Tidal → 1er résultat mappé, ou None."""
     try:
-        r = HTTP.get(f"{base}/search/", params={'s': f"{title} {artist}".strip(), 'limit': 1},
-                         headers=_tidal_headers(), timeout=10)
+        r = HTTP.get(f"{TIDAL_HIFI_BASE.rstrip('/')}/search/", params={**params, 'limit': 1},
+                     headers=_tidal_headers(), timeout=10)
         items = (r.json().get('data') or {}).get('items', []) or []
         return _tidal_track_obj(items[0]) if items else None
     except Exception:
         return None
+
+def _tidal_resolve_one(title, artist, isrc=None):
+    """Cherche un titre sur Tidal (ISRC prioritaire, sinon titre+artiste) → 'tidal_hund'.
+    Les deux recherches partent EN PARALLÈLE + résultat mis en cache (instantané ensuite)."""
+    key = 'tidal:' + _resolve_key(title, artist, isrc)
+    found, cached = _resolve_cache_get(key)
+    if found:
+        return cached
+    with _resolve_locks_guard:
+        lock = _resolve_locks.setdefault(key, threading.Lock())
+    with lock:
+        found, cached = _resolve_cache_get(key)
+        if found:
+            return cached
+        has_ta = bool(title and artist)
+        res = None
+        if isrc and has_ta:
+            # Les 2 recherches partent ensemble ; on rend la main dès que l'ISRC (le plus
+            # fiable) a répondu — on n'attend le titre/artiste QUE si l'ISRC n'a rien donné.
+            f_i = _RESOLVE_POOL.submit(_tidal_search_one, {'i': isrc})
+            f_t = _RESOLVE_POOL.submit(_tidal_search_one, {'s': f"{title} {artist}".strip()})
+            try: res = f_i.result()
+            except Exception: res = None
+            if not res:
+                try: res = f_t.result()
+                except Exception: res = None
+        elif isrc:
+            res = _tidal_search_one({'i': isrc})
+        elif has_ta:
+            res = _tidal_search_one({'s': f"{title} {artist}".strip()})
+        _resolve_cache_put(key, res)
+        return res
 
 def _tidal_native_radio(title, artist, limit=25):
     """Radio native Tidal (recommandations de la piste seed). Repli si YouTube échoue."""
@@ -1745,61 +1803,100 @@ def sync_search_artist_full(name):
         logger.error(f"Deezer Artist Full Error: {e}")
         return None
 
+
+def _qobuz_pick_by_isrc(isrc):
+    """Recherche Qobuz par ISRC → 1er titre dont l'ISRC correspond exactement."""
+    try:
+        for rec in sync_qobuz_search(isrc, limit=10, type='track'):
+            if rec.get('isrc', '').upper() == isrc.upper():
+                rec['source'] = 'qobuz'
+                fix_qobuz_title(rec)
+                img = rec.get('album', {}).get('image', {}).get('large')
+                if img:
+                    rec['album']['image']['large'] = img.replace('_300', '_600')
+                return rec
+    except Exception as e:
+        logger.warning(f"[Resolve] ISRC search failed: {e}")
+    return None
+
+def _qobuz_pick_by_ta(title, artist):
+    """Recherche Qobuz par titre+artiste avec correspondance floue."""
+    target_artist = clean_string(artist); target_title = clean_string(title)
+    try:
+        for rec in sync_qobuz_search(f"{title} {artist}", limit=5):
+            rec_title = clean_string(rec['title'])
+            rec_artist = clean_string(rec.get('performer', {}).get('name', ''))
+            if FUZZ_AVAILABLE:
+                ok_a = fuzz.ratio(target_artist, rec_artist) > 65
+            else:
+                ok_a = target_artist in rec_artist or rec_artist in target_artist
+            if not ok_a:
+                continue
+            if FUZZ_AVAILABLE:
+                ok_t = fuzz.ratio(target_title, rec_title) > 60
+            else:
+                ok_t = target_title in rec_title or rec_title in target_title
+            if ok_t:
+                rec['source'] = 'qobuz'
+                img = rec.get('album', {}).get('image', {}).get('large')
+                if img:
+                    rec['album']['image']['large'] = img.replace('_300', '_600')
+                return rec
+    except Exception:
+        pass
+    return None
+
 def sync_resolve_track(title, artist, isrc=None):
-    """
-    Recherche le titre sur Qobuz (alt API).
-    Si un ISRC est fourni, il est utilisé en priorité (plus fiable que titre+artiste).
-    """
-    # 1. Recherche par ISRC (priorité absolue - identifiant unique)
-    if isrc:
-        try:
-            items = sync_qobuz_search(isrc, limit=10, type='track')
-            for rec in items:
-                if rec.get('isrc', '').upper() == isrc.upper():
-                    rec['source'] = 'qobuz'
-                    fix_qobuz_title(rec)
-                    if rec.get('album', {}).get('image', {}).get('large'):
-                        rec['album']['image']['large'] = rec['album']['image']['large'].replace('_300', '_600')
-                    logger.info(f"[Resolve] ISRC match: {isrc} → qobuz:{rec['id']}")
-                    return rec
-        except Exception as e:
-            logger.warning(f"[Resolve] ISRC search failed: {e}")
+    """Résolution rapide : cache → recherches Qobuz (ISRC + titre/artiste) EN PARALLÈLE
+    → repli Deezer. L'ISRC reste prioritaire s'il matche."""
+    key = _resolve_key(title, artist, isrc)
+    found, cached = _resolve_cache_get(key)
+    if found:
+        return cached
+    # Single-flight : une seule résolution réseau par clé, même si N requêtes arrivent
+    with _resolve_locks_guard:
+        lock = _resolve_locks.setdefault(key, threading.Lock())
+    with lock:
+        found, cached = _resolve_cache_get(key)
+        if found:
+            return cached
+        res = _resolve_track_uncached(title, artist, isrc)
+        _resolve_cache_put(key, res)
+        return res
+
+def _resolve_track_uncached(title, artist, isrc=None):
+    has_ta = bool(title and artist)
+
+    # 1+2. ISRC et titre+artiste lancés EN PARALLÈLE. On rend la main dès que l'ISRC répond
+    # (le plus fiable) ; on n'attend le second QUE s'il n'a rien donné → pas de temps perdu.
+    rec_isrc = rec_ta = None
+    if isrc and has_ta:
+        f_isrc = _RESOLVE_POOL.submit(_qobuz_pick_by_isrc, isrc)
+        f_ta = _RESOLVE_POOL.submit(_qobuz_pick_by_ta, title, artist)
+        try: rec_isrc = f_isrc.result()
+        except Exception: pass
+        if not rec_isrc:
+            try: rec_ta = f_ta.result()
+            except Exception: pass
+    elif isrc:
+        rec_isrc = _qobuz_pick_by_isrc(isrc)
+    elif has_ta:
+        rec_ta = _qobuz_pick_by_ta(title, artist)
+
+    if rec_isrc:
+        logger.info(f"[Resolve] ISRC match: {isrc} → qobuz:{rec_isrc['id']}")
+        return rec_isrc
+    if rec_ta:
+        return rec_ta
 
     # Si pas de titre/artiste : tenter Deezer par ISRC puis abandonner
-    if not title or not artist:
+    if not has_ta:
         if DEEZER_FALLBACK_ENABLED and isrc:
             try:
                 dz = sync_deezer_lookup(None, None, isrc)
                 if dz: return dz
             except Exception: pass
         return None
-
-    target_artist = clean_string(artist)
-    target_title = clean_string(title)
-
-    # 2. Recherche Qobuz par titre+artiste
-    try:
-        items = sync_qobuz_search(f"{title} {artist}", limit=5)
-        for rec in items:
-            rec_title = clean_string(rec['title'])
-            rec_artist = clean_string(rec.get('performer', {}).get('name', ''))
-            match_artist = False
-            if FUZZ_AVAILABLE:
-                if fuzz.ratio(target_artist, rec_artist) > 65: match_artist = True
-            elif target_artist in rec_artist or rec_artist in target_artist: match_artist = True
-
-            if match_artist:
-                match_title = False
-                if FUZZ_AVAILABLE:
-                    if fuzz.ratio(target_title, rec_title) > 60: match_title = True
-                elif target_title in rec_title or rec_title in target_title: match_title = True
-
-                if match_title:
-                    rec['source'] = 'qobuz'
-                    if rec.get('album', {}).get('image', {}).get('large'):
-                        rec['album']['image']['large'] = rec['album']['image']['large'].replace('_300', '_600')
-                    return rec
-    except: pass
 
     # 3. Fallback Deezer (titres absents du catalogue Qobuz)
     if DEEZER_FALLBACK_ENABLED:
