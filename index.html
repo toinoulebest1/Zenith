@@ -1099,8 +1099,8 @@
         let currentHistorySaveState = { id: null, saved: false };
 
         // Charge une piste Tidal (par ID Tidal) dans une instance Shaka (FLAC DASH, segments proxifiés).
-        async function loadTidalIntoShaka(shakaInstance, tidalId) {
-            const mres = await fetch(`${API_BASE}/tidal_manifest/${tidalId}`);
+        async function loadTidalIntoShaka(shakaInstance, tidalId, signal) {
+            const mres = await fetch(`${API_BASE}/tidal_manifest/${tidalId}`, signal ? { signal } : undefined);
             if (!mres.ok) throw new Error("tidal_manifest HTTP " + mres.status);
             const md = await mres.json();
             if (md.mimeType !== 'application/dash+xml') throw new Error("Tidal: pas de manifeste DASH");
@@ -1126,6 +1126,18 @@
 
             // Increment ID to invalidate previous pending loads
             const thisLoadId = ++currentLoadId;
+
+            // OPTIMISATION ZAPPING : on annule tout de suite les requêtes de la piste précédente
+            // (manifeste, paroles) ET on coupe le téléchargement des segments encore en cours.
+            // Sans ça, zapper 5 fois = 5 pistes qui continuent de charger 40 s de segments
+            // chacune via le proxy → serveur saturé et démarrage très lent.
+            try { if (window._loadAbort) window._loadAbort.abort(); } catch (e) {}
+            window._loadAbort = new AbortController();
+            const abortSignal = window._loadAbort.signal;
+            try {
+                const oldShaka = (activeAudio === playerA) ? shakaPlayerA : shakaPlayerB;
+                if (oldShaka && oldShaka.getLoadMode && oldShaka.getLoadMode() !== 0) oldShaka.unload();
+            } catch (e) {}
 
             if (document.getElementById('queuePanel').classList.contains('active')) {
                 const oldIndex = currentIndex;
@@ -1188,7 +1200,7 @@
                 try {
                     const artist = nextTrack.performer ? nextTrack.performer.name : (nextTrack.artist ? nextTrack.artist.name : 'Inconnu');
                     const resolveParams = new URLSearchParams({ title: nextTrack.title || '', artist, ...(nextTrack.isrc && { isrc: nextTrack.isrc }) });
-                    const res = await fetch(`${API_BASE}/resolve_metadata?${resolveParams}`);
+                    const res = await fetch(`${API_BASE}/resolve_metadata?${resolveParams}`, { signal: abortSignal });
 
                     if (thisLoadId !== currentLoadId) return;
 
@@ -1208,6 +1220,7 @@
                         console.warn("❌ Echec résolution métadonnées, tentative de lecture directe...");
                     }
                 } catch (e) {
+                    if (e && e.name === 'AbortError') return;  // zapping : requête annulée, normal
                     console.error("Resolve error", e);
                 }
             }
@@ -1247,10 +1260,11 @@
             else if (nextTrack.source === 'tidal_hund') {
                 await nextShaka.unload();
                 try {
-                    await loadTidalIntoShaka(nextShaka, nextTrack.id);
+                    await loadTidalIntoShaka(nextShaka, nextTrack.id, abortSignal);
                     if (thisLoadId !== currentLoadId) return;
                     console.log("✅ Loaded Tidal (FLAC DASH) for:", nextTrack.title);
                 } catch (e) {
+                    if (e && e.name === 'AbortError') return;  // zapping : chargement annulé, normal
                     console.error("Tidal Load Error", e);
                     if (thisLoadId !== currentLoadId) return;
                     showToast(`❌ Tidal indisponible pour ce titre : ${nextTrack.title}`);
@@ -1465,6 +1479,14 @@
                         if (url) prefetchedStreamUrls[id] = { url, fetchedAt: Date.now() };
                         console.log(`[Prefetch] ✅ URL Qobuz pré-résolue pour piste ${nextIndex}`);
                     }
+                } catch (e) { }
+            } else if (next.source === 'tidal_hund') {
+                // Préchauffe le manifeste Tidal : il sera en cache serveur quand on passera
+                // à la piste suivante → démarrage quasi instantané (pas d'appel hifi-api).
+                try {
+                    await fetch(`${API_BASE}/tidal_manifest/${id}`);
+                    prefetchedStreamUrls[id] = { url: 'tidal-warm', fetchedAt: Date.now() };
+                    console.log(`[Prefetch] ✅ Manifeste Tidal préchauffé pour piste ${nextIndex}`);
                 } catch (e) { }
             }
         }
@@ -2271,7 +2293,11 @@
                 document.getElementById('btnTranslate').classList.remove('active');
                 document.getElementById('btnTranslate').innerHTML = '<i class="fas fa-language"></i> Traduire';
 
-                const r = await fetch(`${API_BASE}/lyrics?artist=${encodeURIComponent(a)}&title=${encodeURIComponent(t.title)}&album=${encodeURIComponent(l || '')}&duration=${t.duration}`);
+                // Annulable : si on zappe, on n'encombre plus le serveur avec les paroles
+                // de la piste précédente (2 appels externes par titre).
+                try { if (window._lyricsAbort) window._lyricsAbort.abort(); } catch (e) {}
+                window._lyricsAbort = new AbortController();
+                const r = await fetch(`${API_BASE}/lyrics?artist=${encodeURIComponent(a)}&title=${encodeURIComponent(t.title)}&album=${encodeURIComponent(l || '')}&duration=${t.duration}`, { signal: window._lyricsAbort.signal });
                 const d = await r.json();
 
                 if (d.type === 'synced') {
@@ -2287,6 +2313,7 @@
                     document.getElementById('lyricsContent').innerHTML = '<p style="margin-top:50px;">Non trouvé.</p>';
                 }
             } catch (e) {
+                if (e && e.name === 'AbortError') return;  // zapping : normal
                 document.getElementById('lyricsContent').innerHTML = '<p style="margin-top:50px;">Indisponible.</p>';
             }
         }

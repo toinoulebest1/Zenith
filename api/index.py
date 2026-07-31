@@ -52,6 +52,15 @@ CRYPTO_AVAILABLE = False
 requests.adapters.DEFAULT_POOLSIZE = 100
 requests.adapters.DEFAULT_RETRIES = 3
 
+# Session HTTP partagée : garde les connexions TCP/TLS ouvertes (keep-alive) au lieu de
+# refaire un handshake à chaque appel (~200 ms économisés par requête). Utilisée pour tous
+# les appels chauds (Tidal manifest/proxy/recherche).
+HTTP = requests.Session()
+_http_adapter = requests.adapters.HTTPAdapter(
+    pool_connections=50, pool_maxsize=100, max_retries=0, pool_block=False)
+HTTP.mount('http://', _http_adapter)
+HTTP.mount('https://', _http_adapter)
+
 # Tentative d'import pour rapidfuzz
 try:
     from rapidfuzz import fuzz
@@ -122,6 +131,28 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Compression GZip : les réponses JSON (recherche, playlists, albums) sont très
+# compressibles (~-75 %) → transfert bien plus rapide, surtout en mobile/4G.
+# minimum_size évite de compresser les petites réponses (coût CPU inutile).
+try:
+    from starlette.middleware.gzip import GZipMiddleware
+    app.add_middleware(GZipMiddleware, minimum_size=800, compresslevel=5)
+except Exception as _e:
+    pass
+
+# Le pool de threads d'AnyIO (utilisé par run_in_threadpool) est limité à 40 par défaut :
+# c'est lui qui sert TOUS les appels bloquants (proxy audio, recherches, résolutions).
+# On l'élargit pour éviter que les segments audio attendent derrière les recherches.
+@app.on_event("startup")
+async def _tune_threadpool():
+    try:
+        import anyio
+        limiter = anyio.to_thread.current_default_thread_limiter()
+        limiter.total_tokens = 120
+        logger.info(f"[Perf] Threadpool élargi à {limiter.total_tokens} threads")
+    except Exception as e:
+        logger.warning(f"[Perf] Threadpool non ajusté: {e}")
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ZenithAPI")
 
@@ -187,7 +218,7 @@ class TidalAuthManager:
 
         logger.info(f"[TidalAuth] Refreshing Token (Client: {self.client_id[:4]}...)")
         try:
-            r = requests.post(
+            r = HTTP.post(
                 "https://auth.tidal.com/v1/oauth2/token",
                 data={
                     "client_id": self.client_id,
@@ -531,7 +562,7 @@ def _tidal_track_obj(t):
 def sync_search_tidal(query, limit=25):
     """Recherche Tidal via hifi-api → objets 'tidal_hund'. Lecture via /tidal_manifest."""
     try:
-        r = requests.get(f"{TIDAL_HIFI_BASE.rstrip('/')}/search/",
+        r = HTTP.get(f"{TIDAL_HIFI_BASE.rstrip('/')}/search/",
                          params={'s': query, 'limit': limit},
                          headers=_tidal_headers(), timeout=12)
         if r.status_code != 200:
@@ -556,7 +587,7 @@ def _tidal_resolve_one(title, artist, isrc=None):
     # 1. ISRC (plus fiable)
     if isrc:
         try:
-            r = requests.get(f"{base}/search/", params={'i': isrc, 'limit': 1},
+            r = HTTP.get(f"{base}/search/", params={'i': isrc, 'limit': 1},
                              headers=_tidal_headers(), timeout=10)
             items = (r.json().get('data') or {}).get('items', []) or []
             if items:
@@ -565,7 +596,7 @@ def _tidal_resolve_one(title, artist, isrc=None):
             pass
     # 2. Titre + artiste
     try:
-        r = requests.get(f"{base}/search/", params={'s': f"{title} {artist}".strip(), 'limit': 1},
+        r = HTTP.get(f"{base}/search/", params={'s': f"{title} {artist}".strip(), 'limit': 1},
                          headers=_tidal_headers(), timeout=10)
         items = (r.json().get('data') or {}).get('items', []) or []
         return _tidal_track_obj(items[0]) if items else None
@@ -575,14 +606,14 @@ def _tidal_resolve_one(title, artist, isrc=None):
 def _tidal_native_radio(title, artist, limit=25):
     """Radio native Tidal (recommandations de la piste seed). Repli si YouTube échoue."""
     try:
-        r = requests.get(f"{TIDAL_HIFI_BASE.rstrip('/')}/search/",
+        r = HTTP.get(f"{TIDAL_HIFI_BASE.rstrip('/')}/search/",
                          params={'s': f"{title} {artist}".strip(), 'limit': 1},
                          headers=_tidal_headers(), timeout=12)
         items = (r.json().get('data') or {}).get('items', []) or []
         if not items:
             return []
         seed_id = items[0].get('id')
-        rr = requests.get(f"{TIDAL_HIFI_BASE.rstrip('/')}/recommendations/",
+        rr = HTTP.get(f"{TIDAL_HIFI_BASE.rstrip('/')}/recommendations/",
                           params={'id': seed_id}, headers=_tidal_headers(), timeout=20)
         recs = (rr.json().get('data') or {}).get('items', []) or []
         out = []
@@ -646,7 +677,7 @@ def _sync_search_tidal_DISABLED(query, limit=50):
     #     }
     #     headers = {"Authorization": f"Bearer {token}"}
         
-    #     res = requests.get(url, headers=headers, params=params, timeout=10)
+    #     res = HTTP.get(url, headers=headers, params=params, timeout=10)
     #     logger.info(f"[Tidal Search] Status: {res.status_code}")
         
     #     if res.status_code != 200:
@@ -693,7 +724,7 @@ def _sync_search_tidal_DISABLED(query, limit=50):
 def sync_search_tidal_albums(query, limit=15):
     """Recherche d'albums Tidal via hifi-api (?al=) → objets album 'tidal_hund'."""
     try:
-        r = requests.get(f"{TIDAL_HIFI_BASE.rstrip('/')}/search/",
+        r = HTTP.get(f"{TIDAL_HIFI_BASE.rstrip('/')}/search/",
                          params={'al': query, 'limit': limit}, headers=_tidal_headers(), timeout=12)
         albs = ((r.json().get('data') or {}).get('albums') or {}).get('items') or []
     except Exception as e:
@@ -722,7 +753,7 @@ def sync_search_tidal_albums(query, limit=15):
 def sync_get_tidal_album(album_id):
     """Détails d'un album Tidal via hifi-api (/album/?id=) → pistes 'tidal_hund'."""
     try:
-        r = requests.get(f"{TIDAL_HIFI_BASE.rstrip('/')}/album/",
+        r = HTTP.get(f"{TIDAL_HIFI_BASE.rstrip('/')}/album/",
                          params={'id': album_id, 'limit': 250}, headers=_tidal_headers(), timeout=20)
         d = (r.json() or {}).get('data') or {}
         if not d.get('id'):
@@ -780,7 +811,7 @@ def sync_search_amazon(query, limit=50):
             "types": "track",
             "country": "FR"
         }
-        res = requests.get(url, params=params, timeout=15)
+        res = HTTP.get(url, params=params, timeout=15)
         logger.info(f"[Amazon Search] Status: {res.status_code}")
         
         if res.status_code != 200:
@@ -855,7 +886,7 @@ def sync_search_amazon_albums(query, limit=15):
             "types": "album",
             "country": "FR"
         }
-        res = requests.get(url, params=params, timeout=15)
+        res = HTTP.get(url, params=params, timeout=15)
         
         if res.status_code != 200:
             return []
@@ -934,7 +965,7 @@ def sync_get_amazon_album(album_asin):
             "types": "track,album",
             "country": "FR"
         }
-        res = requests.get(url, params=params, timeout=15)
+        res = HTTP.get(url, params=params, timeout=15)
         
         if res.status_code != 200:
             return None
@@ -1008,7 +1039,7 @@ def get_amazon_stream_url(asin):
             "country": "FR",
             "codec": "flac"
         }
-        res = requests.get(url, params=params, timeout=15)
+        res = HTTP.get(url, params=params, timeout=15)
         
         if res.status_code != 200:
             logger.error(f"[Amazon Stream] Error {res.status_code}: {res.text}")
@@ -1098,7 +1129,7 @@ def sync_search_deezer(query, limit=25):
     try:
         url = "https://api.deezer.com/search"
         params = {'q': query, 'index': 0, 'limit': limit}
-        r = requests.get(url, params=params, timeout=5)
+        r = HTTP.get(url, params=params, timeout=5)
         data = r.json()
         results = []
         if 'data' in data:
@@ -1121,7 +1152,7 @@ def sync_search_deezer_tracks(query, limit=25):
     """Recherche de titres Deezer pour la grille → objets 'deezer_flac' (id = ISRC).
     Sélectionner un de ces titres déclenche la lecture directe via le resolver Deezer."""
     try:
-        r = requests.get("https://api.deezer.com/search",
+        r = HTTP.get("https://api.deezer.com/search",
                          params={'q': query, 'index': 0, 'limit': limit}, timeout=8)
         data = r.json()
         results = []
@@ -1185,7 +1216,7 @@ def sync_get_top_country(country, limit=100):
     if cached and (time.time() - cached['ts']) < TOP_COUNTRY_TTL:
         return cached['tracks']
     try:
-        r = requests.get(
+        r = HTTP.get(
             f'https://rss.applemarketingtools.com/api/v2/{cc}/music/most-played/{limit}/songs.json',
             timeout=10)
         entries = r.json().get('feed', {}).get('results', [])
@@ -1250,7 +1281,7 @@ def _amz_quality_from_url(url):
 def _amz_resolve_source(asin):
     """Résout (streamUrl, key) pour un ASIN : mirror communautaire puis repli zarz.moe."""
     try:
-        r = requests.get(f"{AMZ_MIRROR_BASE}/api/track/{asin}",
+        r = HTTP.get(f"{AMZ_MIRROR_BASE}/api/track/{asin}",
                          headers={'X-API-Key': AMZ_MIRROR_KEY, 'User-Agent': SQUID_UA}, timeout=25)
         if r.status_code == 200:
             d = r.json()
@@ -1259,7 +1290,7 @@ def _amz_resolve_source(asin):
     except Exception as e:
         logger.warning(f"[Amazon] mirror {asin}: {e}")
     try:
-        r = requests.get(f"{AMZ_ZARZ_BASE}/media", params={'asin': asin, 'codec': 'flac'},
+        r = HTTP.get(f"{AMZ_ZARZ_BASE}/media", params={'asin': asin, 'codec': 'flac'},
                          headers={'User-Agent': AMZ_APP_UA, 'Accept': 'application/json'}, timeout=25)
         if r.status_code == 200:
             data = r.json()
@@ -1285,7 +1316,7 @@ def _amz_get_session():
     if _amz_session['data'] and (time.time() - _amz_session['ts']) < AMZ_SESSION_TTL:
         return _amz_session['data']
     try:
-        r = requests.get(AMZ_MUSIC_BASE + "/config.json",
+        r = HTTP.get(AMZ_MUSIC_BASE + "/config.json",
                          headers={'User-Agent': SQUID_UA, 'Accept': 'application/json'}, timeout=12)
         cfg = r.json()
         s = {'deviceId': cfg.get('deviceId', ''), 'sessionId': cfg.get('sessionId', ''),
@@ -1387,7 +1418,7 @@ def sync_search_amazon(query, limit=15):
         "userHash": json.dumps({"level": "LIBRARY_MEMBER"}),
         "headers": _amz_headers(s, page)})
     try:
-        r = requests.post(AMZ_SKILL_BASE + "/showSearch",
+        r = HTTP.post(AMZ_SKILL_BASE + "/showSearch",
                           headers={"Content-Type": "text/plain;charset=UTF-8", "User-Agent": SQUID_UA,
                                    "Origin": AMZ_MUSIC_BASE, "Referer": page}, data=body, timeout=15)
         if r.status_code != 200:
@@ -1444,7 +1475,7 @@ def sync_search_deezer_albums(query, limit=15):
     try:
         url = "https://api.deezer.com/search/album"
         params = {'q': query, 'index': 0, 'limit': limit}
-        r = requests.get(url, params=params, timeout=5)
+        r = HTTP.get(url, params=params, timeout=5)
         data = r.json()
         results = []
         if 'data' in data:
@@ -1465,7 +1496,7 @@ def sync_search_deezer_playlists(query, limit=100):
     try:
         url = "https://api.deezer.com/search/playlist"
         params = {'q': query, 'index': 0, 'limit': limit}
-        r = requests.get(url, params=params, timeout=5)
+        r = HTTP.get(url, params=params, timeout=5)
         data = r.json()
         results = []
         if 'data' in data:
@@ -1487,7 +1518,7 @@ def sync_search_deezer_artists(query, limit=15):
     try:
         url = "https://api.deezer.com/search/artist"
         params = {'q': query, 'index': 0, 'limit': limit}
-        r = requests.get(url, params=params, timeout=5)
+        r = HTTP.get(url, params=params, timeout=5)
         data = r.json()
         results = []
         if 'data' in data:
@@ -1523,7 +1554,7 @@ def sync_qobuz_search(query, limit=25, type='track'):
             logger.error(f"[Qobuz Search officiel] {e}")
     # 2. Repli API alt (kennyy)
     try:
-        r = requests.get(f"{QOBUZ_ALT_API_BASE}/api/get-music",
+        r = HTTP.get(f"{QOBUZ_ALT_API_BASE}/api/get-music",
                          params={'q': query, 'offset': 0}, timeout=15)
         if r.status_code != 200:
             return []
@@ -1562,7 +1593,7 @@ def sync_get_qobuz_album(album_id):
             logger.error(f"[Qobuz Album officiel] {e}")
     # 2. Repli API alt (kennyy, album_id = UPC)
     try:
-        r = requests.get(f"{QOBUZ_ALT_API_BASE}/api/get-album",
+        r = HTTP.get(f"{QOBUZ_ALT_API_BASE}/api/get-album",
                          params={'album_id': album_id}, timeout=15)
         if r.status_code != 200:
             return None
@@ -1596,11 +1627,11 @@ def sync_get_qobuz_album(album_id):
 
 def sync_get_deezer_artist_by_id(artist_id):
     try:
-        r = requests.get(f"https://api.deezer.com/artist/{artist_id}", timeout=5)
+        r = HTTP.get(f"https://api.deezer.com/artist/{artist_id}", timeout=5)
         artist = r.json()
         if 'error' in artist or not artist.get('name'): return None
 
-        r_top = requests.get(f"https://api.deezer.com/artist/{artist_id}/top", params={"limit": 20}, timeout=5)
+        r_top = HTTP.get(f"https://api.deezer.com/artist/{artist_id}/top", params={"limit": 20}, timeout=5)
         top_data = r_top.json()
         top_tracks = []
         for t in top_data.get("data", []):
@@ -1614,7 +1645,7 @@ def sync_get_deezer_artist_by_id(artist_id):
                 "maximum_bit_depth": 16
             })
             
-        r_alb = requests.get(f"https://api.deezer.com/artist/{artist_id}/albums", params={"limit": 50}, timeout=5)
+        r_alb = HTTP.get(f"https://api.deezer.com/artist/{artist_id}/albums", params={"limit": 50}, timeout=5)
         alb_data = r_alb.json()
         albums = []
         for a in alb_data.get("data", []):
@@ -1684,7 +1715,7 @@ def sync_search_artist_full(name):
 
     # 2. Fallback DEEZER
     try:
-        r = requests.get("https://api.deezer.com/search/artist", params={"q": name, "limit": 10}, timeout=5)
+        r = HTTP.get("https://api.deezer.com/search/artist", params={"q": name, "limit": 10}, timeout=5)
         data = r.json()
         if not data.get("data"): return None
         
@@ -1905,8 +1936,29 @@ async def get_radio_queue(artist: str, title: str):
     if not tracks: raise HTTPException(404, "No results")
     return JSONResponse(tracks)
 
+# Cache des recherches : une même requête (ex. l'utilisateur revient en arrière, ou
+# plusieurs personnes cherchent la même chose) ne retape plus Qobuz+Deezer+Tidal.
+_search_cache: dict = {}
+SEARCH_CACHE_TTL = 5 * 60
+SEARCH_CACHE_MAX = 200
+
 @app.get('/search')
 async def search_tracks(q: str, type: str = 'all'):
+    _ck = (q.strip().lower(), type)
+    _hit = _search_cache.get(_ck)
+    if _hit and (time.time() - _hit[1]) < SEARCH_CACHE_TTL:
+        return JSONResponse(_hit[0])
+
+    payload = await _do_search(q, type)
+    if len(_search_cache) >= SEARCH_CACHE_MAX:
+        try:
+            del _search_cache[min(_search_cache, key=lambda k: _search_cache[k][1])]
+        except Exception:
+            _search_cache.clear()
+    _search_cache[_ck] = (payload, time.time())
+    return JSONResponse(payload)
+
+async def _do_search(q: str, type: str = 'all'):
     # MODE TIDAL : titres + albums via Tidal, playlists via Deezer (lues via Tidal au clic)
     if TIDAL_ONLY_MODE:
         subtasks, kinds = [], []
@@ -1920,8 +1972,8 @@ async def search_tracks(q: str, type: str = 'all'):
         res = {'tracks': [], 'albums': [], 'playlists': []}
         for k, r in zip(kinds, done):
             res[k] = r if isinstance(r, list) else []
-        return JSONResponse({"tracks": res['tracks'], "albums": res['albums'],
-                             "external_playlists": res['playlists'], "artists": []})
+        return {"tracks": res['tracks'], "albums": res['albums'],
+                "external_playlists": res['playlists'], "artists": []}
 
     tasks = []
     if type in ['track', 'all']:
@@ -2033,12 +2085,12 @@ async def search_tracks(q: str, type: str = 'all'):
         s = f"{clean_string(a['title'])}{clean_string(a.get('artist',{}).get('name'))}"
         if s not in album_sigs: combined_albums.append(a); album_sigs.add(s)
     
-    return JSONResponse({
+    return {
         "tracks": combined_tracks,
         "albums": combined_albums,
         "external_playlists": deezer_playlists,
         "artists": deezer_artists
-    })
+    }
 
 @app.get('/artist_bio')
 async def get_artist_bio_route(name: str, id: str = None, source: str = None):
@@ -2109,10 +2161,10 @@ async def get_top_country_route(country: str = 'fr'):
 async def get_deezer_playlist_details_route(id: str):
     def _fetch():
         try:
-            r = requests.get(f"https://api.deezer.com/playlist/{id}", timeout=5)
+            r = HTTP.get(f"https://api.deezer.com/playlist/{id}", timeout=5)
             data = r.json()
             if 'error' in data: return {"error": data['error'].get('message')}
-            r_tracks = requests.get(f"https://api.deezer.com/playlist/{id}/tracks", params={'limit': 500}, timeout=5)
+            r_tracks = HTTP.get(f"https://api.deezer.com/playlist/{id}/tracks", params={'limit': 500}, timeout=5)
             tracks_json = r_tracks.json()
             raw_tracks = tracks_json.get('data', [])
             final_tracks = []
@@ -2198,9 +2250,9 @@ async def get_album(id: str, source: str = None):
     elif source == 'deezer':
         def _fetch_deezer_album():
             try:
-                r = requests.get(f"https://api.deezer.com/album/{id}", timeout=5)
+                r = HTTP.get(f"https://api.deezer.com/album/{id}", timeout=5)
                 data = r.json()
-                r_tracks = requests.get(f"https://api.deezer.com/album/{id}/tracks", params={'limit': 500}, timeout=5)
+                r_tracks = HTTP.get(f"https://api.deezer.com/album/{id}/tracks", params={'limit': 500}, timeout=5)
                 tracks_json = r_tracks.json()
                 raw_tracks = tracks_json.get('data', [])
                 final_tracks = []
@@ -2254,7 +2306,7 @@ def _resolve_qobuz_url(track_id: str):
     # 2. Repli API alt (kennyy)
     for fmt in [27, 7, 6, 5]:
         try:
-            r = requests.get(
+            r = HTTP.get(
                 f"{QOBUZ_ALT_API_BASE}/api/download-music",
                 params={"track_id": track_id, "quality": fmt},
                 timeout=15
@@ -2339,7 +2391,7 @@ DZR_CACHE_TTL = 25 * 60
 
 def _deezer_api(url):
     try:
-        r = requests.get(url, timeout=8, headers={'User-Agent': SQUID_UA})
+        r = HTTP.get(url, timeout=8, headers={'User-Agent': SQUID_UA})
         return r.json()
     except Exception:
         return None
@@ -2396,7 +2448,7 @@ def _dzr_resolve(isrc):
     if c and (time.time() - c['ts']) < DZR_CACHE_TTL:
         return c
     try:
-        r = requests.get(f"{DZR_RESOLVER}?isrc={urllib.parse.quote(isrc)}&format=FLAC",
+        r = HTTP.get(f"{DZR_RESOLVER}?isrc={urllib.parse.quote(isrc)}&format=FLAC",
                          headers={"User-Agent": SQUID_UA, "Origin": DZR_ORIGIN}, timeout=25)
         if r.status_code != 200:
             logger.warning(f"[Deezer] dzr {isrc} -> {r.status_code}")
@@ -2408,7 +2460,7 @@ def _dzr_resolve(isrc):
         mt = 'audio/flac' if str(d.get('format', '')).upper().startswith('FLAC') else 'audio/mpeg'
         size = 0
         try:
-            h = requests.get(url, headers={'Range': 'bytes=0-0', 'User-Agent': SQUID_UA}, timeout=10)
+            h = HTTP.get(url, headers={'Range': 'bytes=0-0', 'User-Agent': SQUID_UA}, timeout=10)
             cr = h.headers.get('Content-Range', '')
             if '/' in cr:
                 size = int(cr.rsplit('/', 1)[-1])
@@ -2465,7 +2517,7 @@ async def deezer_stream(isrc: str, request: Request):
         aligned_end = min(aligned_end, size - 1)
 
     def _fetch_dec():
-        r = requests.get(url, headers={'Range': f'bytes={aligned_start}-{aligned_end}', 'User-Agent': SQUID_UA}, timeout=40)
+        r = HTTP.get(url, headers={'Range': f'bytes={aligned_start}-{aligned_end}', 'User-Agent': SQUID_UA}, timeout=40)
         dec = _deezer_decrypt(key, r.content, aligned_start)
         return dec[start - aligned_start: end - aligned_start + 1]
 
@@ -2538,7 +2590,7 @@ def _amz_resolve(asin):
     _amz_quality_cache[asin] = (bd, sr)
     # En-tête du MP4 chiffré : KID, ranges init/sidx, durée, taille totale
     try:
-        h = requests.get(url, headers={'User-Agent': AMZ_APP_UA, 'Range': 'bytes=0-16383'}, timeout=20)
+        h = HTTP.get(url, headers={'User-Agent': AMZ_APP_UA, 'Range': 'bytes=0-16383'}, timeout=20)
         head = h.content
         cr = h.headers.get('Content-Range', '')
         size = int(cr.rsplit('/', 1)[-1]) if '/' in cr else 0
@@ -2605,7 +2657,7 @@ async def amazon_proxy(asin: str, request: Request):
     rng = request.headers.get('range') or request.headers.get('Range') or 'bytes=0-'
 
     def _fetch():
-        return requests.get(url, headers={'User-Agent': AMZ_APP_UA, 'Range': rng}, timeout=40)
+        return HTTP.get(url, headers={'User-Agent': AMZ_APP_UA, 'Range': rng}, timeout=40)
 
     r = await run_in_threadpool(_fetch)
     headers = {
@@ -2681,7 +2733,7 @@ async def get_amazon_stream_route(asin: str):
         """
         try:
             # Download the encrypted file
-            resp = requests.get(stream_url, timeout=60)
+            resp = HTTP.get(stream_url, timeout=60)
             if resp.status_code != 200:
                 logger.error(f"[Amazon Decrypt] Download failed: {resp.status_code}")
                 return None
@@ -3052,9 +3104,9 @@ TIDAL_ADAPTIVE_FORMATS = os.getenv('TIDAL_ADAPTIVE_FORMATS', 'FLAC_HIRES,FLAC,AA
 def _tidal_resolve_mpd_single(track_id):
     """Repli : manifeste mono-qualité via /track (une seule représentation)."""
     try:
-        r = requests.get(f"{TIDAL_HIFI_BASE.rstrip('/')}/track/",
-                         params={'id': track_id, 'quality': TIDAL_QUALITY},
-                         headers=_tidal_headers(), timeout=20)
+        r = HTTP.get(f"{TIDAL_HIFI_BASE.rstrip('/')}/track/",
+                     params={'id': track_id, 'quality': TIDAL_QUALITY},
+                     headers=_tidal_headers(), timeout=12)
         if r.status_code != 200:
             return None
         d = (r.json() or {}).get('data') or {}
@@ -3065,33 +3117,45 @@ def _tidal_resolve_mpd_single(track_id):
         logger.error(f"[Tidal] resolve single {track_id}: {e}")
         return None
 
+# Verrous "single-flight" : si plusieurs requêtes demandent le MÊME titre en même temps
+# (zapping rapide), une seule interroge l'API, les autres attendent son résultat.
+_tidal_mpd_locks: dict = {}
+_tidal_locks_guard = threading.Lock()
+
 def _tidal_resolve_mpd(track_id):
     """Manifeste DASH ADAPTATIF (plusieurs qualités : 24/16 bits FLAC + AAC) via /trackManifests.
     Shaka choisit la meilleure qualité tenable et descend au lieu de couper. Repli /track."""
     c = _tidal_mpd_cache.get(track_id)
     if c and (time.time() - c['ts']) < TIDAL_MPD_TTL:
         return c['mpd']
-    mpd = None
-    try:
-        r = requests.get(f"{TIDAL_HIFI_BASE.rstrip('/')}/trackManifests/",
+    # Un seul appel réseau par titre, même si N requêtes arrivent en parallèle
+    with _tidal_locks_guard:
+        lock = _tidal_mpd_locks.setdefault(track_id, threading.Lock())
+    with lock:
+        c = _tidal_mpd_cache.get(track_id)  # re-check : un autre thread a pu remplir le cache
+        if c and (time.time() - c['ts']) < TIDAL_MPD_TTL:
+            return c['mpd']
+        mpd = None
+        try:
+            r = HTTP.get(f"{TIDAL_HIFI_BASE.rstrip('/')}/trackManifests/",
                          params={'id': track_id, 'formats': TIDAL_ADAPTIVE_FORMATS,
                                  'adaptive': 'true', 'manifestType': 'MPEG_DASH', 'uriScheme': 'DATA'},
-                         headers=_tidal_headers(), timeout=20)
-        if r.status_code == 200:
-            attrs = (((r.json() or {}).get('data') or {}).get('data') or {}).get('attributes') or {}
-            uri = attrs.get('uri', '') or ''
-            if uri.startswith('data:') and 'base64,' in uri:
-                mpd = base64.b64decode(uri.split('base64,', 1)[1]).decode('utf-8', 'replace')
-        else:
-            logger.warning(f"[Tidal] trackManifests {track_id} -> {r.status_code}")
-    except Exception as e:
-        logger.warning(f"[Tidal] trackManifests {track_id}: {e}")
-    # Repli sur la version mono-qualité si l'adaptatif échoue
-    if not mpd:
-        mpd = _tidal_resolve_mpd_single(track_id)
-    if mpd:
-        _tidal_mpd_cache[track_id] = {'mpd': mpd, 'ts': time.time()}
-    return mpd
+                         headers=_tidal_headers(), timeout=12)
+            if r.status_code == 200:
+                attrs = (((r.json() or {}).get('data') or {}).get('data') or {}).get('attributes') or {}
+                uri = attrs.get('uri', '') or ''
+                if uri.startswith('data:') and 'base64,' in uri:
+                    mpd = base64.b64decode(uri.split('base64,', 1)[1]).decode('utf-8', 'replace')
+            else:
+                logger.warning(f"[Tidal] trackManifests {track_id} -> {r.status_code}")
+        except Exception as e:
+            logger.warning(f"[Tidal] trackManifests {track_id}: {e}")
+        # Repli sur la version mono-qualité si l'adaptatif échoue
+        if not mpd:
+            mpd = _tidal_resolve_mpd_single(track_id)
+        if mpd:
+            _tidal_mpd_cache[track_id] = {'mpd': mpd, 'ts': time.time()}
+        return mpd
 
 @app.get('/tidal_manifest/{track_id}')
 async def get_tidal_manifest_route(track_id: str):
@@ -3102,6 +3166,13 @@ async def get_tidal_manifest_route(track_id: str):
     b64 = base64.b64encode(mpd.encode('utf-8')).decode('ascii')
     return JSONResponse({'mimeType': 'application/dash+xml', 'manifest': b64})
 
+# Cache mémoire des petits segments (init MP4 surtout) : évite de retraverser le CDN
+# quand on rejoue/revient sur un titre. Borné pour ne pas gonfler la mémoire.
+_tidal_seg_cache: dict = {}      # (url, range) -> (status, content, content_range, ctype, ts)
+TIDAL_SEG_CACHE_MAX = 60
+TIDAL_SEG_CACHE_TTL = 10 * 60
+TIDAL_SEG_CACHEABLE_MAX = 512 * 1024  # on ne cache que les segments ≤ 512 Ko
+
 @app.get('/tidal_proxy')
 async def tidal_proxy(url: str, request: Request):
     """Proxy par plages des segments audio Tidal (CDN sans CORS). Restreint au CDN Tidal."""
@@ -3110,21 +3181,42 @@ async def tidal_proxy(url: str, request: Request):
         raise HTTPException(403, "host not allowed")
     rng = request.headers.get('range') or request.headers.get('Range') or 'bytes=0-'
 
+    key = (url, rng)
+    hit = _tidal_seg_cache.get(key)
+    if hit and (time.time() - hit[4]) < TIDAL_SEG_CACHE_TTL:
+        status, content, cr, ctype, _ = hit
+        h = {'Accept-Ranges': 'bytes', 'Content-Length': str(len(content)),
+             'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*'}
+        if cr:
+            h['Content-Range'] = cr
+        return Response(content=content, status_code=status, media_type=ctype, headers=h)
+
     def _fetch():
-        return requests.get(url, headers={'User-Agent': SQUID_UA, 'Range': rng}, timeout=40)
+        # Session partagée (keep-alive) : plus de handshake TLS par segment
+        return HTTP.get(url, headers={'User-Agent': SQUID_UA, 'Range': rng}, timeout=30)
 
     r = await run_in_threadpool(_fetch)
+    content = r.content
+    cr = r.headers.get('Content-Range')
+    ctype = r.headers.get('Content-Type', 'audio/mp4')
+
+    if r.status_code in (200, 206) and len(content) <= TIDAL_SEG_CACHEABLE_MAX:
+        if len(_tidal_seg_cache) >= TIDAL_SEG_CACHE_MAX:
+            try:  # purge le plus ancien
+                del _tidal_seg_cache[min(_tidal_seg_cache, key=lambda k: _tidal_seg_cache[k][4])]
+            except Exception:
+                _tidal_seg_cache.clear()
+        _tidal_seg_cache[key] = (r.status_code, content, cr, ctype, time.time())
+
     headers = {
         'Accept-Ranges': 'bytes',
-        'Content-Length': str(len(r.content)),
+        'Content-Length': str(len(content)),
         'Cache-Control': 'no-store',
         'Access-Control-Allow-Origin': '*',
     }
-    cr = r.headers.get('Content-Range')
     if cr:
         headers['Content-Range'] = cr
-    return Response(content=r.content, status_code=r.status_code,
-                    media_type=r.headers.get('Content-Type', 'audio/mp4'), headers=headers)
+    return Response(content=content, status_code=r.status_code, media_type=ctype, headers=headers)
 
 @app.get('/lyrics')
 async def get_lyrics(artist: str, title: str, album: str = None, duration: str = None):
