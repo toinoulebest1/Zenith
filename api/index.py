@@ -13,7 +13,7 @@ sys.path.append(current_dir)
 PROJECT_ROOT = os.path.abspath(os.path.join(current_dir, '..'))
 
 from fastapi import FastAPI, Request, Response, HTTPException
-from fastapi.responses import JSONResponse, RedirectResponse, FileResponse
+from fastapi.responses import JSONResponse, RedirectResponse, FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.concurrency import run_in_threadpool
@@ -60,6 +60,31 @@ _http_adapter = requests.adapters.HTTPAdapter(
     pool_connections=50, pool_maxsize=100, max_retries=0, pool_block=False)
 HTTP.mount('http://', _http_adapter)
 HTTP.mount('https://', _http_adapter)
+
+# --- CLIENT ASYNCHRONE (chemin audio) ---
+# Le proxy audio est le point le plus sollicité : en async, une requête ne monopolise
+# plus un thread (le serveur peut en tenir des centaines en parallèle) et les octets sont
+# relayés AU FIL DE L'EAU (streaming) au lieu d'être chargés en mémoire.
+# HTTP/2 si disponible : tous les segments passent sur UNE seule connexion (multiplexage).
+try:
+    import httpx as _httpx
+    try:
+        import h2 as _h2  # noqa: F401
+        _HTTP2_OK = True
+    except ImportError:
+        _HTTP2_OK = False
+    AHTTP = _httpx.AsyncClient(
+        http2=_HTTP2_OK,
+        timeout=_httpx.Timeout(20.0, connect=5.0),
+        limits=_httpx.Limits(max_connections=200, max_keepalive_connections=100,
+                             keepalive_expiry=120.0),
+        follow_redirects=True,
+    )
+    ASYNC_HTTP_OK = True
+except Exception:
+    AHTTP = None
+    _HTTP2_OK = False
+    ASYNC_HTTP_OK = False
 
 # Tentative d'import pour rapidfuzz
 try:
@@ -152,6 +177,15 @@ async def _tune_threadpool():
         logger.info(f"[Perf] Threadpool élargi à {limiter.total_tokens} threads")
     except Exception as e:
         logger.warning(f"[Perf] Threadpool non ajusté: {e}")
+    logger.info(f"[Perf] Client async: {ASYNC_HTTP_OK} | HTTP/2: {_HTTP2_OK}")
+
+@app.on_event("shutdown")
+async def _close_async_client():
+    try:
+        if AHTTP is not None:
+            await AHTTP.aclose()
+    except Exception:
+        pass
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ZenithAPI")
@@ -590,8 +624,8 @@ def sync_search_tidal(query, limit=25):
 _RESOLVE_POOL = ThreadPoolExecutor(max_workers=12, thread_name_prefix='resolve')
 
 _resolve_cache: dict = {}          # key -> (result_or_None, ts)
-RESOLVE_CACHE_TTL = 30 * 60
-RESOLVE_NEG_TTL = 3 * 60
+RESOLVE_CACHE_TTL = 0   # cache désactivé (résultats toujours frais)
+RESOLVE_NEG_TTL = 0     # cache négatif désactivé
 RESOLVE_CACHE_MAX = 500
 _resolve_locks: dict = {}
 _resolve_locks_guard = threading.Lock()
@@ -1593,6 +1627,29 @@ def sync_search_deezer_artists(query, limit=15):
         return results
     except Exception as e: return []
 
+def sync_qobuz_search_both(query, limit_tracks=50, limit_albums=15):
+    """UN SEUL appel Qobuz pour les titres ET les albums (l'API catalog/search renvoie
+    déjà les deux). Évite de faire deux fois la même requête à chaque recherche."""
+    if QOBUZ_OFFICIAL_ENABLED and client:
+        try:
+            r = client.api_call("catalog/search", query=query,
+                                limit=max(limit_tracks, limit_albums, 20), offset=0)
+            tracks = (r.get('tracks') or {}).get('items', [])[:limit_tracks]
+            albums = (r.get('albums') or {}).get('items', [])[:limit_albums]
+            for it in tracks:
+                it['source'] = 'qobuz'; fix_qobuz_title(it)
+                it['date'] = it.get('release_date_original') or it.get('released_at')
+            for it in albums:
+                it['source'] = 'qobuz'
+                it['date'] = it.get('release_date_original') or it.get('released_at')
+            if tracks or albums:
+                return tracks, albums
+        except Exception as e:
+            logger.error(f"[Qobuz Search both] {e}")
+    # Repli : ancienne voie (2 appels séparés)
+    return (sync_qobuz_search(query, limit_tracks, 'track'),
+            sync_qobuz_search(query, limit_albums, 'album'))
+
 def sync_qobuz_search(query, limit=25, type='track'):
     """Recherche Qobuz : API officielle en priorité, repli sur l'API alt (kennyy)."""
     coll = 'tracks' if type == 'track' else 'albums'
@@ -2036,7 +2093,7 @@ async def get_radio_queue(artist: str, title: str):
 # Cache des recherches : une même requête (ex. l'utilisateur revient en arrière, ou
 # plusieurs personnes cherchent la même chose) ne retape plus Qobuz+Deezer+Tidal.
 _search_cache: dict = {}
-SEARCH_CACHE_TTL = 5 * 60
+SEARCH_CACHE_TTL = 0    # cache désactivé (résultats toujours frais)
 SEARCH_CACHE_MAX = 200
 
 @app.get('/search')
@@ -2073,12 +2130,19 @@ async def _do_search(q: str, type: str = 'all'):
                 "external_playlists": res['playlists'], "artists": []}
 
     tasks = []
-    if type in ['track', 'all']:
+    want_tracks = type in ['track', 'all']
+    want_albums = type in ['album', 'all']
+    # UN SEUL appel Qobuz quand on veut titres + albums (au lieu de deux identiques)
+    if want_tracks and want_albums:
+        tasks.append(run_in_threadpool(sync_qobuz_search_both, q, 50, 15))
+    elif want_tracks:
         tasks.append(run_in_threadpool(sync_qobuz_search, q, 50, 'track'))
+    elif want_albums:
+        tasks.append(run_in_threadpool(sync_qobuz_search, q, 15, 'album'))
+    if want_tracks:
         tasks.append(run_in_threadpool(sync_search_deezer_tracks, q, 25))
         tasks.append(run_in_threadpool(sync_search_tidal, q, 25))
-    if type in ['album', 'all']:
-        tasks.append(run_in_threadpool(sync_qobuz_search, q, 15, 'album'))
+    if want_albums:
         tasks.append(run_in_threadpool(sync_search_deezer_albums, q, 15))
     if type in ['artist', 'all']:
         tasks.append(run_in_threadpool(sync_search_deezer_artists, q, 15))
@@ -2089,12 +2153,19 @@ async def _do_search(q: str, type: str = 'all'):
     qobuz_albums = []; amazon_albums = []; deezer_albums = []
     deezer_artists = []
 
-    if type in ['track', 'all']:
-        r1 = finished[idx]; idx += 1; qobuz_tracks = r1 if isinstance(r1, list) else []
+    if want_tracks and want_albums:
+        r0 = finished[idx]; idx += 1
+        if isinstance(r0, tuple) and len(r0) == 2:
+            qobuz_tracks = r0[0] if isinstance(r0[0], list) else []
+            qobuz_albums = r0[1] if isinstance(r0[1], list) else []
+    elif want_tracks:
+        r0 = finished[idx]; idx += 1; qobuz_tracks = r0 if isinstance(r0, list) else []
+    elif want_albums:
+        r0 = finished[idx]; idx += 1; qobuz_albums = r0 if isinstance(r0, list) else []
+    if want_tracks:
         r2 = finished[idx]; idx += 1; deezer_tracks = r2 if isinstance(r2, list) else []
         r3b = finished[idx]; idx += 1; tidal_tracks = r3b if isinstance(r3b, list) else []
-    if type in ['album', 'all']:
-        r4 = finished[idx]; idx += 1; qobuz_albums = r4 if isinstance(r4, list) else []
+    if want_albums:
         r6 = finished[idx]; idx += 1; deezer_albums = r6 if isinstance(r6, list) else []
     if type in ['artist', 'all']:
         r7 = finished[idx]; idx += 1; deezer_artists = r7 if isinstance(r7, list) else []
@@ -3192,7 +3263,7 @@ async def get_amazon_stream_info_route(asin: str):
 
 # --- TIDAL (lecture via hifi-api : manifeste DASH FLAC non chiffré + proxy segments) ---
 _tidal_mpd_cache: dict = {}   # track_id -> {'mpd', 'ts'}
-TIDAL_MPD_TTL = 15 * 60
+TIDAL_MPD_TTL = 0       # non utilisé (manifeste toujours frais)
 
 # Formats demandés pour le manifeste adaptatif (SANS Atmos EAC3_JOC, non lisible en navigateur).
 # Ordre = 24 bits FLAC → 16 bits FLAC → AAC : Shaka joue le meilleur tenable, descend au lieu de couper.
@@ -3220,108 +3291,108 @@ _tidal_mpd_locks: dict = {}
 _tidal_locks_guard = threading.Lock()
 
 def _tidal_resolve_mpd(track_id):
-    """Manifeste DASH ADAPTATIF (plusieurs qualités : 24/16 bits FLAC + AAC) via /trackManifests.
-    Shaka choisit la meilleure qualité tenable et descend au lieu de couper. Repli /track."""
-    c = _tidal_mpd_cache.get(track_id)
-    if c and (time.time() - c['ts']) < TIDAL_MPD_TTL:
-        return c['mpd']
-    # Un seul appel réseau par titre, même si N requêtes arrivent en parallèle
-    with _tidal_locks_guard:
-        lock = _tidal_mpd_locks.setdefault(track_id, threading.Lock())
-    with lock:
-        c = _tidal_mpd_cache.get(track_id)  # re-check : un autre thread a pu remplir le cache
-        if c and (time.time() - c['ts']) < TIDAL_MPD_TTL:
-            return c['mpd']
-        mpd = None
+    """Version synchrone (repli) : manifeste DASH adaptatif via /trackManifests."""
+    mpd = None
+    try:
+        r = HTTP.get(f"{TIDAL_HIFI_BASE.rstrip('/')}/trackManifests/",
+                     params={'id': track_id, 'formats': TIDAL_ADAPTIVE_FORMATS,
+                             'adaptive': 'true', 'manifestType': 'MPEG_DASH', 'uriScheme': 'DATA'},
+                     headers=_tidal_headers(), timeout=12)
+        if r.status_code == 200:
+            attrs = (((r.json() or {}).get('data') or {}).get('data') or {}).get('attributes') or {}
+            uri = attrs.get('uri', '') or ''
+            if uri.startswith('data:') and 'base64,' in uri:
+                mpd = base64.b64decode(uri.split('base64,', 1)[1]).decode('utf-8', 'replace')
+    except Exception as e:
+        logger.warning(f"[Tidal] trackManifests {track_id}: {e}")
+    return mpd or _tidal_resolve_mpd_single(track_id)
+
+@app.get('/tidal_manifest/{track_id}')
+async def get_tidal_manifest_route(track_id: str):
+    """Manifeste DASH Tidal pour Shaka (100 % async, aucun cache : toujours frais)."""
+    mpd = None
+    if ASYNC_HTTP_OK:
         try:
-            r = HTTP.get(f"{TIDAL_HIFI_BASE.rstrip('/')}/trackManifests/",
-                         params={'id': track_id, 'formats': TIDAL_ADAPTIVE_FORMATS,
-                                 'adaptive': 'true', 'manifestType': 'MPEG_DASH', 'uriScheme': 'DATA'},
-                         headers=_tidal_headers(), timeout=12)
+            r = await AHTTP.get(f"{TIDAL_HIFI_BASE.rstrip('/')}/trackManifests/",
+                                params={'id': track_id, 'formats': TIDAL_ADAPTIVE_FORMATS,
+                                        'adaptive': 'true', 'manifestType': 'MPEG_DASH',
+                                        'uriScheme': 'DATA'},
+                                headers=_tidal_headers())
             if r.status_code == 200:
                 attrs = (((r.json() or {}).get('data') or {}).get('data') or {}).get('attributes') or {}
                 uri = attrs.get('uri', '') or ''
                 if uri.startswith('data:') and 'base64,' in uri:
                     mpd = base64.b64decode(uri.split('base64,', 1)[1]).decode('utf-8', 'replace')
-            else:
-                logger.warning(f"[Tidal] trackManifests {track_id} -> {r.status_code}")
         except Exception as e:
-            logger.warning(f"[Tidal] trackManifests {track_id}: {e}")
-        # Repli sur la version mono-qualité si l'adaptatif échoue
-        if not mpd:
-            mpd = _tidal_resolve_mpd_single(track_id)
-        if mpd:
-            _tidal_mpd_cache[track_id] = {'mpd': mpd, 'ts': time.time()}
-        return mpd
-
-@app.get('/tidal_manifest/{track_id}')
-async def get_tidal_manifest_route(track_id: str):
-    """Manifeste DASH Tidal (FLAC non chiffré) pour Shaka. Les segments passent par /tidal_proxy."""
-    mpd = await run_in_threadpool(_tidal_resolve_mpd, track_id)
+            logger.warning(f"[Tidal] async manifest {track_id}: {e}")
+    if not mpd:
+        mpd = await run_in_threadpool(_tidal_resolve_mpd, track_id)
     if not mpd:
         raise HTTPException(404, "Tidal stream not found")
     b64 = base64.b64encode(mpd.encode('utf-8')).decode('ascii')
     return JSONResponse({'mimeType': 'application/dash+xml', 'manifest': b64})
 
-# Cache mémoire des petits segments (init MP4 surtout) : évite de retraverser le CDN
-# quand on rejoue/revient sur un titre. Borné pour ne pas gonfler la mémoire.
-_tidal_seg_cache: dict = {}      # (url, range) -> (status, content, content_range, ctype, ts)
-TIDAL_SEG_CACHE_MAX = 60
-TIDAL_SEG_CACHE_TTL = 10 * 60
-TIDAL_SEG_CACHEABLE_MAX = 512 * 1024  # on ne cache que les segments ≤ 512 Ko
-
 @app.get('/tidal_proxy')
 async def tidal_proxy(url: str, request: Request):
-    """Proxy par plages des segments audio Tidal (CDN sans CORS). Restreint au CDN Tidal."""
+    """Proxy TRANSPARENT des segments audio Tidal (le CDN refuse les requêtes du navigateur).
+    100 % asynchrone et en streaming : les octets sont relayés au fil de l'eau, sans être
+    stockés ni mis en cache, et sans monopoliser de thread → le serveur n'est qu'un tuyau."""
     host = (urllib.parse.urlparse(url).hostname or '').lower()
     if not (host.endswith('.audio.tidal.com') or host.endswith('.tidal.com')):
         raise HTTPException(403, "host not allowed")
     rng = request.headers.get('range') or request.headers.get('Range') or 'bytes=0-'
+    # IMPORTANT : ne jamais transmettre 'Origin' (le CDN Tidal répond 403 s'il est présent)
+    fwd = {'User-Agent': SQUID_UA, 'Range': rng, 'Accept-Encoding': 'identity'}
 
-    key = (url, rng)
-    hit = _tidal_seg_cache.get(key)
-    if hit and (time.time() - hit[4]) < TIDAL_SEG_CACHE_TTL:
-        status, content, cr, ctype, _ = hit
-        h = {'Accept-Ranges': 'bytes', 'Content-Length': str(len(content)),
-             'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*'}
-        if cr:
-            h['Content-Range'] = cr
-        return Response(content=content, status_code=status, media_type=ctype, headers=h)
+    if ASYNC_HTTP_OK:
+        req = AHTTP.build_request('GET', url, headers=fwd)
+        upstream = await AHTTP.send(req, stream=True)
 
+        async def _relay():
+            try:
+                async for chunk in upstream.aiter_raw():
+                    yield chunk
+            except (GeneratorExit, asyncio.CancelledError):
+                # Le client a zappé : on ARRÊTE immédiatement de tirer depuis le CDN
+                # au lieu de télécharger un segment dont plus personne ne veut.
+                raise
+            finally:
+                await upstream.aclose()
+
+        h = {'Accept-Ranges': 'bytes', 'Cache-Control': 'no-store',
+             'Access-Control-Allow-Origin': '*'}
+        for k in ('Content-Range', 'Content-Length'):
+            if k in upstream.headers:
+                h[k] = upstream.headers[k]
+        return StreamingResponse(_relay(), status_code=upstream.status_code,
+                                 media_type=upstream.headers.get('Content-Type', 'audio/mp4'),
+                                 headers=h)
+
+    # Repli synchrone si httpx indisponible
     def _fetch():
-        # Session partagée (keep-alive) : plus de handshake TLS par segment
-        return HTTP.get(url, headers={'User-Agent': SQUID_UA, 'Range': rng}, timeout=30)
-
+        return HTTP.get(url, headers=fwd, timeout=30)
     r = await run_in_threadpool(_fetch)
-    content = r.content
-    cr = r.headers.get('Content-Range')
-    ctype = r.headers.get('Content-Type', 'audio/mp4')
-
-    if r.status_code in (200, 206) and len(content) <= TIDAL_SEG_CACHEABLE_MAX:
-        if len(_tidal_seg_cache) >= TIDAL_SEG_CACHE_MAX:
-            try:  # purge le plus ancien
-                del _tidal_seg_cache[min(_tidal_seg_cache, key=lambda k: _tidal_seg_cache[k][4])]
-            except Exception:
-                _tidal_seg_cache.clear()
-        _tidal_seg_cache[key] = (r.status_code, content, cr, ctype, time.time())
-
-    headers = {
-        'Accept-Ranges': 'bytes',
-        'Content-Length': str(len(content)),
-        'Cache-Control': 'no-store',
-        'Access-Control-Allow-Origin': '*',
-    }
-    if cr:
-        headers['Content-Range'] = cr
-    return Response(content=content, status_code=r.status_code, media_type=ctype, headers=headers)
+    headers = {'Accept-Ranges': 'bytes', 'Content-Length': str(len(r.content)),
+               'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*'}
+    if r.headers.get('Content-Range'):
+        headers['Content-Range'] = r.headers['Content-Range']
+    return Response(content=r.content, status_code=r.status_code,
+                    media_type=r.headers.get('Content-Type', 'audio/mp4'), headers=headers)
 
 @app.get('/lyrics')
 async def get_lyrics(artist: str, title: str, album: str = None, duration: str = None):
-    yt_res = await run_in_threadpool(sync_search_yt_lyrics, title, artist)
-    if yt_res and yt_res['type'] == 'synced': return JSONResponse({"type": "synced", "lyrics": yt_res['lyrics'], "source": "YouTube"})
+    # Les deux fournisseurs (YouTube + LRCLib) sont interrogés EN PARALLÈLE au lieu d'être
+    # enchaînés : le temps total = le plus lent des deux, au lieu de leur somme.
     dur = parse_duration(duration)
+    _yt_task = asyncio.create_task(run_in_threadpool(sync_search_yt_lyrics, title, artist))
+    _lrc_task = asyncio.create_task(run_in_threadpool(lyrics_engine.search_lyrics, artist, title, album, dur))
+    try: yt_res = await _yt_task
+    except Exception: yt_res = None
+    if yt_res and yt_res['type'] == 'synced':
+        _lrc_task.cancel()
+        return JSONResponse({"type": "synced", "lyrics": yt_res['lyrics'], "source": "YouTube"})
     lrc_plain, lrc_synced = None, None
-    try: lrc_plain, lrc_synced = await run_in_threadpool(lyrics_engine.search_lyrics, artist, title, album, dur)
+    try: lrc_plain, lrc_synced = await _lrc_task
     except Exception: pass
     if lrc_synced: return JSONResponse({"type": "synced", "lyrics": lrc_synced, "source": "LRCLib"})
     if yt_res and yt_res['type'] == 'plain': return JSONResponse({"type": "plain", "lyrics": yt_res['lyrics'], "source": "YouTube"})

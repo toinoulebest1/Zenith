@@ -5,6 +5,7 @@ ytmusicapi
 deep-translator
 rapidfuzz
 httpx
+h2
 python-dotenv
 pydantic
 pycryptodome

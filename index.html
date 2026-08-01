@@ -1111,12 +1111,13 @@
                 // que si la connexion/CPU ne suit pas → qualité max SANS jamais couper.
                 abr: { enabled: true, defaultBandwidthEstimate: 5000000, restrictToElementSize: false },
                 streaming: {
-                    // Gros tampon : Shaka garde ~40 s d'avance en mémoire, donc une saturation
-                    // passagère du thread principal (PC chargé) ne vide pas le buffer → pas de coupure.
-                    rebufferingGoal: 4, bufferingGoal: 40, bufferBehind: 30, stallEnabled: false,
-                    retryParameters: { maxAttempts: 8, baseDelay: 500, backoffFactor: 2, fuzzFactor: 0.5, timeout: 60000, stallTimeout: 0, connectionTimeout: 0 }
+                    // Tampon calibré : 22 s d'avance suffisent largement à absorber les à-coups
+                    // (Spotify en utilise ~10-15 s). En 24 bits/96 kHz, passer de 40 s à 22 s
+                    // divise presque par deux les données transitant par le serveur.
+                    rebufferingGoal: 3, bufferingGoal: 22, bufferBehind: 15, stallEnabled: false,
+                    retryParameters: { maxAttempts: 4, baseDelay: 400, backoffFactor: 2, fuzzFactor: 0.5, timeout: 45000, stallTimeout: 0, connectionTimeout: 0 }
                 },
-                manifest: { retryParameters: { maxAttempts: 5, baseDelay: 500, backoffFactor: 2, timeout: 40000 } }
+                manifest: { retryParameters: { maxAttempts: 3, baseDelay: 400, backoffFactor: 2, timeout: 30000 } }
             });
             await shakaInstance.load('data:application/dash+xml;base64,' + md.manifest);
         }
@@ -1480,15 +1481,9 @@
                         console.log(`[Prefetch] ✅ URL Qobuz pré-résolue pour piste ${nextIndex}`);
                     }
                 } catch (e) { }
-            } else if (next.source === 'tidal_hund') {
-                // Préchauffe le manifeste Tidal : il sera en cache serveur quand on passera
-                // à la piste suivante → démarrage quasi instantané (pas d'appel hifi-api).
-                try {
-                    await fetch(`${API_BASE}/tidal_manifest/${id}`);
-                    prefetchedStreamUrls[id] = { url: 'tidal-warm', fetchedAt: Date.now() };
-                    console.log(`[Prefetch] ✅ Manifeste Tidal préchauffé pour piste ${nextIndex}`);
-                } catch (e) { }
             }
+            // Rien à préchauffer pour Tidal : le manifeste est résolu à la demande (pas de
+            // cache serveur), donc un pré-appel ne ferait que charger le serveur pour rien.
         }
 
         async function handlePlaybackError(index) {
