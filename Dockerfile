@@ -1,4 +1,6 @@
-FROM python:3.9-slim
+# Python 3.13 : les versions récentes de ytmusicapi (radio, paroles YouTube) exigent Python 3.10+.
+# En 3.9, pip installait une vieille version qui ne fonctionne plus avec YouTube Music.
+FROM python:3.13-slim
 
 WORKDIR /app
 

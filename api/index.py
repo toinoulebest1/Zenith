@@ -104,7 +104,7 @@ except ImportError:
 # Identifiants Qobuz officiels. Le token est lié à l'app_id : app_id + secret + token
 # doivent être cohérents. Le token et l'ID utilisateur donnent accès au compte : ils viennent
 # UNIQUEMENT de l'environnement (.env en local, tableau de bord Vercel en ligne).
-APP_VERSION  = "2026-10-25 · Qobuz prioritaire, Tidal en secours"
+APP_VERSION  = "2026-10-25b · Qobuz prioritaire, radio Python 3.13"
 
 def _env_clean(name):
     return (os.getenv(name) or '').strip().strip('"').strip("'").strip()
@@ -2723,8 +2723,30 @@ async def status_route():
             conseil = "Qobuz fonctionne. Si le site affiche encore l'ancienne version, recharge-le avec Ctrl+Maj+R."
         else:
             conseil = "Qobuz ne répond pas correctement depuis ce serveur : voir le détail ci-dessus."
+        # Radio (YouTube Music) : dépend d'une version récente de ytmusicapi (Python 3.10+)
+        import platform
+        try:
+            from importlib.metadata import version as _pkg_version
+            ytm_version = _pkg_version('ytmusicapi')
+        except Exception:
+            ytm_version = '?'
+        try:
+            radio = sync_get_radio_queue('Blinding Lights', 'The Weeknd')
+            radio_state = f"ok ({len(radio)} titres)" if radio else 'aucun résultat'
+        except Exception as e:
+            radio_state = f"erreur ({type(e).__name__})"
+        try:
+            old_ytm = tuple(int(x) for x in ytm_version.split('.')[:2]) < (1, 11)
+        except ValueError:
+            old_ytm = False
+        conseil_radio = None
+        if not radio_state.startswith('ok'):
+            conseil_radio = ("ytmusicapi trop ancien : reconstruis l'image avec le Dockerfile en Python 3.13 (Redeploy)."
+                             if old_ytm else "YouTube Music ne répond pas depuis ce serveur (adresse IP peut-être bloquée).")
         return {'version': APP_VERSION, 'mode': 'lossless' if LOSSLESS_MODE else 'mixte',
-                'qobuz': qz, 'tidal_addon': tidal, 'conseil': conseil}
+                'serveur': {'python': platform.python_version(), 'ytmusicapi': ytm_version},
+                'qobuz': qz, 'tidal_addon': tidal, 'radio_youtube': radio_state,
+                'conseil': conseil, **({'conseil_radio': conseil_radio} if conseil_radio else {})}
 
     return JSONResponse(await run_in_threadpool(_check), headers={'Cache-Control': 'no-store'})
 

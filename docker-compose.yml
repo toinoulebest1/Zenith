@@ -1,13 +1,15 @@
 services:
   web:
     build: .
-    env_file:
-      - .env
+    # Variables lues dans Coolify (onglet Environment Variables) ou, en local, dans le fichier .env
+    # placé à côté de ce fichier (Docker Compose le lit automatiquement pour remplir ${...}).
+    environment:
+      - QOBUZ_TOKEN=${QOBUZ_TOKEN:-}
+      - QOBUZ_USER_ID=${QOBUZ_USER_ID:-}
+      - LRCRED_SITE=${LRCRED_SITE:-}
+      - LRCRED_CONTACT=${LRCRED_CONTACT:-}
     ports:
       - "8000:8000"
-    volumes:
-      - .:/app
-    working_dir: /app
     # CORRECTION CRITIQUE : On lance api.index:app (Application Principale) au lieu de main:app (Proxy Tidal seul)
     command: uvicorn api.index:app --host 0.0.0.0 --port 8000
     restart: unless-stopped
