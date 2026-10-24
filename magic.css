@@ -36,7 +36,9 @@ body.starwars-mode .progress-bg { background: #330000 !important; }
 /* --- 3. MATRIX (Hacker) --- */
 body.matrix-mode { background: #000 !important; font-family: 'Courier New', monospace !important; }
 body.matrix-mode * { color: #00ff41 !important; border-color: #003b00 !important; }
-body.matrix-mode .app-layout, body.matrix-mode .track-card, body.matrix-mode .player-capsule, body.matrix-mode .sidebar, body.matrix-mode .search-container {
+/* Police mono sur le texte uniquement : les icônes gardent leur police (sinon carrés vides) */
+body.matrix-mode h1, body.matrix-mode h2, body.matrix-mode h3 { font-family: 'Courier New', monospace !important; }
+body.matrix-mode .main-feed, body.matrix-mode .right-panel, body.matrix-mode .track-card, body.matrix-mode .player-capsule, body.matrix-mode .sidebar, body.matrix-mode .search-field {
     background: rgba(0, 20, 0, 0.9) !important; box-shadow: none !important; border: 1px solid #00ff41 !important;
 }
 body.matrix-mode img { filter: grayscale(100%) sepia(100%) hue-rotate(90deg) saturate(500%) !important; }
@@ -88,7 +90,7 @@ body.ocean-mode {
 body.ocean-mode .app-layout { backdrop-filter: blur(5px) !important; }
 body.ocean-mode .player-capsule { animation: floaty 3s ease-in-out infinite; }
 
-@keyframes floaty { 0% { transform: translateX(-50%) translateY(0px); } 50% { transform: translateX(-50%) translateY(-10px); } 100% { transform: translateX(-50%) translateY(0px); } }
+@keyframes floaty { 0% { transform: translateY(0px); } 50% { transform: translateY(-6px); } 100% { transform: translateY(0px); } }
 
 .bubble {
     position: absolute; bottom: -20px; background: rgba(255,255,255,0.2); border-radius: 50%;

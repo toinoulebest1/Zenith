@@ -3,8 +3,8 @@
   "short_name": "Zenith",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#000000",
-  "theme_color": "#00d2ff",
+  "background_color": "#07070a",
+  "theme_color": "#07070a",
   "orientation": "portrait",
   "icons": [
     {

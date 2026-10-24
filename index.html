@@ -4,20 +4,23 @@
 <head>
     <meta charset="UTF-8">
     <meta name="referrer" content="no-referrer">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Zenith Ultimate</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Zenith</title>
 
     <link rel="manifest" href="manifest.json">
-    <meta name="theme-color" content="#000000">
+    <meta name="theme-color" content="#07070a">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/4472/4472584.png">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%235eead4'/%3E%3Cstop offset='1' stop-color='%237c5cff'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='9' fill='url(%23g)'/%3E%3Ctext x='16' y='23' font-size='21' font-family='Arial' font-weight='700' text-anchor='middle' fill='%2307070a'%3E%E2%88%9E%3C/text%3E%3C/svg%3E">
 
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;500;700;800&display=swap" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..800&family=Manrope:wght@400..800&display=swap" rel="stylesheet">
 
-    <link rel="stylesheet" href="magic.css">
     <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="magic.css">
 
     <!-- Leaflet (carte des souvenirs) + clustering -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
@@ -31,6 +34,10 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/shaka-player/4.3.5/shaka-player.compiled.js"></script>
     <script src="cast.js"></script>
     <script src="zenith-processor.js"></script>
+    <script>
+        // Couleur d'accent choisie (appliquée avant le premier rendu pour éviter un flash)
+        try { const a = JSON.parse(localStorage.getItem('zenith_accent') || 'null'); if (a && a.hex) { document.documentElement.style.setProperty('--primary', a.hex); document.documentElement.style.setProperty('--primary-rgb', a.rgb); document.documentElement.style.setProperty('--primary-ink', a.ink); } } catch (e) { }
+    </script>
 </head>
 
 <body>
@@ -38,167 +45,179 @@
     <div id="ambientOverlay"></div>
     <div id="orbitVisual" class="orbit-orb"></div>
 
-    <div id="toast" class="toast">Action effectuée</div>
+    <div id="toast" class="toast" role="status" aria-live="polite">Action effectuée</div>
 
+    <!-- ============ CONNEXION ============ -->
     <div id="loginScreen" class="login-screen">
-        <div class="orbit-orb center-stage" style="opacity: 0.5;"></div>
-        <div class="login-card">
-            <h1 style="margin-bottom: 20px; font-size: 2rem; color: var(--primary);">ZENITH</h1>
-            <h2 id="authTitle" style="margin-bottom: 30px; font-weight: 300;">Connexion</h2>
+        <div class="login-aurora"><span></span><span></span><span></span></div>
+        <div class="login-shell">
+            <section class="login-hero">
+                <div class="brand-lockup">
+                    <div class="brand-mark"><i class="fas fa-infinity"></i></div>
+                    <span class="brand-name">Zenith</span>
+                </div>
+                <h1 class="login-title">Votre musique,<br><em>qualité studio.</em></h1>
+                <p class="login-tagline">Des millions de titres en FLAC jusqu'au 24 bits, des paroles synchronisées et des
+                    écoutes partagées avec vos amis.</p>
+                <ul class="login-features">
+                    <li><i class="fas fa-wave-square"></i> Hi-Res Lossless</li>
+                    <li><i class="fas fa-microphone-alt"></i> Paroles en direct</li>
+                    <li><i class="fas fa-users"></i> Party Mode</li>
+                    <li><i class="fas fa-map-marked-alt"></i> Carte des souvenirs</li>
+                </ul>
+            </section>
 
-            <button id="btnSpotifyAction" class="btn-spotify" onclick="loginWithSpotify()">
-                <i class="fab fa-spotify"></i> Se connecter avec Spotify
-            </button>
+            <div class="login-card">
+                <h2 id="authTitle">Connexion</h2>
+                <p class="login-sub">Content de vous revoir.</p>
 
-            <div style="display:flex; align-items:center; width:100%; margin: 20px 0;">
-                <hr style="flex:1; border:0; border-top:1px solid rgba(255,255,255,0.1);">
-                <span style="padding:0 10px; color:#666; font-size:12px;">OU CLASSIQUE</span>
-                <hr style="flex:1; border:0; border-top:1px solid rgba(255,255,255,0.1);">
+                <button id="btnSpotifyAction" class="btn-spotify" onclick="loginWithSpotify()">
+                    <i class="fab fa-spotify"></i> Continuer avec Spotify
+                </button>
+
+                <div class="login-divider">ou par e-mail</div>
+
+                <input type="text" id="username" class="login-input" placeholder="Nom d'utilisateur" style="display:none;"
+                    autocomplete="username"
+                    onkeypress="if(event.key==='Enter') document.getElementById('email').focus()">
+                <input type="email" id="email" class="login-input" placeholder="Adresse e-mail" autocomplete="email"
+                    onkeypress="if(event.key==='Enter') document.getElementById('password').focus()">
+                <input type="password" id="password" class="login-input" placeholder="Mot de passe"
+                    autocomplete="current-password"
+                    onkeypress="if(event.key==='Enter') isLoginMode ? login(document.getElementById('email').value, this.value) : signup(document.getElementById('email').value, this.value)">
+                <button id="btnLoginAction" class="login-btn"
+                    onclick="isLoginMode ? login(document.getElementById('email').value, document.getElementById('password').value) : signup(document.getElementById('email').value, document.getElementById('password').value)">Se
+                    connecter</button>
+                <p id="authMessage"></p>
+                <div id="btnToggleMode" class="login-toggle" onclick="toggleAuthMode()">Pas de compte ? <b>Créer un
+                        compte</b></div>
             </div>
-
-            <input type="text" id="username" class="login-input" placeholder="Nom d'utilisateur" style="display:none;"
-                onkeypress="if(event.key==='Enter') document.getElementById('email').focus()">
-            <input type="email" id="email" class="login-input" placeholder="Email"
-                onkeypress="if(event.key==='Enter') document.getElementById('password').focus()">
-            <input type="password" id="password" class="login-input" placeholder="Mot de passe"
-                onkeypress="if(event.key==='Enter') isLoginMode ? login(document.getElementById('email').value, this.value) : signup(document.getElementById('email').value, this.value)">
-            <button id="btnLoginAction" class="login-btn"
-                onclick="isLoginMode ? login(document.getElementById('email').value, document.getElementById('password').value) : signup(document.getElementById('email').value, document.getElementById('password').value)">Se
-                connecter</button>
-            <p id="authMessage"
-                style="margin-top: 15px; min-height: 20px; font-size: 14px; opacity: 0; transition: 0.3s;"></p>
-            <div id="btnToggleMode" class="login-toggle" onclick="toggleAuthMode()">Pas de compte ? <b>Créer un
-                    compte</b></div>
         </div>
     </div>
 
-    <div id="createPlaylistModal" class="login-screen" style="display:none; z-index:2000; background:rgba(0,0,0,0.8);">
-        <div class="login-card">
-            <h2 style="margin-bottom: 20px;">Nouvelle Playlist</h2>
-            <input type="text" id="newPlaylistName" class="login-input" placeholder="Nom de la playlist...">
-            <div
-                style="display:flex; align-items:center; justify-content:space-between; margin:20px 0; text-align:left; width:100%;">
-                <span>Publique (visible par tous)</span>
-                <label class="switch"><input type="checkbox" id="newPlaylistPublic"><span
-                        class="slider round"></span></label>
+    <!-- ============ MODALES ============ -->
+    <div id="createPlaylistModal" class="modal" style="display:none;" onclick="if(event.target===this) closeCreatePlaylistModal()">
+        <div class="modal-card">
+            <div class="modal-head">
+                <div>
+                    <h2>Nouvelle playlist</h2>
+                    <p>Donnez-lui un nom, vous pourrez le changer plus tard.</p>
+                </div>
+                <button class="modal-close" onclick="closeCreatePlaylistModal()" title="Fermer"><i class="fas fa-times"></i></button>
             </div>
-            <div style="display:flex; gap:10px;">
-                <button class="login-btn" style="background:#333; color:white;"
-                    onclick="closeCreatePlaylistModal()">Annuler</button>
+            <input type="text" id="newPlaylistName" class="login-input" placeholder="Ma playlist du dimanche"
+                onkeypress="if(event.key==='Enter') createPlaylist()">
+            <label class="field-row">
+                <div><strong>Publique</strong><span>Visible et cherchable par tous</span></div>
+                <span class="switch"><input type="checkbox" id="newPlaylistPublic"><span class="slider round"></span></span>
+            </label>
+            <div class="btn-row">
+                <button class="login-btn btn-ghost" onclick="closeCreatePlaylistModal()">Annuler</button>
                 <button class="login-btn" onclick="createPlaylist()">Créer</button>
             </div>
         </div>
     </div>
 
-    <div id="editPlaylistModal" class="login-screen" style="display:none; z-index:2000; background:rgba(0,0,0,0.8);">
-        <div class="login-card">
-            <h2 style="margin-bottom: 20px;">Modifier Playlist</h2>
-            <input type="text" id="editPlaylistName" class="login-input" placeholder="Nom de la playlist...">
-            <div
-                style="display:flex; align-items:center; justify-content:space-between; margin:20px 0; text-align:left; width:100%;">
-                <span>Publique</span>
-                <label class="switch"><input type="checkbox" id="editPlaylistPublic"><span
-                        class="slider round"></span></label>
+    <div id="editPlaylistModal" class="modal" style="display:none;" onclick="if(event.target===this) closeEditPlaylistModal()">
+        <div class="modal-card">
+            <div class="modal-head">
+                <h2>Modifier la playlist</h2>
+                <button class="modal-close" onclick="closeEditPlaylistModal()" title="Fermer"><i class="fas fa-times"></i></button>
             </div>
-            <div style="display:flex; gap:10px;">
-                <button class="login-btn" style="background:#333; color:white;"
-                    onclick="closeEditPlaylistModal()">Annuler</button>
-                <button class="login-btn" onclick="savePlaylistEdits()">Sauvegarder</button>
+            <input type="text" id="editPlaylistName" class="login-input" placeholder="Nom de la playlist">
+            <label class="field-row">
+                <div><strong>Publique</strong><span>Visible et cherchable par tous</span></div>
+                <span class="switch"><input type="checkbox" id="editPlaylistPublic"><span class="slider round"></span></span>
+            </label>
+            <div class="btn-row">
+                <button class="login-btn btn-ghost" onclick="closeEditPlaylistModal()">Annuler</button>
+                <button class="login-btn" onclick="savePlaylistEdits()">Enregistrer</button>
             </div>
         </div>
     </div>
 
-    <div id="memoryModal" class="login-screen" style="display:none; z-index:2000; background:rgba(0,0,0,0.88);">
-        <div class="login-card" style="max-width:400px; gap:0;">
-            <h2 style="margin-bottom:4px; font-size:1.2rem;">Épingler un souvenir</h2>
-            <p style="color:#555; font-size:12px; margin-bottom:18px;">Attaché à cette musique pour toujours</p>
-            <div id="memoryTrackPreview"
-                style="display:flex; align-items:center; gap:12px; background:rgba(255,255,255,0.05); padding:12px; border-radius:12px; width:100%; margin-bottom:14px; border:1px solid rgba(255,255,255,0.07);">
-                <img id="memoryTrackArt" src=""
-                    style="width:48px; height:48px; border-radius:8px; object-fit:cover; flex-shrink:0;">
-                <div style="text-align:left; overflow:hidden; flex:1;">
-                    <div id="memoryTrackTitle"
-                        style="font-weight:600; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-                    </div>
-                    <div id="memoryTrackArtist" style="color:var(--primary); font-size:12px;"></div>
+    <div id="memoryModal" class="modal" style="display:none;" onclick="if(event.target===this) closeMemoryModal()">
+        <div class="modal-card">
+            <div class="modal-head">
+                <div>
+                    <h2>Épingler un souvenir</h2>
+                    <p>Attaché à cette musique pour toujours</p>
+                </div>
+                <button class="modal-close" onclick="closeMemoryModal()" title="Fermer"><i class="fas fa-times"></i></button>
+            </div>
+            <div id="memoryTrackPreview" class="memory-preview">
+                <img id="memoryTrackArt" src="" alt="">
+                <div>
+                    <div id="memoryTrackTitle"></div>
+                    <div id="memoryTrackArtist"></div>
                 </div>
             </div>
-            <textarea id="memoryNoteInput" placeholder="Ce souvenir me rappelle..."
-                style="width:100%; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12); border-radius:12px; color:white; padding:12px; font-family:inherit; font-size:14px; resize:none; min-height:80px; margin-bottom:12px; outline:none;"></textarea>
-            <label
-                style="display:flex; align-items:center; gap:10px; background:rgba(255,255,255,0.04); padding:12px; border-radius:12px; cursor:pointer; width:100%; margin-bottom:8px; border:1px dashed rgba(255,255,255,0.12);">
-                <i class="fas fa-image" style="color:#666;"></i>
-                <span id="memoryPhotoLabel" style="color:#666; font-size:13px;">Ajouter une photo (optionnel)</span>
-                <input type="file" id="memoryPhotoInput" accept="image/*" style="display:none;"
-                    onchange="previewMemoryPhoto(this)">
+            <textarea id="memoryNoteInput" placeholder="Ce souvenir me rappelle…"></textarea>
+            <label class="memory-photo-drop">
+                <i class="fas fa-image"></i>
+                <span id="memoryPhotoLabel">Ajouter une photo (optionnel)</span>
+                <input type="file" id="memoryPhotoInput" accept="image/*" style="display:none;" onchange="previewMemoryPhoto(this)">
             </label>
-            <img id="memoryPhotoPreview" src=""
-                style="display:none; width:100%; border-radius:10px; margin-bottom:10px; max-height:140px; object-fit:cover;">
-            <p style="font-size:10px; color:#444; margin:-4px 0 14px; text-align:left; line-height:1.5;">
-                <i class="fas fa-shield-alt" style="margin-right:4px;"></i>Vos photos sont hébergées de façon sécurisée
-                par un service tiers indépendant. Zenith ne conserve aucune image sur sa propre infrastructure.
-            </p>
-            <div
-                style="display:flex; align-items:center; gap:8px; color:#555; font-size:12px; margin-bottom:18px; padding:0 2px;">
-                <i class="fas fa-map-marker-alt" style="color:#ff0055; font-size:13px;"></i>
-                <span id="memoryLocationText">Récupération de la position...</span>
+            <img id="memoryPhotoPreview" src="" alt="" style="display:none;">
+            <p class="memory-privacy"><i class="fas fa-shield-alt"></i> Vos photos sont hébergées par un service tiers
+                indépendant. Zenith ne conserve aucune image sur sa propre infrastructure.</p>
+            <div class="memory-location">
+                <i class="fas fa-map-marker-alt"></i>
+                <span id="memoryLocationText">Récupération de la position…</span>
             </div>
-            <div style="display:flex; gap:10px; width:100%;">
-                <button class="login-btn" style="background:#222; color:#888; flex:1; border:1px solid #333;"
-                    onclick="closeMemoryModal()">Annuler</button>
-                <button class="login-btn" style="flex:2;" id="btnSaveMemory" onclick="saveMemory()"><i
-                        class="fas fa-thumbtack"></i> Épingler</button>
+            <div class="btn-row">
+                <button class="login-btn btn-ghost" onclick="closeMemoryModal()">Annuler</button>
+                <button class="login-btn" id="btnSaveMemory" onclick="saveMemory()"><i class="fas fa-thumbtack"></i> Épingler</button>
             </div>
         </div>
     </div>
 
-    <div id="addToPlaylistModal" class="login-screen" style="display:none; z-index:2000; background:rgba(0,0,0,0.8);">
-        <div class="login-card">
-            <h2 style="margin-bottom: 20px;">Ajouter à...</h2>
-            <div id="addToPlaylistList" style="max-height:300px; overflow-y:auto; width:100%;"></div>
-            <button class="login-btn" style="background:#333; color:white; margin-top:20px;"
-                onclick="closeAddToPlaylistModal()">Annuler</button>
+    <div id="addToPlaylistModal" class="modal" style="display:none;" onclick="if(event.target===this) closeAddToPlaylistModal()">
+        <div class="modal-card">
+            <div class="modal-head">
+                <h2>Ajouter à une playlist</h2>
+                <button class="modal-close" onclick="closeAddToPlaylistModal()" title="Fermer"><i class="fas fa-times"></i></button>
+            </div>
+            <div id="addToPlaylistList"></div>
+            <button class="login-btn btn-ghost" onclick="closeAddToPlaylistModal(); showPlaylists(); openCreatePlaylistModal();"><i class="fas fa-plus"></i> Nouvelle playlist</button>
         </div>
     </div>
 
-    <div id="partyModal" class="login-screen" style="display:none; z-index:2000; background:rgba(0,0,0,0.8);">
-        <div class="login-card" style="height: 80vh; justify-content: flex-start;">
-            <h2 style="margin-bottom: 10px;">Party Mode 🎉</h2>
+    <div id="partyModal" class="modal" style="display:none;" onclick="if(event.target===this) Party.closeModal()">
+        <div class="modal-card tall">
+            <div class="modal-head">
+                <div>
+                    <h2>Party Mode</h2>
+                    <p>Écoutez en synchro avec vos amis</p>
+                </div>
+                <button class="modal-close" onclick="Party.closeModal()" title="Fermer"><i class="fas fa-times"></i></button>
+            </div>
             <div id="partySetupContainer">
-                <p style="color:#ccc; margin-bottom:20px;">Écoutez de la musique en synchro avec vos amis.</p>
-                <button class="login-btn" onclick="Party.createRoom()">Créer une Room</button>
-                <div style="margin:15px 0; color:#555;">- OU -</div>
-                <input type="text" id="partyJoinCode" class="login-input" placeholder="Code de la room (ex: A4Z9)"
-                    style="text-transform:uppercase;">
-                <button class="login-btn" style="background:#333; color:white; margin-top:10px;"
-                    onclick="Party.joinRoom(document.getElementById('partyJoinCode').value)">Rejoindre</button>
+                <p class="party-intro">Créez une room et partagez son code : tout le monde entend la même chose, au même moment, et peut discuter.</p>
+                <button class="login-btn" onclick="Party.createRoom()"><i class="fas fa-plus"></i> Créer une room</button>
+                <div class="party-or">OU</div>
+                <input type="text" id="partyJoinCode" class="login-input" placeholder="Code (ex : A4Z9)" maxlength="8"
+                    onkeypress="if(event.key==='Enter') Party.joinRoom(this.value)">
+                <button class="login-btn btn-ghost" onclick="Party.joinRoom(document.getElementById('partyJoinCode').value)">Rejoindre</button>
             </div>
             <div id="partyActiveContainer" style="display:none;">
-                <div
-                    style="display:flex; justify-content:space-between; align-items:center; width:100%; margin-bottom:10px;">
-                    <div style="text-align:left;">
-                        <span style="font-size:10px; color:#888;">ROOM</span>
-                        <div id="partyCodeDisplay"
-                            style="font-size:20px; font-weight:800; color:var(--primary); letter-spacing:2px;">ABCD
-                        </div>
+                <div class="party-room-head">
+                    <div>
+                        <small>ROOM</small>
+                        <div id="partyCodeDisplay">ABCD</div>
                     </div>
                     <div>
-                        <button class="action-btn-mini" onclick="Party.copyLink()" title="Copier lien"><i
-                                class="fas fa-link"></i></button>
-                        <button class="action-btn-mini" style="color:#ff0055;" onclick="Party.leaveRoom()"
-                            title="Quitter"><i class="fas fa-power-off"></i></button>
+                        <button class="action-btn-mini" onclick="Party.copyLink()" title="Copier le lien"><i class="fas fa-link"></i></button>
+                        <button class="action-btn-mini" style="color:var(--secondary);" onclick="Party.leaveRoom()" title="Quitter"><i class="fas fa-power-off"></i></button>
                     </div>
                 </div>
                 <div class="chat-box-container" id="partyChatList"></div>
                 <div class="chat-input-area">
-                    <input type="text" id="partyChatInput" class="chat-input" placeholder="Votre message..."
+                    <input type="text" id="partyChatInput" class="chat-input" placeholder="Votre message…"
                         onkeypress="if(event.key==='Enter') Party.sendChat()">
-                    <button class="chat-send-btn" onclick="Party.sendChat()"><i class="fas fa-paper-plane"></i></button>
+                    <button class="chat-send-btn" onclick="Party.sendChat()" title="Envoyer"><i class="fas fa-paper-plane"></i></button>
                 </div>
             </div>
-            <button class="login-btn"
-                style="background:transparent; color:#888; margin-top:10px; border:1px solid #444; width:auto; align-self:center; padding:10px 30px;"
-                onclick="Party.closeModal()">Fermer</button>
         </div>
     </div>
 
@@ -209,240 +228,279 @@
         </div>
     </div>
 
+    <!-- ============ APPLICATION ============ -->
     <div class="app-layout">
-        <nav class="sidebar">
-            <div style="font-size: 24px; color: white;"><i class="fas fa-infinity"></i></div>
-            <div class="nav-item active" onclick="goHome()" title="Accueil"><i class="fas fa-search"></i></div>
-            <div class="nav-item" onclick="showFavorites()" title="Favoris"><i class="fas fa-heart"></i></div>
-            <div class="nav-item" onclick="showHistory()" title="Historique"><i class="fas fa-history"></i></div>
-            <div class="nav-item" onclick="showPlaylists()" title="Mes Playlists"><i class="fas fa-list"></i></div>
-            <div class="nav-item" onclick="toggleQueue()" title="File d'attente"><i class="fas fa-list-ol"></i></div>
-            <div class="nav-item" onclick="showWeeklyTop()" title="Top 10 Semaine"><i class="fas fa-trophy"></i></div>
-            <div class="nav-item" onclick="showTopCountries()" title="Top des pays"><i class="fas fa-globe-americas"></i></div>
-            <div class="nav-item" onclick="showMemories()" title="Mes Souvenirs"><i class="fas fa-bookmark"></i></div>
-            <div class="nav-item lyrics-btn" onclick="toggleLyrics()" title="Paroles (V)"><i
-                    class="fas fa-microphone-alt"></i></div>
-            <div class="nav-item" onclick="startBlindTest()" title="Blind Test"><i class="fas fa-gamepad"></i></div>
-            <div class="nav-item" id="btnPartyMenu" onclick="Party.openModal()" title="Party Mode">
-                <i class="fas fa-users"></i>
-                <div id="partyBadge" class="nav-badge">0</div>
+        <nav class="sidebar" id="sidebar" aria-label="Navigation principale">
+            <div class="sheet-handle"></div>
+            <div class="brand-lockup">
+                <div class="brand-mark"><i class="fas fa-infinity"></i></div>
+                <span class="brand-name">Zenith</span>
             </div>
-            <div class="nav-item" onclick="toggleEQ()" title="Audio FX"><i class="fas fa-sliders-h"></i></div>
-            <div class="nav-item" onclick="showProfileSettings()" title="Mon Compte"><i class="fas fa-user"></i></div>
-            <div class="nav-item" onclick="BluetoothManager.toggle()" title="Bluetooth"><i class="fab fa-bluetooth-b"
-                    id="btBtnIcon"></i></div>
-            <div class="nav-item" onclick="ZenithCast.triggerMenu()" title="Caster sur TV"><i class="fab fa-chromecast"
-                    id="castBtnIcon"></i></div>
-            <div class="nav-item" onclick="logout()" title="Déconnexion" style="margin-top: auto;"><i
-                    class="fas fa-sign-out-alt"></i></div>
+
+            <div class="nav-group">
+                <div class="nav-label">Découvrir</div>
+                <div class="nav-item active" data-nav="home" onclick="goHome()" title="Accueil"><i class="fas fa-house"></i><span>Accueil</span></div>
+                <div class="nav-item" data-nav="top" onclick="showWeeklyTop()" title="Top 10 de la semaine"><i class="fas fa-trophy"></i><span>Top 10 semaine</span></div>
+                <div class="nav-item" data-nav="countries" onclick="showTopCountries()" title="Top des pays"><i class="fas fa-earth-europe"></i><span>Top des pays</span></div>
+                <div class="nav-item" data-nav="blindtest" onclick="startBlindTest()" title="Blind test"><i class="fas fa-gamepad"></i><span>Blind test</span></div>
+            </div>
+
+            <div class="nav-group">
+                <div class="nav-label">Bibliothèque</div>
+                <div class="nav-item" data-nav="favorites" onclick="showFavorites()" title="Favoris"><i class="fas fa-heart"></i><span>Favoris</span></div>
+                <div class="nav-item" data-nav="playlists" onclick="showPlaylists()" title="Mes playlists"><i class="fas fa-layer-group"></i><span>Playlists</span></div>
+                <div class="nav-item" data-nav="history" onclick="showHistory()" title="Historique"><i class="fas fa-clock-rotate-left"></i><span>Historique</span></div>
+                <div class="nav-item" data-nav="memories" onclick="showMemories()" title="Mes souvenirs"><i class="fas fa-bookmark"></i><span>Souvenirs</span></div>
+            </div>
+
+            <div class="nav-group">
+                <div class="nav-label">Écoute</div>
+                <div class="nav-item" onclick="toggleQueue()" title="File d'attente"><i class="fas fa-list-ol"></i><span>File d'attente</span></div>
+                <div class="nav-item lyrics-btn" onclick="toggleLyrics()" title="Paroles (V)"><i class="fas fa-microphone-alt"></i><span>Paroles</span></div>
+                <div class="nav-item" onclick="toggleEQ()" title="Audio FX"><i class="fas fa-sliders-h"></i><span>Audio FX</span></div>
+                <div class="nav-item" id="btnPartyMenu" onclick="Party.openModal()" title="Party Mode">
+                    <i class="fas fa-users"></i><span>Party Mode</span>
+                    <div id="partyBadge" class="nav-badge">0</div>
+                </div>
+                <div class="nav-item" onclick="BluetoothManager.toggle()" title="Bluetooth"><i class="fab fa-bluetooth-b" id="btBtnIcon"></i><span>Bluetooth</span></div>
+                <div class="nav-item" onclick="ZenithCast.triggerMenu()" title="Caster sur TV"><i class="fab fa-chromecast" id="castBtnIcon"></i><span>Caster</span></div>
+            </div>
+
+            <div class="nav-footer">
+                <div class="nav-item" data-nav="profile" onclick="showProfileSettings()" title="Compte et paramètres"><i class="fas fa-circle-user"></i><span>Compte</span></div>
+                <div class="nav-item danger" onclick="logout()" title="Déconnexion"><i class="fas fa-arrow-right-from-bracket"></i><span>Déconnexion</span></div>
+            </div>
         </nav>
 
         <main class="main-feed">
             <div class="search-container" id="searchBarContainer">
-                <select id="searchType" class="search-select">
-                    <option value="all">Tout</option>
-                    <option value="track">Titres</option>
-                    <option value="album">Albums</option>
-                    <option value="playlist">Playlists</option>
-                    <option value="artist">Artistes</option>
-                </select>
-                <!-- MENU DE TRI AJOUTÉ ICI -->
-                <select id="searchSort" class="search-select" onchange="applySearchSort()">
-                    <option value="relevance">Pertinence</option>
-                    <option value="date_desc">Récents</option>
-                    <option value="date_asc">Anciens</option>
-                    <option value="alpha_asc">A-Z</option>
-                </select>
-                <input type="text" id="searchInput" class="search-input" placeholder="Rechercher...">
-                <button class="search-btn" id="btnSearch" onclick="performSearch()">GO</button>
+                <div class="search-field">
+                    <i class="fas fa-search"></i>
+                    <input type="search" id="searchInput" class="search-input" placeholder="Titres, artistes, albums, playlists…" autocomplete="off" enterkeyhint="search">
+                    <button class="search-btn" id="btnSearch" onclick="performSearch()"><span>Rechercher</span><i class="fas fa-arrow-right"></i></button>
+                </div>
+                <div class="search-filters">
+                    <select id="searchType" class="visually-hidden" tabindex="-1" aria-hidden="true">
+                        <option value="all">Tout</option>
+                        <option value="track">Titres</option>
+                        <option value="album">Albums</option>
+                        <option value="playlist">Playlists</option>
+                        <option value="artist">Artistes</option>
+                    </select>
+                    <button class="chip active" data-type="all" onclick="setSearchType('all')">Tout</button>
+                    <button class="chip" data-type="track" onclick="setSearchType('track')">Titres</button>
+                    <button class="chip" data-type="album" onclick="setSearchType('album')">Albums</button>
+                    <button class="chip" data-type="playlist" onclick="setSearchType('playlist')">Playlists</button>
+                    <button class="chip" data-type="artist" onclick="setSearchType('artist')">Artistes</button>
+                    <label class="sort-wrap">
+                        <span>Trier</span>
+                        <select id="searchSort" class="search-select" onchange="applySearchSort()">
+                            <option value="relevance">Pertinence</option>
+                            <option value="date_desc">Plus récents</option>
+                            <option value="date_asc">Plus anciens</option>
+                            <option value="alpha_asc">A → Z</option>
+                        </select>
+                    </label>
+                </div>
             </div>
 
             <div class="track-view" id="trackView">
                 <div class="header-controls">
-                    <button class="back-btn-main" onclick="goBack()" title="Retour"><i
-                            class="fas fa-arrow-left"></i></button>
-                    <h2 id="viewTitle" style="font-size: 1.2rem; opacity: 0.8; margin:0;">Accueil</h2>
+                    <button class="back-btn-main" onclick="goBack()" title="Retour"><i class="fas fa-arrow-left"></i></button>
+                    <h2 id="viewTitle">Accueil</h2>
+                    <div class="view-actions" id="viewActions"></div>
                 </div>
-                <div class="bento-grid" id="trackGrid" style="margin-top: 20px;"></div>
+                <div class="bento-grid" id="trackGrid"></div>
             </div>
 
             <div class="track-view" id="allPlaylistsView" style="display:none;">
                 <div class="header-controls">
-                    <button class="back-btn-main" onclick="goHome()" title="Retour"><i
-                            class="fas fa-arrow-left"></i></button>
-                    <h2 style="font-size: 1.2rem; margin:0;">Mes Playlists</h2>
+                    <button class="back-btn-main" onclick="goHome()" title="Retour"><i class="fas fa-arrow-left"></i></button>
+                    <h2>Mes playlists</h2>
+                    <div class="view-actions">
+                        <button class="pill-btn accent" onclick="openCreatePlaylistModal()"><i class="fas fa-plus"></i> Nouvelle</button>
+                    </div>
                 </div>
-                <div class="bento-grid" id="allPlaylistsGrid" style="margin-top: 20px;"></div>
+                <div class="bento-grid" id="allPlaylistsGrid"></div>
             </div>
 
             <div class="track-view" id="playlistView" style="display:none;">
                 <div class="header-controls">
-                    <button class="back-btn-main" onclick="goBack()" title="Retour"><i
-                            class="fas fa-arrow-left"></i></button>
-                    <h2 id="playlistTitle" style="font-size: 1.2rem; margin:0;">Ma Playlist</h2>
+                    <button class="back-btn-main" onclick="goBack()" title="Retour"><i class="fas fa-arrow-left"></i></button>
+                    <h2 id="playlistTitle">Ma playlist</h2>
+                    <div class="view-actions" id="playlistActions"></div>
                 </div>
-                <div class="bento-grid" id="playlistGrid" style="margin-top: 20px;"></div>
+                <div class="bento-grid" id="playlistGrid"></div>
             </div>
 
             <div class="artist-view" id="artistView">
-                <div class="header-controls" style="position: absolute; top: 20px; left: 20px; z-index: 10;">
-                    <button class="back-btn-main" onclick="goBack()" title="Retour"><i
-                            class="fas fa-arrow-left"></i></button>
+                <div class="header-controls">
+                    <button class="back-btn-main" onclick="goBack()" title="Retour"><i class="fas fa-arrow-left"></i></button>
                 </div>
                 <div class="artist-header-content">
-                    <img id="artistHeaderBg" class="artist-header-bg">
-                    <div
-                        style="background:linear-gradient(to bottom, transparent, #050505); position:absolute; top:0; left:0; width:100%; height:100%;">
-                    </div>
-                    <img id="artistProfileImg" class="artist-profile-img"
+                    <img id="artistHeaderBg" class="artist-header-bg" alt="">
+                    <div class="artist-header-shade"></div>
+                    <img id="artistProfileImg" class="artist-profile-img" alt=""
                         src="https://placehold.co/200x200/1a1a1a/666666?text=Artist">
                     <div class="artist-info">
+                        <div class="artist-kicker"><i class="fas fa-circle-check"></i> Artiste</div>
                         <h1 id="artistProfileName" class="artist-name-large">Artiste</h1>
-                        <div id="artistFans" class="artist-fans-badge" style="display:none;"><i
-                                class="fas fa-users"></i> 0 fans</div>
+                        <div id="artistFans" class="artist-fans-badge" style="display:none;"><i class="fas fa-users"></i> 0 fans</div>
                         <p id="artistProfileBio" class="artist-bio"></p>
                     </div>
                 </div>
 
                 <div class="artist-content-container">
-                    <div class="section-title"><i class="fas fa-fire"></i> Top Titres</div>
+                    <div class="section-title"><i class="fas fa-fire"></i> Titres populaires</div>
                     <div class="track-list" id="artistTopTracks"></div>
 
-                    <div class="section-title" style="margin-top:40px;"><i class="fas fa-compact-disc"></i> Albums</div>
+                    <div class="section-title"><i class="fas fa-compact-disc"></i> Albums</div>
                     <div class="bento-grid" id="artistAlbums"></div>
                 </div>
             </div>
 
             <div class="lyrics-view" id="lyricsView">
                 <div class="lyrics-header-actions">
+                    <a class="lyrics-credit" id="lyricsCredit" target="_blank" rel="noopener" style="display:none;"></a>
                     <button class="translate-btn" id="btnTranslate" onclick="toggleTranslation()">
                         <i class="fas fa-language"></i> Traduire
                     </button>
                 </div>
-                <div id="lyricsContent" style="margin-top: 50px;">
-                    <div style="margin-top: 100px; color: #555;">Paroles.</div>
+                <div id="lyricsContent">
+                    <div class="lyrics-placeholder">Lancez un titre pour afficher ses paroles.</div>
                 </div>
             </div>
 
             <div class="lyrics-view" id="blindTestView" style="display: none;"></div>
 
             <div class="track-view" id="memoriesView" style="display:none;">
-                <div class="header-controls" style="flex-wrap:wrap; gap:10px;">
-                    <button class="back-btn-main" onclick="goHome()" title="Retour"><i
-                            class="fas fa-arrow-left"></i></button>
-                    <h2 style="font-size:1.2rem; margin:0; flex:1;">Mes Souvenirs</h2>
-                    <button onclick="openMemoriesReel()" class="reel-trigger-btn"><i class="fas fa-film"></i> Il y a 1
-                        an</button>
-                    <button onclick="openMemoriesReelTest()" class="reel-trigger-btn"
-                        style="background:rgba(255,100,100,0.12);border-color:rgba(255,100,100,0.3);color:rgba(255,160,160,0.9);"
-                        title="Test : lecture aléatoire de tous vos souvenirs"><i class="fas fa-flask"></i>
-                        Test</button>
-                    <button onclick="openMemoriesMap()" class="reel-trigger-btn"
-                        style="background:rgba(0,210,255,0.12);border-color:rgba(0,210,255,0.3);color:var(--primary);"
-                        title="Voir tous vos souvenirs sur une carte"><i class="fas fa-map-marked-alt"></i>
-                        Carte</button>
+                <div class="header-controls">
+                    <button class="back-btn-main" onclick="goHome()" title="Retour"><i class="fas fa-arrow-left"></i></button>
+                    <h2>Mes souvenirs</h2>
+                    <div class="memories-actions">
+                        <button onclick="openMemoriesReel()" class="reel-trigger-btn"><i class="fas fa-film"></i> Il y a 1 an</button>
+                        <button onclick="openMemoriesReelTest()" class="reel-trigger-btn rose" title="Lecture aléatoire de tous vos souvenirs"><i class="fas fa-shuffle"></i> Rétrospective</button>
+                        <button onclick="openMemoriesMap()" class="reel-trigger-btn cyan" title="Voir tous vos souvenirs sur une carte"><i class="fas fa-map-marked-alt"></i> Carte</button>
+                    </div>
                 </div>
-                <div id="memoriesFeed"
-                    style="margin-top:20px; display:flex; flex-direction:column; gap:14px; padding-bottom:120px;"></div>
+                <div id="memoriesFeed"></div>
             </div>
 
             <div class="profile-view" id="profileView">
                 <div class="profile-container">
-                    <h2 style="margin-bottom: 30px; font-size: 24px;">Mon Profil</h2>
-                    <div class="profile-avatar-wrapper" onclick="triggerAvatarUpload()">
-                        <img src="https://placehold.co/400x400/1a1a1a/666666?text=U" id="profileAvatarPreview"
-                            class="profile-avatar">
-                        <div class="profile-avatar-overlay"><i class="fas fa-camera"></i></div>
-                        <input type="file" id="profileAvatarInput" accept="image/*" style="display: none;">
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Nom d'utilisateur</label>
-                        <input type="text" id="profileUsername" class="form-input" placeholder="Votre pseudo">
-                    </div>
-                    <button class="save-btn" id="btnSaveProfile" onclick="updateProfile()">Enregistrer les
-                        modifications</button>
+                    <h2 class="profile-title">Compte &amp; paramètres</h2>
 
-                    <div style="margin-top: 15px; display:flex; flex-direction:column; gap:10px;">
-                        <button class="login-btn" id="btnFixSpotify" onclick="fixSpotifyTags()"
-                            style="background:transparent; border:1px solid #ff0055; color:#ff0055; font-size:12px;">Réparer
-                            les badges Spotify (Party Bug)</button>
-                        <button class="login-btn" id="btnMigrateTidal" onclick="migrateTidalLegacy()"
-                            style="background:transparent; border:1px solid #00d2ff; color:#00d2ff; font-size:12px;">Migrer
-                            anciens titres Tidal (v2)</button>
-                    </div>
-
-                    <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 30px 0;">
-
-                    <h3 style="margin-bottom: 20px; text-align: left;">Audio</h3>
-
-                    <div class="form-group"
-                        style="display: flex; justify-content: space-between; align-items: center; background:rgba(255,255,255,0.05); padding:15px; border-radius:12px; border:1px solid rgba(255,255,255,0.1);">
-                        <div style="display:flex; flex-direction:column; align-items:flex-start;">
-                            <label class="form-label" style="margin:0; color:#00ff88;"><i
-                                    class="fab fa-bluetooth-b"></i> Mode Audio Direct</label>
-                            <span style="font-size:10px; color:#aaa;">Pour Bluetooth voiture. Désactive EQ/FX pour
-                                éviter les coupures.</span>
+                    <div class="profile-card">
+                        <div class="profile-avatar-wrapper" onclick="triggerAvatarUpload()" title="Changer la photo">
+                            <img src="https://placehold.co/400x400/1a1a1a/666666?text=U" id="profileAvatarPreview" class="profile-avatar" alt="">
+                            <div class="profile-avatar-overlay"><i class="fas fa-camera"></i></div>
+                            <input type="file" id="profileAvatarInput" accept="image/*" style="display: none;">
                         </div>
-                        <label class="switch"><input type="checkbox" id="settingDirectAudio"
-                                onchange="changeSetting('directAudio', this.checked)"><span
-                                class="slider round"></span></label>
-                    </div>
-
-                    <div class="form-group" style="display: flex; justify-content: space-between; align-items: center;">
-                        <label class="form-label" style="margin:0;">Normalisateur actif au démarrage</label>
-                        <label class="switch"><input type="checkbox" id="settingLimiter"
-                                onchange="changeSetting('limiter', this.checked)"><span
-                                class="slider round"></span></label>
-                    </div>
-                    <div class="form-group">
-                        <div style="display: flex; justify-content: space-between;">
-                            <label class="form-label">Durée Crossfade par défaut</label>
-                            <span id="settingCrossfadeVal" style="color:var(--primary)">0s</span>
-                        </div>
-                        <input type="range" class="settings-slider" id="settingCrossfade" min="0" max="12" step="1"
-                            oninput="changeSetting('crossfade', this.value)">
-                    </div>
-                    <h3 style="margin-bottom: 20px; text-align: left; margin-top: 30px;">Apparence</h3>
-                    <div class="form-group" style="display: flex; justify-content: space-between; align-items: center;">
-                        <label class="form-label" style="margin:0;">Effets Magiques (Thèmes)</label>
-                        <label class="switch"><input type="checkbox" id="settingMagic"
-                                onchange="changeSetting('magic', this.checked)"><span
-                                class="slider round"></span></label>
-                    </div>
-
-                    <div class="form-group" style="display: flex; justify-content: space-between; align-items: center;">
-                        <div style="display:flex; flex-direction:column; align-items:flex-start;">
-                            <label class="form-label" style="margin:0;">Mode Éco (Performance)</label>
-                            <span style="font-size:10px; color:#aaa;">Pour tablettes/PC lents. Désactive les
-                                flous.</span>
-                        </div>
-                        <label class="switch"><input type="checkbox" id="settingEcoMode"
-                                onchange="changeSetting('eco', this.checked)"><span class="slider round"></span></label>
-                    </div>
-
-                    <div class="form-group" style="margin-top:30px; text-align:left;">
-                        <p style="color:#888; font-size:12px; margin-bottom:10px;">Raccourcis Clavier</p>
-                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; font-size:12px; color:#ccc;">
-                            <div>Espace : Lecture/Pause</div>
-                            <div>Flèches ⬅️ / ➡️ : -/+ 5 sec</div>
-                            <div>Flèches ⬆️ / ⬇️ : Volume</div>
-                            <div>F : Mode Zen</div>
+                        <div class="profile-card-body">
+                            <div class="form-group">
+                                <label class="form-label" for="profileUsername">Nom d'utilisateur</label>
+                                <input type="text" id="profileUsername" class="form-input" placeholder="Votre pseudo">
+                            </div>
+                            <button class="save-btn" id="btnSaveProfile" onclick="updateProfile()">Enregistrer</button>
                         </div>
                     </div>
+
+                    <section class="settings-section">
+                        <div class="settings-section-title"><i class="fas fa-headphones"></i> Audio</div>
+                        <div class="setting-row">
+                            <div class="setting-text">
+                                <strong style="color:var(--limiter-green);"><i class="fab fa-bluetooth-b"></i> Mode audio direct</strong>
+                                <span>Lecture sans coupure (Bluetooth, voiture). Désactive l'égaliseur et les effets.</span>
+                            </div>
+                            <label class="switch"><input type="checkbox" id="settingDirectAudio" onchange="changeSetting('directAudio', this.checked)"><span class="slider round"></span></label>
+                        </div>
+                        <div class="setting-row">
+                            <div class="setting-text">
+                                <strong>Normalisateur au démarrage</strong>
+                                <span>Égalise le volume entre les titres.</span>
+                            </div>
+                            <label class="switch"><input type="checkbox" id="settingLimiter" onchange="changeSetting('limiter', this.checked)"><span class="slider round"></span></label>
+                        </div>
+                        <div class="setting-row stacked">
+                            <div class="setting-head">
+                                <div class="setting-text"><strong>Fondu enchaîné</strong><span>Durée du crossfade entre deux titres.</span></div>
+                                <span id="settingCrossfadeVal" class="setting-value">0s</span>
+                            </div>
+                            <input type="range" class="settings-slider" id="settingCrossfade" min="0" max="12" step="1" oninput="changeSetting('crossfade', this.value)">
+                        </div>
+                    </section>
+
+                    <section class="settings-section">
+                        <div class="settings-section-title"><i class="fas fa-palette"></i> Apparence</div>
+                        <div class="setting-row">
+                            <div class="setting-text">
+                                <strong>Couleur d'accent</strong>
+                                <span>Boutons, liens et éléments actifs.</span>
+                            </div>
+                            <div class="accent-swatches" id="accentSwatches"></div>
+                        </div>
+                        <div class="setting-row">
+                            <div class="setting-text">
+                                <strong>Effets magiques</strong>
+                                <span>Thèmes visuels déclenchés par certains titres.</span>
+                            </div>
+                            <label class="switch"><input type="checkbox" id="settingMagic" onchange="changeSetting('magic', this.checked)"><span class="slider round"></span></label>
+                        </div>
+                        <div class="setting-row">
+                            <div class="setting-text">
+                                <strong>Mode éco</strong>
+                                <span>Pour tablettes et PC lents : désactive flous et animations.</span>
+                            </div>
+                            <label class="switch"><input type="checkbox" id="settingEcoMode" onchange="changeSetting('eco', this.checked)"><span class="slider round"></span></label>
+                        </div>
+                    </section>
+
+                    <section class="settings-section">
+                        <div class="settings-section-title"><i class="fas fa-keyboard"></i> Raccourcis clavier</div>
+                        <div class="shortcut-grid">
+                            <div class="shortcut"><kbd>Espace</kbd> Lecture / pause</div>
+                            <div class="shortcut"><kbd>←</kbd><kbd>→</kbd> −5 s / +5 s</div>
+                            <div class="shortcut"><kbd>↑</kbd><kbd>↓</kbd> Volume</div>
+                            <div class="shortcut"><kbd>F</kbd> Mode zen</div>
+                        </div>
+                    </section>
+
+                    <section class="settings-section">
+                        <div class="settings-section-title"><i class="fas fa-screwdriver-wrench"></i> Maintenance</div>
+                        <div class="maintenance-row">
+                            <button class="login-btn btn-danger-outline" id="btnFixSpotify" onclick="fixSpotifyTags()">Réparer les badges Spotify</button>
+                            <button class="login-btn btn-outline" id="btnMigrateTidal" onclick="migrateTidalLegacy()">Migrer les anciens titres Tidal</button>
+                        </div>
+                    </section>
                 </div>
             </div>
         </main>
 
-        <aside class="right-panel" id="rightPanel">
+        <aside class="right-panel" id="rightPanel" aria-label="Lecture en cours">
+            <div class="np-topbar">
+                <button class="icon-btn np-close" onclick="closeNowPlaying()" title="Réduire"><i class="fas fa-chevron-down"></i></button>
+                <span class="np-label">Lecture en cours</span>
+                <button class="icon-btn" onclick="toggleQueue()" title="File d'attente"><i class="fas fa-list-ol"></i></button>
+            </div>
             <div class="rp-header">
                 <div class="xl-image-wrapper">
                     <div id="xlBadge" class="xl-badge smooth-fade">HI-RES</div>
-                    <img src="https://placehold.co/600x600/1a1a1a/444444?text=Zenith" id="xlArt"
-                        class="album-art-xl smooth-fade">
+                    <img src="https://placehold.co/600x600/17171d/3a3a46?text=Zenith" id="xlArt" class="album-art-xl smooth-fade" alt="">
                 </div>
-                <h2 id="xlTitle" class="smooth-fade" style="font-size: 1.2rem; margin-bottom: 5px;">Prêt</h2>
-                <p id="xlArtist" class="smooth-fade" style="color: var(--primary); font-size: 1rem;">...</p>
+                <div class="np-meta">
+                    <h2 id="xlTitle" class="smooth-fade">Prêt à écouter</h2>
+                    <p id="xlArtist" class="smooth-fade" onclick="if(tracks[currentIndex]) { closeNowPlaying(); openArtistProfile(tracks[currentIndex].performer.name, tracks[currentIndex].artist_id, tracks[currentIndex].source); }">Choisissez un titre</p>
+                    <p id="xlQuality" class="np-quality"></p>
+                </div>
             </div>
+
+            <section class="up-next" id="upNext">
+                <div class="up-next-head">
+                    <h3>À suivre</h3>
+                    <button class="link-btn" onclick="toggleQueue()">Tout voir</button>
+                </div>
+                <div id="upNextList"></div>
+            </section>
 
             <div class="wand-container" id="wandContainer">
                 <div class="wand-light"></div>
@@ -452,71 +510,60 @@
             <div id="queuePanel" class="queue-panel">
                 <div class="queue-header">
                     <h3>File d'attente</h3>
-                    <button class="close-eq" onclick="toggleQueue()"><i class="fas fa-times"></i></button>
+                    <button class="close-eq" onclick="toggleQueue()" title="Fermer"><i class="fas fa-times"></i></button>
                 </div>
                 <div id="queueList" class="queue-list"></div>
             </div>
         </aside>
 
-        <div class="eq-overlay" id="eqView">
+        <div class="eq-overlay" id="eqView" role="dialog" aria-label="Audio FX">
             <div class="eq-header">
-                <h3>Audio FX</h3><button class="close-eq" onclick="toggleEQ()"><i class="fas fa-times"></i></button>
+                <h3><i class="fas fa-sliders-h"></i> Audio FX</h3>
+                <button class="close-eq" onclick="toggleEQ()" title="Fermer"><i class="fas fa-times"></i></button>
             </div>
+            <p class="eq-note" id="eqDirectNote"><i class="fab fa-bluetooth-b"></i> Le mode audio direct est actif : la lecture passe sans traitement pour éviter les coupures, donc l'égaliseur et les effets sont désactivés.</p>
             <div class="xfade-section">
-                <div style="display:flex; justify-content:space-between; margin-bottom:5px;"><span
-                        style="font-size:12px; color:#888; font-weight:bold;">DURÉE CROSSFADE</span><span id="xfadeVal"
-                        style="font-size:12px; color:var(--primary);">0s</span></div>
-                <input type="range" class="xfade-range" min="0" max="12" step="1" value="0"
-                    oninput="updateCrossfade(this.value)">
+                <div class="xfade-head"><span>FONDU ENCHAÎNÉ</span><span id="xfadeVal">0s</span></div>
+                <input type="range" class="xfade-range" min="0" max="12" step="1" value="0" oninput="updateCrossfade(this.value)">
             </div>
             <div class="eq-sliders">
-                <div class="eq-band"><input type="range" class="eq-range" min="-12" max="12" value="0" data-freq="60"
-                        oninput="updateEQ(0, this.value)"><span>60Hz</span></div>
-                <div class="eq-band"><input type="range" class="eq-range" min="-12" max="12" value="0" data-freq="230"
-                        oninput="updateEQ(1, this.value)"><span>230Hz</span></div>
-                <div class="eq-band"><input type="range" class="eq-range" min="-12" max="12" value="0" data-freq="910"
-                        oninput="updateEQ(2, this.value)"><span>910Hz</span></div>
-                <div class="eq-band"><input type="range" class="eq-range" min="-12" max="12" value="0" data-freq="4000"
-                        oninput="updateEQ(3, this.value)"><span>4kHz</span></div>
-                <div class="eq-band"><input type="range" class="eq-range" min="-12" max="12" value="0" data-freq="14000"
-                        oninput="updateEQ(4, this.value)"><span>14kHz</span></div>
+                <div class="eq-band"><input type="range" class="eq-range" min="-12" max="12" value="0" data-freq="60" oninput="updateEQ(0, this.value)"><span>60Hz</span></div>
+                <div class="eq-band"><input type="range" class="eq-range" min="-12" max="12" value="0" data-freq="230" oninput="updateEQ(1, this.value)"><span>230Hz</span></div>
+                <div class="eq-band"><input type="range" class="eq-range" min="-12" max="12" value="0" data-freq="910" oninput="updateEQ(2, this.value)"><span>910Hz</span></div>
+                <div class="eq-band"><input type="range" class="eq-range" min="-12" max="12" value="0" data-freq="4000" oninput="updateEQ(3, this.value)"><span>4kHz</span></div>
+                <div class="eq-band"><input type="range" class="eq-range" min="-12" max="12" value="0" data-freq="14000" oninput="updateEQ(4, this.value)"><span>14kHz</span></div>
             </div>
-            <button class="limiter-btn" id="limiterBtn" onclick="toggleLimiter()"><i
-                    class="fas fa-compress-arrows-alt"></i> NORMALISATEUR</button>
-            <button class="orbit-btn" id="orbitBtn" onclick="toggleOrbit()"><i class="fas fa-globe-americas"></i> 8D
-                ORBIT (WORKLET)</button>
-            <button class="eq-reset-btn" onclick="resetEQ()">Réinitialiser EQ</button>
+            <div class="fx-btn-row">
+                <button class="limiter-btn" id="limiterBtn" onclick="toggleLimiter()"><i class="fas fa-compress-arrows-alt"></i> Normaliser</button>
+                <button class="orbit-btn" id="orbitBtn" onclick="toggleOrbit()"><i class="fas fa-earth-europe"></i> 8D Orbit</button>
+            </div>
+            <button class="eq-reset-btn" onclick="resetEQ()">Réinitialiser l'égaliseur</button>
         </div>
 
         <div class="player-capsule">
             <div class="radio-badge" id="radioBadge">RADIO AUTO</div>
             <div class="cap-info">
-                <img src="https://placehold.co/60x60/1a1a1a/444444?text=Z" id="capArt" class="cap-img smooth-fade">
-                <div style="display:flex; align-items:center; flex:1; overflow:hidden;">
-                    <div class="cap-text">
-                        <div id="capTitle" class="cap-title smooth-fade">Titre</div>
-                        <div id="capArtist" class="cap-artist smooth-fade"
-                            onclick="if(tracks[currentIndex]) openArtistProfile(tracks[currentIndex].performer.name, tracks[currentIndex].artist_id, tracks[currentIndex].source)">
-                            Artiste</div>
-                    </div>
-                    <button id="btnLike" class="action-btn-mini" onclick="toggleLike()" title="Ajouter aux favoris"><i
-                            class="far fa-heart"></i></button>
-                    <button class="action-btn-mini" onclick="openAddToPlaylistModal()" title="Ajouter à une Playlist"><i
-                            class="fas fa-list-ul"></i></button>
-                    <button class="share-btn-mini" onclick="copyLink()" title="Partager"><i class="fas fa-link"
-                            style="color:var(--text-dim)"></i></button>
-                    <button class="action-btn-mini" onclick="openMemoryModal()" title="Épingler un souvenir"
-                        id="btnPinMemory"><i class="fas fa-thumbtack"></i></button>
+                <img src="https://placehold.co/60x60/17171d/3a3a46?text=Z" id="capArt" class="cap-img smooth-fade" alt="">
+                <div class="cap-text">
+                    <div id="capTitle" class="cap-title smooth-fade">Aucun titre</div>
+                    <div id="capArtist" class="cap-artist smooth-fade"
+                        onclick="if(tracks[currentIndex]) openArtistProfile(tracks[currentIndex].performer.name, tracks[currentIndex].artist_id, tracks[currentIndex].source)">
+                        Lancez une musique</div>
+                </div>
+                <div class="cap-actions">
+                    <button id="btnLike" class="action-btn-mini" onclick="toggleLike()" title="Ajouter aux favoris"><i class="far fa-heart"></i></button>
+                    <button class="action-btn-mini" onclick="openAddToPlaylistModal()" title="Ajouter à une playlist"><i class="fas fa-plus"></i></button>
+                    <button class="share-btn-mini" onclick="copyLink()" title="Copier le lien"><i class="fas fa-link"></i></button>
+                    <button class="action-btn-mini" onclick="openMemoryModal()" title="Épingler un souvenir" id="btnPinMemory"><i class="fas fa-thumbtack"></i></button>
                 </div>
             </div>
             <div class="cap-center">
                 <div class="controls">
-                    <button class="ctrl-btn" id="btnShuffle"><i class="fas fa-random"></i></button>
-                    <button class="ctrl-btn" id="btnPrev"><i class="fas fa-step-backward"></i></button>
-                    <button class="play-btn" id="btnPlay"><i class="fas fa-play" id="playIcon"></i></button>
-                    <button class="ctrl-btn" id="btnNext"><i class="fas fa-step-forward"></i></button>
-                    <button class="ctrl-btn lyrics-btn" onclick="toggleLyrics()"><i
-                            class="fas fa-microphone"></i></button>
+                    <button class="ctrl-btn" id="btnShuffle" title="Aléatoire"><i class="fas fa-shuffle"></i></button>
+                    <button class="ctrl-btn" id="btnPrev" title="Précédent"><i class="fas fa-backward-step"></i></button>
+                    <button class="play-btn" id="btnPlay" title="Lecture / pause"><i class="fas fa-play" id="playIcon"></i></button>
+                    <button class="ctrl-btn" id="btnNext" title="Suivant"><i class="fas fa-forward-step"></i></button>
+                    <button class="ctrl-btn lyrics-btn" onclick="toggleLyrics()" title="Paroles (V)"><i class="fas fa-microphone-alt"></i></button>
                 </div>
                 <div class="timeline-box">
                     <span id="currTime">0:00</span>
@@ -528,11 +575,25 @@
                 </div>
             </div>
             <div class="cap-right">
-                <i class="fas fa-volume-up" style="color:#888; font-size:12px;"></i>
-                <input type="range" class="vol-slider" min="0" max="1" step="0.01" value="1">
+                <button class="ctrl-btn" onclick="toggleQueue()" title="File d'attente"><i class="fas fa-list-ol"></i></button>
+                <button class="ctrl-btn" onclick="toggleEQ()" title="Audio FX"><i class="fas fa-sliders-h"></i></button>
+                <div class="vol-wrap">
+                    <i class="fas fa-volume-high"></i>
+                    <input type="range" class="vol-slider" min="0" max="1" step="0.01" value="1" aria-label="Volume">
+                </div>
             </div>
         </div>
     </div>
+
+    <!-- Navigation mobile -->
+    <nav class="mobile-tabbar" aria-label="Navigation mobile">
+        <button class="tab-item active" data-tab="home" onclick="goHome()"><i class="fas fa-house"></i><span>Accueil</span></button>
+        <button class="tab-item" data-tab="search" onclick="focusSearch()"><i class="fas fa-search"></i><span>Rechercher</span></button>
+        <button class="tab-item" data-tab="favorites" onclick="showFavorites()"><i class="fas fa-heart"></i><span>Favoris</span></button>
+        <button class="tab-item" data-tab="playlists" onclick="showPlaylists()"><i class="fas fa-layer-group"></i><span>Playlists</span></button>
+        <button class="tab-item" data-tab="more" onclick="toggleMoreSheet()"><i class="fas fa-ellipsis"></i><span>Plus</span></button>
+    </nav>
+    <div class="sheet-backdrop" id="sheetBackdrop" onclick="closeMoreSheet()"></div>
 
     <!-- MEMORIES REEL OVERLAY -->
     <div id="memoriesReelOverlay" style="display:none; position:fixed; inset:0; z-index:5000; overflow:hidden; background:#000;">
@@ -668,6 +729,9 @@
         let originalLyricsData = [];
         let translatedLyricsData = [];
         let isTranslated = false;
+        // Paroles enrichies (lrc.red) : source/crédit/traductions, traduction affichée sous les vers,
+        // boucle d'animation mot à mot, pause du défilement auto quand l'utilisateur fait défiler
+        let lyricsMeta = null, lyricsTranslation = null, lyricsRaf = null, lyricsScrollHold = 0;
 
         // --- VARIABLES AUDIO WORKLET ---
         let audioCtx, zenithNode, sourceA, sourceB;
@@ -687,6 +751,91 @@
         let navStack = [];
 
         function resetNavStack() { navStack = []; }
+
+        // --- UI : états, navigation, mobile ---
+        // Bloc d'état réutilisable (chargement / vide / erreur) pour les grilles et listes
+        function uiState(kind, msg, icon) {
+            const icons = { loading: 'fa-circle-notch fa-spin', empty: 'fa-folder-open', error: 'fa-triangle-exclamation' };
+            return `<div class="ui-state ${kind}"><i class="fas ${icon || icons[kind] || icons.empty}"></i><p>${msg}</p></div>`;
+        }
+
+        const MAIN_VIEWS = ['trackView', 'artistView', 'lyricsView', 'blindTestView', 'profileView', 'playlistView', 'allPlaylistsView', 'memoriesView'];
+        function hideAllViews() {
+            MAIN_VIEWS.forEach(id => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
+            document.getElementById('searchBarContainer').style.display = 'none';
+            closeMoreSheet();
+        }
+
+        // Onglet actif : barre latérale (navKey) + barre d'onglets mobile (tabKey)
+        function setActiveNav(navKey, tabKey) {
+            document.querySelectorAll('.nav-item[data-nav]').forEach(n => n.classList.toggle('active', n.dataset.nav === navKey));
+            const tab = tabKey || (['home', 'favorites', 'playlists'].includes(navKey) ? navKey : 'more');
+            document.querySelectorAll('.tab-item[data-tab]').forEach(n => n.classList.toggle('active', n.dataset.tab === tab));
+        }
+
+        // Filtres de recherche (puces) : pilotent le <select id="searchType"> lu par performSearch
+        function syncSearchChips() {
+            const v = document.getElementById('searchType').value;
+            document.querySelectorAll('.search-filters .chip').forEach(c => c.classList.toggle('active', c.dataset.type === v));
+        }
+        function setSearchType(type) {
+            document.getElementById('searchType').value = type;
+            syncSearchChips();
+            if (document.getElementById('searchInput').value.trim()) performSearch();
+        }
+        function focusSearch() {
+            goHome();
+            setActiveNav('home', 'search');
+            setTimeout(() => document.getElementById('searchInput').focus(), 50);
+        }
+
+        // Feuille « Plus » (mobile) = la barre latérale qui remonte
+        function toggleMoreSheet() {
+            const open = !document.getElementById('sidebar').classList.contains('sheet-open');
+            document.getElementById('sidebar').classList.toggle('sheet-open', open);
+            document.getElementById('sheetBackdrop').classList.toggle('show', open);
+        }
+        function closeMoreSheet() {
+            const sb = document.getElementById('sidebar');
+            if (sb) sb.classList.remove('sheet-open');
+            const bd = document.getElementById('sheetBackdrop');
+            if (bd) bd.classList.remove('show');
+        }
+
+        // « Lecture en cours » plein écran (tablette / mobile)
+        function isCompactLayout() { return window.matchMedia('(max-width: 1024px)').matches; }
+        function openNowPlaying() {
+            if (!isCompactLayout()) return;
+            closeMoreSheet();
+            document.body.classList.add('np-open');
+        }
+        function closeNowPlaying() {
+            document.body.classList.remove('np-open');
+            const rp = document.getElementById('rightPanel');
+            if (rp && rp.classList.contains('mobile-active')) toggleQueue();
+        }
+
+        // Couleur d'accent (stockée sur l'appareil)
+        const ACCENTS = [
+            { name: 'Menthe', hex: '#5eead4', rgb: '94, 234, 212', ink: '#03201b' },
+            { name: 'Cyan', hex: '#38d4ff', rgb: '56, 212, 255', ink: '#021822' },
+            { name: 'Lilas', hex: '#b9a5ff', rgb: '185, 165, 255', ink: '#160b33' },
+            { name: 'Rose', hex: '#ff8fb1', rgb: '255, 143, 177', ink: '#2d0613' },
+            { name: 'Ambre', hex: '#fbbf5a', rgb: '251, 191, 90', ink: '#2a1700' },
+            { name: 'Citron', hex: '#c4f25c', rgb: '196, 242, 92', ink: '#172300' },
+        ];
+        function applyAccent(a) {
+            const root = document.documentElement.style;
+            root.setProperty('--primary', a.hex); root.setProperty('--primary-rgb', a.rgb); root.setProperty('--primary-ink', a.ink);
+            try { localStorage.setItem('zenith_accent', JSON.stringify(a)); } catch (e) { }
+            renderAccentSwatches();
+        }
+        function renderAccentSwatches() {
+            const box = document.getElementById('accentSwatches');
+            if (!box) return;
+            const current = getComputedStyle(document.documentElement).getPropertyValue('--primary').trim().toLowerCase();
+            box.innerHTML = ACCENTS.map((a, i) => `<button class="accent-swatch${a.hex === current ? ' active' : ''}" style="--swatch:${a.hex}" title="${a.name}" onclick="applyAccent(ACCENTS[${i}])"></button>`).join('');
+        }
         function pushNavState() {
             navStack.push({
                 gridItems: [...currentGridItems],
@@ -802,7 +951,7 @@
         }
 
         const originalLoadProfile = window.loadProfile; window.loadProfile = async function () { if (originalLoadProfile) await originalLoadProfile(); const { data: { user } } = await supabaseClient.auth.getUser(); if (!user) return; if (window.loadUserPlaylists) window.loadUserPlaylists(); if (window.loadUserHistory) await window.loadUserHistory(); const { data, error } = await supabaseClient.from('profiles').select('settings').eq('id', user.id).single(); if (data && data.settings) { userSettings = { ...userSettings, ...data.settings }; applySettings(userSettings); localStorage.setItem('zenith_pref_limiter', userSettings.limiter); localStorage.setItem('zenith_pref_crossfade', userSettings.crossfade); localStorage.setItem('zenith_pref_magic', userSettings.magic); localStorage.setItem('zenith_pref_eco', userSettings.eco); localStorage.setItem('zenith_pref_directAudio', userSettings.directAudio); } };
-        function showProfileSettings() { document.getElementById('trackView').style.display = 'none'; document.getElementById('artistView').style.display = 'none'; document.getElementById('lyricsView').style.display = 'none'; document.getElementById('blindTestView').style.display = 'none'; document.getElementById('allPlaylistsView').style.display = 'none'; document.getElementById('playlistView').style.display = 'none'; document.getElementById('searchBarContainer').style.display = 'none'; document.getElementById('profileView').style.display = 'block'; window.loadProfile(); }
+        function showProfileSettings() { isLyricsMode = false; hideAllViews(); setActiveNav('profile'); document.getElementById('profileView').style.display = 'block'; renderAccentSwatches(); window.loadProfile(); }
         window.loadUserFavorites = async function () {
             if (!supabaseClient) return;
             const { data: { user } } = await supabaseClient.auth.getUser();
@@ -943,6 +1092,7 @@
             document.getElementById('eqView').querySelector('.eq-reset-btn').disabled = true;
             document.getElementById('limiterBtn').style.opacity = "0.5";
             document.getElementById('orbitBtn').style.opacity = "0.5";
+            document.getElementById('eqDirectNote').style.display = '';
         }
 
         function enableAudioFXButtons() {
@@ -953,6 +1103,47 @@
             document.getElementById('eqView').querySelector('.eq-reset-btn').disabled = false;
             document.getElementById('limiterBtn').style.opacity = "1";
             document.getElementById('orbitBtn').style.opacity = "1";
+            document.getElementById('eqDirectNote').style.display = 'none';
+        }
+
+        // --- Panneau « Lecture en cours » : aperçu des prochains titres + qualité ---
+        function renderUpNext() {
+            const box = document.getElementById('upNextList');
+            if (!box) return;
+            const next = (tracks || []).slice(currentIndex + 1, currentIndex + 6);
+            if (!next.length) {
+                box.innerHTML = tracks && tracks.length
+                    ? '<div class="up-next-empty"><i class="fas fa-tower-broadcast"></i> La radio prendra le relais à la fin du titre.</div>'
+                    : '';
+                return;
+            }
+            box.innerHTML = next.map((t, k) => {
+                let img = t.img || (t.album && t.album.image ? t.album.image.large : null) || 'https://placehold.co/80x80/17171d/3a3a46?text=%E2%99%AA';
+                if (img.includes('_300')) img = img.replace('_300', '_600');
+                const artist = t.performer ? t.performer.name : (t.artist ? t.artist.name : '');
+                return `<div class="queue-item" onclick="loadTrack(${currentIndex + 1 + k})">
+                    <img src="${img}" loading="lazy" alt="">
+                    <div class="queue-info"><div class="queue-title">${escapeHtml(t.title)}</div><div class="queue-artist">${escapeHtml(artist)}</div></div>
+                </div>`;
+            }).join('');
+        }
+
+        function updateQualityInfo(t) {
+            const el = document.getElementById('xlQuality');
+            if (!el || !t) return;
+            const hires = t.maximum_bit_depth > 16;
+            let label = '';
+            if (t.source === 'tidal_hund') label = hires ? 'Hi-Res Lossless · FLAC 24 bits' : 'Lossless · FLAC 16 bits';
+            else if (t.source === 'qobuz') {
+                const sr = parseFloat(t.maximum_sampling_rate);
+                label = (hires ? 'Hi-Res · FLAC 24 bits' : 'Lossless · FLAC 16 bits') + (sr ? ` / ${String(sr).replace('.', ',')} kHz` : '');
+            }
+            else if (t.source === 'deezer_flac') label = 'Lossless · FLAC';
+            else if (t.source === 'amazon_music') label = 'Amazon Music · FLAC';
+            const sourceName = { qobuz: 'Qobuz', tidal_hund: 'Tidal', deezer_flac: 'Deezer', amazon_music: 'Amazon' }[t.source];
+            el.innerHTML = label ? `<i class="fas fa-wave-square"></i> ${sourceName && t.source !== 'amazon_music' ? sourceName + ' · ' : ''}${label}` : '';
+            el.classList.toggle('hires', hires && !!label);
+            document.getElementById('xlBadge').style.display = (t.source !== 'subsonic' && hires) ? 'block' : 'none';
         }
 
         function setGlobalVolume(val) {
@@ -963,6 +1154,8 @@
                 playerA.volume = globalVolume;
                 playerB.volume = globalVolume;
             }
+            const vs = document.querySelector('.vol-slider');
+            if (vs) vs.style.setProperty('--fill', (globalVolume * 100) + '%');
         }
 
         function toggleLimiter() {
@@ -1036,7 +1229,7 @@
             const list = document.getElementById('queueList');
             list.innerHTML = '';
             if (!tracks || tracks.length === 0) {
-                list.innerHTML = '<div style="text-align:center; padding:20px; color:#666;">Vide</div>';
+                list.innerHTML = '<div class="queue-empty">La file d\'attente est vide.</div>';
                 return;
             }
 
@@ -1073,9 +1266,8 @@
             setTimeout(() => {
                 const currentEl = list.querySelector('.current');
                 if (currentEl) {
-                    // Calcul du scroll pour centrer l'élément sans affecter le parent
-                    const targetScroll = currentEl.offsetTop - (list.clientHeight / 2) + (currentEl.clientHeight / 2);
-                    list.scrollTo({ top: targetScroll, behavior: 'smooth' });
+                    // Le titre en cours en haut de la liste : on voit ce qui suit
+                    list.scrollTo({ top: Math.max(0, currentEl.offsetTop - 4), behavior: 'smooth' });
                 }
             }, 100);
         }
@@ -1089,9 +1281,11 @@
 
             document.getElementById('btnTranslate').classList.remove('active');
             const view = document.getElementById('lyricsContent');
-            view.innerHTML = '<div style="margin-top: 100px; color: #888; animation: pulseText 1.5s infinite;">Recherche des paroles...</div>';
+            view.innerHTML = '<div class="lyrics-placeholder" style="animation: pulseText 1.5s infinite;">Recherche des paroles…</div>';
             document.getElementById('introContainer').style.display = 'none';
             lyricsElements = [];
+            lyricsMeta = null; lyricsTranslation = null;
+            setLyricsCredit(null);
         }
 
         // Variable globale pour gérer la concurrence des chargements
@@ -1195,9 +1389,9 @@
             // On capture l'ID original pour la correction Supabase éventuelle
             const oldId = nextTrack.id;
 
-            // On résout ce qui est marqué comme "lazy" ou ce qui vient de sources instables (Tidal)
-            // On exclut maintenant QUE Qobuz et Amazon Music qui sont fiables.
-            if (nextTrack.source !== 'qobuz' && nextTrack.source !== 'amazon_music' && nextTrack.source !== 'deezer_flac' && nextTrack.source !== 'tidal_hund') {
+            // Qobuz + Tidal : un titre venant d'une autre source (playlist Deezer, radio, classement,
+            // ancien favori…) est cherché sur Qobuz puis Tidal avant lecture, sans aucun message.
+            if (!PLAYABLE_SOURCES.includes(nextTrack.source)) {
                 try {
                     const artist = nextTrack.performer ? nextTrack.performer.name : (nextTrack.artist ? nextTrack.artist.name : 'Inconnu');
                     const resolveParams = new URLSearchParams({ title: nextTrack.title || '', artist, ...(nextTrack.isrc && { isrc: nextTrack.isrc }) });
@@ -1213,18 +1407,23 @@
                         nextTrack.id = newMeta.id;
                         nextTrack.source = newMeta.source;
                         if (newMeta.duration && (!nextTrack.duration || nextTrack.duration === 0)) nextTrack.duration = newMeta.duration;
+                        if (newMeta.maximum_bit_depth) nextTrack.maximum_bit_depth = newMeta.maximum_bit_depth;
+                        updateQualityInfo(nextTrack);
 
                         // CORRECTION SUPABASE : réparation en base avec db_row_id direct si disponible
                         const directId = nextTrack.db_row_id || null;
                         updateFavoriteIfNeeded(oldId, newMeta, directId);
                     } else {
-                        console.warn("❌ Echec résolution métadonnées, tentative de lecture directe...");
+                        console.warn("[Lecture] Titre introuvable sur Qobuz et Tidal :", nextTrack.title);
                     }
                 } catch (e) {
                     if (e && e.name === 'AbortError') return;  // zapping : requête annulée, normal
                     console.error("Resolve error", e);
                 }
             }
+
+            // Ni sur Qobuz ni sur Tidal : on passe discrètement au titre suivant
+            if (!PLAYABLE_SOURCES.includes(nextTrack.source)) { skipUnplayable(index); return; }
 
             // Gestion Source AMAZON MUSIC (FLAC chiffré CENC — Shaka déchiffre en ClearKey)
             if (nextTrack.source === 'amazon_music') {
@@ -1263,14 +1462,15 @@
                 try {
                     await loadTidalIntoShaka(nextShaka, nextTrack.id, abortSignal);
                     if (thisLoadId !== currentLoadId) return;
+                    skipStreak = 0;
                     console.log("✅ Loaded Tidal (FLAC DASH) for:", nextTrack.title);
                 } catch (e) {
                     if (e && e.name === 'AbortError') return;  // zapping : chargement annulé, normal
                     console.error("Tidal Load Error", e);
                     if (thisLoadId !== currentLoadId) return;
-                    showToast(`❌ Tidal indisponible pour ce titre : ${nextTrack.title}`);
-                    document.getElementById('playIcon').className = 'fas fa-exclamation-triangle';
-                    return;  // surtout PAS de repli Qobuz
+                    if (await tryOtherSource(index)) return;  // même titre sur Qobuz
+                    skipUnplayable(index);
+                    return;
                 }
             }
             else {
@@ -1390,7 +1590,6 @@
                     console.error(`[Repair] ❌ Erreur update ${rowId}:`, error);
                 } else if (!updated || updated.length === 0) {
                     console.error(`[Repair] ❌ Update bloqué (0 lignes affectées) pour ${rowId} — vérifiez les politiques RLS Supabase (UPDATE manquant ?)`);
-                    showToast('⚠️ Erreur : mise à jour Supabase bloquée (politique RLS)');
                 } else {
                     console.log(`[Repair] ✅ Ligne ${rowId} mise à jour → ${newMeta.source}:${newMeta.id}`);
                 }
@@ -1404,7 +1603,7 @@
             });
 
             // 6. Rafraîchissement UI si on est sur la vue Favoris
-            if (document.getElementById('viewTitle').innerText === "Mes Favoris ❤️") showFavorites();
+            if (document.getElementById('trackView').dataset.view === 'favorites') showFavorites();
         }
 
         // --- RÉPARATION PROACTIVE DES SOURCES INSTABLES AU CHARGEMENT ---
@@ -1486,22 +1685,63 @@
             // cache serveur), donc un pré-appel ne ferait que charger le serveur pour rien.
         }
 
+        // Titre introuvable ou illisible sur Tidal : on passe discrètement au suivant (aucun message)
+        const PLAYABLE_SOURCES = ['qobuz', 'tidal_hund'];
+
+        // Une source n'arrive pas à lire un titre : on cherche le même sur l'autre (une seule fois,
+        // sans message). Renvoie true si la lecture a été relancée avec l'autre source.
+        async function tryOtherSource(index) {
+            const t = tracks[index];
+            if (!t || t._altTried || !PLAYABLE_SOURCES.includes(t.source)) return false;
+            t._altTried = true;
+            try {
+                const artist = t.performer ? t.performer.name : (t.artist ? t.artist.name : '');
+                const params = new URLSearchParams({ title: t.title || '', artist, exclude: t.source, ...(t.isrc && { isrc: t.isrc }) });
+                const res = await fetch(`${API_BASE}/resolve_metadata?${params}`);
+                if (!res.ok || currentIndex !== index) return false;
+                const m = await res.json();
+                if (!m || !m.id || m.source === t.source || !PLAYABLE_SOURCES.includes(m.source)) return false;
+                console.log(`[Lecture] ${t.source} n'a pas pu lire « ${t.title} » → ${m.source}:${m.id}`);
+                t.id = m.id; t.source = m.source;
+                if (m.maximum_bit_depth) t.maximum_bit_depth = m.maximum_bit_depth;
+                if (m.maximum_sampling_rate) t.maximum_sampling_rate = m.maximum_sampling_rate;
+                loadTrack(index, true, false);
+                return true;
+            } catch (e) {
+                return false;
+            }
+        }
+
+        // Au-delà de 3 titres ignorés d'affilée (sources en panne), on s'arrête au lieu de vider la file
+        let skipStreak = 0;
+        function skipUnplayable(index) {
+            console.warn('[Tidal] Titre ignoré (introuvable ou illisible) :', tracks[index] && tracks[index].title);
+            nextTrackTriggered = false;
+            isPlaying = false;
+            document.getElementById('playIcon').className = 'fas fa-play';
+            skipStreak++;
+            if (skipStreak < 3 && index < tracks.length - 1) {
+                setTimeout(() => { if (currentIndex === index) loadTrack(index + 1, true, false); }, 400);
+            } else {
+                skipStreak = 0;
+            }
+        }
+
         async function handlePlaybackError(index) {
             const track = tracks[index];
             if (!track) return;
 
-            // Tidal : jamais de repli/réparation Qobuz — un titre Tidal se lit en Tidal ou pas du tout.
-            if (track.source === 'tidal_hund') {
-                showToast(`❌ Tidal indisponible pour ce titre : ${track.title}`);
-                document.getElementById('playIcon').className = 'fas fa-exclamation-triangle';
+            // Qobuz / Tidal : on tente le même titre sur l'autre source, sinon titre suivant
+            if (PLAYABLE_SOURCES.includes(track.source)) {
+                if (await tryOtherSource(index)) return;
+                skipUnplayable(index);
                 return;
             }
 
             // Éviter les boucles infinies
             if (fallbackRetries[index] && fallbackRetries[index] >= 1) {
                 console.warn("Échec définitif du fallback pour ce titre.");
-                showToast(`❌ Titre indisponible : ${track.title}`);
-                document.getElementById('playIcon').className = 'fas fa-exclamation-triangle';
+                document.getElementById('playIcon').className = 'fas fa-play';
 
                 if (tracks.length > 1 && currentIndex < tracks.length - 1) {
                     setTimeout(() => {
@@ -1512,7 +1752,6 @@
             }
 
             fallbackRetries[index] = (fallbackRetries[index] || 0) + 1;
-            showToast("Source corrompue, recherche d'un fallback... 🔍");
 
             const success = await attemptTrackFallback(index);
             if (!success) {
@@ -1549,7 +1788,6 @@
                     // Mise à jour permanente dans Supabase avec db_row_id direct
                     await updateFavoriteIfNeeded(oldId, newMeta, directDbRowId);
 
-                    showToast("Source réparée, reprise... ✨");
                     loadTrack(index, true, false);
                     return true;
                 }
@@ -1660,6 +1898,7 @@
                 }
             };
             audioObj.onended = () => { if (audioObj === activeAudio && !nextTrackTriggered) handleNext(); };
+            audioObj.addEventListener('playing', () => { skipStreak = 0; });
 
             audioObj.onerror = () => {
                 if (audioObj === activeAudio && audioObj.src) {
@@ -1741,6 +1980,7 @@
                         } else {
                             // Si background, on met juste à jour la liste
                             if (document.getElementById('queuePanel').classList.contains('active')) renderQueueList();
+                            renderUpNext();
                             // SUPPRESSION DU TOAST DEMANDÉE ICI
                         }
                     } else {
@@ -1794,7 +2034,8 @@
             textEls.forEach(el => el.classList.add('fade-out-active'));
             setTimeout(() => {
                 document.getElementById('xlTitle').innerText = t.title; document.getElementById('xlArtist').innerText = artistName; document.getElementById('capTitle').innerText = t.title; document.getElementById('capArtist').innerText = artistName;
-                const badge = document.getElementById('xlBadge'); badge.style.display = (t.source !== 'subsonic' && t.maximum_bit_depth > 16) ? 'block' : 'none';
+                updateQualityInfo(t);
+                renderUpNext();
                 if (magicEnabled) checkMagic(t.title, artistName);
                 textEls.forEach(el => el.classList.remove('fade-out-active'));
             }, 300);
@@ -1826,27 +2067,24 @@
         }
 
         async function openArtistProfile(name, id = null, source = null) {
+            const passId = id && ['qobuz', 'tidal_hund', 'deezer'].includes(source);
             let query = `/?artist_profile=${encodeURIComponent(name)}`;
-            if (id && source === 'deezer') query += `&id=${id}&source=${source}`;
+            if (passId) query += `&id=${id}&source=${source}`;
             safePushState({}, "", query);
 
-            document.getElementById('trackView').style.display = 'none';
-            document.getElementById('lyricsView').style.display = 'none';
-            document.getElementById('blindTestView').style.display = 'none';
-            document.getElementById('profileView').style.display = 'none';
-            document.getElementById('allPlaylistsView').style.display = 'none';
-            document.getElementById('searchBarContainer').style.display = 'none';
-            document.getElementById('playlistView').style.display = 'none';
+            isLyricsMode = false;
+            hideAllViews();
 
             const view = document.getElementById('artistView');
             view.style.display = 'block';
+            view.scrollTop = 0;
 
             // État de chargement initial
             document.getElementById('artistProfileName').innerText = name;
-            document.getElementById('artistProfileImg').src = 'https://placehold.co/200x200/1a1a1a/666666?text=...';
-            document.getElementById('artistHeaderBg').src = '';
-            document.getElementById('artistTopTracks').innerHTML = '<p style="text-align:center; padding:20px;">Chargement des titres...</p>';
-            document.getElementById('artistAlbums').innerHTML = '<p style="text-align:center; padding:20px;">Chargement des albums...</p>';
+            document.getElementById('artistProfileImg').src = 'https://placehold.co/200x200/17171d/3a3a46?text=%E2%80%A6';
+            document.getElementById('artistHeaderBg').removeAttribute('src');
+            document.getElementById('artistTopTracks').innerHTML = uiState('loading', 'Chargement des titres…');
+            document.getElementById('artistAlbums').innerHTML = uiState('loading', 'Chargement des albums…');
 
             // Réinitialisation de la bio avant chargement
             const bioEl = document.getElementById('artistProfileBio');
@@ -1861,7 +2099,7 @@
 
             try {
                 let apiUrl = `${API_BASE}/artist_bio?name=${encodeURIComponent(name)}`;
-                if (id && source === 'deezer') apiUrl += `&id=${id}&source=${source}`;
+                if (passId) apiUrl += `&id=${id}&source=${source}`;
 
                 const res = await fetch(apiUrl);
                 const data = await res.json();
@@ -1935,28 +2173,28 @@
                         div.className = 'track-row';
                         div.dataset.id = t.id; // Added for highlight
 
-                        let img = t.album && t.album.image && t.album.image.large ? t.album.image.large.replace('_300', '_600') : 'https://placehold.co/60x60/1a1a1a/666666?text=M';
-                        let badge = '';
-                        if (t.maximum_bit_depth > 16) badge = '<div class="type-badge badge-hires" style="margin-left:auto;">HI-RES</div>';
+                        let img = t.album && t.album.image && t.album.image.large ? t.album.image.large.replace('_300', '_600') : 'https://placehold.co/60x60/17171d/3a3a46?text=%E2%99%AA';
+                        const badge = t.maximum_bit_depth > 16 ? '<div class="type-badge badge-hires">HI-RES</div>' : '<span></span>';
 
                         div.innerHTML = `
                             <div class="track-row-num">${i + 1}</div>
-                            <img src="${img}" class="track-row-img" loading="lazy">
+                            <img src="${img}" class="track-row-img" loading="lazy" alt="">
                             <div class="track-row-info">
                                 <div class="track-row-title">${t.title}</div>
-                                <div class="track-row-meta">${t.album ? t.album.title : 'Single'} • ${fmtTime(t.duration)}</div>
+                                <div class="track-row-meta">${(t.album && t.album.title) || 'Single'}</div>
                             </div>
                             ${badge}
+                            <div class="track-row-time">${fmtTime(t.duration)}</div>
                         `;
                         div.onclick = () => {
-                            tracks = data.top_tracks.map(x => ({ id: x.id, title: x.title, performer: { name: x.performer ? x.performer.name : data.name }, album: x.album, source: x.source, maximum_bit_depth: x.maximum_bit_depth, duration: x.duration }));
+                            tracks = data.top_tracks.map(x => ({ id: x.id, title: x.title, performer: { name: x.performer ? x.performer.name : data.name }, album: x.album, source: x.source, maximum_bit_depth: x.maximum_bit_depth, maximum_sampling_rate: x.maximum_sampling_rate, isrc: x.isrc, duration: x.duration }));
                             const idx = tracks.findIndex(tr => tr.id === t.id);
                             loadTrack(idx !== -1 ? idx : 0);
                         };
                         grid.appendChild(div);
                     });
                 } else {
-                    grid.innerHTML = '<p style="color:#666; font-style:italic;">Aucun titre populaire trouvé.</p>';
+                    grid.innerHTML = uiState('empty', 'Aucun titre populaire trouvé.', 'fa-music');
                 }
 
                 // 3. Albums (Affichage Grille)
@@ -1967,28 +2205,32 @@
                         const div = document.createElement('div');
                         div.className = 'track-card';
 
-                        let img = a.image && a.image.large ? a.image.large.replace('_300', '_600') : 'https://placehold.co/300x300/1a1a1a/666666?text=Album';
-                        let b = '<div class="type-badge badge-album">ALBUM</div>';
-                        if (a.maximum_bit_depth > 16) b += '<div class="type-badge badge-hires">HI-RES</div>';
+                        let img = a.image && a.image.large ? a.image.large.replace('_300', '_600') : 'https://placehold.co/300x300/17171d/3a3a46?text=Album';
+                        const b = a.maximum_bit_depth > 16 ? '<div class="type-badge badge-hires">HI-RES</div>' : '';
+                        const year = a.release_date_original ? a.release_date_original.substring(0, 4) : '';
 
                         div.innerHTML = `
-                            <div class="badges-container">${b}</div>
-                            <img src="${img}" loading="lazy">
+                            <div class="card-media">
+                                <img src="${img}" loading="lazy" alt="">
+                                <div class="badges-container">${b}</div>
+                                <span class="card-play"><i class="fas fa-play"></i></span>
+                            </div>
                             <h3>${a.title}</h3>
-                            <p>${a.release_date_original ? a.release_date_original.substring(0, 4) : ''}</p>
+                            <p>${year ? year + ' · ' : ''}Album</p>
                         `;
                         div.onclick = () => openAlbum(a.id, a.source);
                         albumGrid.appendChild(div);
                     });
                 } else {
-                    albumGrid.innerHTML = '<p style="color:#666; font-style:italic;">Aucun album trouvé.</p>';
+                    albumGrid.innerHTML = uiState('empty', 'Aucun album trouvé.', 'fa-compact-disc');
                 }
 
                 updateActiveCard();
 
             } catch (e) {
                 console.error(e);
-                document.getElementById('artistTopTracks').innerHTML = '<p style="color:red;">Erreur de chargement.</p>';
+                document.getElementById('artistTopTracks').innerHTML = uiState('error', 'Impossible de charger cet artiste.');
+                document.getElementById('artistAlbums').innerHTML = '';
             }
         }
         function play() { if (audioCtx && audioCtx.state === 'suspended' && !userSettings.directAudio) audioCtx.resume(); activeAudio.play().then(() => { isPlaying = true; document.getElementById('playIcon').className = 'fas fa-pause'; updateMediaSessionState(); if ('mediaSession' in navigator) navigator.mediaSession.playbackState = "playing"; if (typeof broadcastPlay === 'function') broadcastPlay(); }).catch(e => { }); }
@@ -2161,8 +2403,9 @@
                         if (!el.querySelector('.playing-indicator')) {
                             const ind = document.createElement('div');
                             ind.className = 'playing-indicator';
-                            ind.innerHTML = '<i class="fas fa-volume-up"></i>';
-                            el.appendChild(ind);
+                            ind.title = 'En lecture';
+                            ind.innerHTML = '<span></span><span></span><span></span>';
+                            (el.querySelector('.card-media') || el).appendChild(ind);
                         }
                     } else if (el.classList.contains('track-row')) {
                         el.classList.add('active-row');
@@ -2174,6 +2417,9 @@
             if (p) safePushState({}, "", "/");
             resetNavStack();
             showTracks();
+            setActiveNav('home');
+            document.getElementById('trackView').classList.add('is-home');
+            document.getElementById('trackView').scrollTop = 0;
             isRadioActive = false;
             document.getElementById('radioBadge').style.display = 'none';
 
@@ -2183,9 +2429,10 @@
         async function showWeeklyTop() {
             resetNavStack();
             showTracks();
+            setActiveNav('top');
             document.getElementById('searchBarContainer').style.display = 'none';
-            document.getElementById('viewTitle').innerText = "Top 10 Semaine 🏆";
-            document.getElementById('trackGrid').innerHTML = '<p style="text-align:center;margin-top:50px;">Calcul du classement...</p>';
+            document.getElementById('viewTitle').innerHTML = '<i class="fas fa-trophy"></i> Top 10 de la semaine';
+            document.getElementById('trackGrid').innerHTML = uiState('loading', 'Calcul du classement…');
             try {
                 const { data, error } = await supabaseClient.rpc('get_weekly_top_tracks');
                 if (error) throw error;
@@ -2193,11 +2440,11 @@
                     const topTracks = data.map((item, index) => { return { ...item.track_data, rank: index + 1 }; });
                     renderGrid(topTracks, true);
                 } else {
-                    document.getElementById('trackGrid').innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:50px;color:#555;"><i class="fas fa-trophy" style="font-size:30px;margin-bottom:10px;"></i><p>Aucun like cette semaine.<br>Soyez le premier à lancer la tendance !</p></div>`;
+                    document.getElementById('trackGrid').innerHTML = uiState('empty', 'Aucun like cette semaine.<br>Soyez le premier à lancer la tendance !', 'fa-trophy');
                 }
             } catch (e) {
                 console.error("Top 10 Error", e);
-                showToast("Erreur récupération Top 10");
+                document.getElementById('trackGrid').innerHTML = uiState('error', 'Impossible de récupérer le classement.');
             }
         }
 
@@ -2216,28 +2463,29 @@
         function showTopCountries() {
             resetNavStack();
             showTracks();
+            setActiveNav('countries');
             document.getElementById('searchBarContainer').style.display = 'none';
             // Pays par défaut : déduit de la langue du navigateur, sinon France
             const navCC = (navigator.language || 'fr').split('-').pop().toLowerCase();
             const def = TOP_COUNTRIES.some(c => c.code === navCC) ? navCC : 'fr';
             const opts = TOP_COUNTRIES.map(c => `<option value="${c.code}"${c.code === def ? ' selected' : ''}>${c.name}</option>`).join('');
             document.getElementById('viewTitle').innerHTML =
-                `<i class="fas fa-globe-americas"></i> Top des pays &nbsp;` +
-                `<select class="search-select" id="topCountrySelect" onchange="loadTopCountry(this.value)" style="margin-left:8px;vertical-align:middle;">${opts}</select>`;
+                `<i class="fas fa-earth-europe"></i> Top des pays` +
+                `<select class="search-select" id="topCountrySelect" onchange="loadTopCountry(this.value)">${opts}</select>`;
             loadTopCountry(def);
         }
 
         async function loadTopCountry(cc) {
             const g = document.getElementById('trackGrid');
-            g.innerHTML = '<p style="text-align:center;margin-top:50px;">Chargement du classement...</p>';
+            g.innerHTML = uiState('loading', 'Chargement du classement…');
             try {
                 const r = await fetch(`${API_BASE}/top_country?country=${encodeURIComponent(cc)}`);
                 const d = await r.json();
                 if (d.tracks && d.tracks.length) renderGrid(d.tracks, false);
-                else g.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:50px;color:#555;">Classement indisponible pour ce pays.</div>';
+                else g.innerHTML = uiState('empty', 'Classement indisponible pour ce pays.', 'fa-earth-europe');
             } catch (e) {
                 console.error('Top pays', e);
-                g.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:50px;color:#555;">Erreur de chargement du classement.</div>';
+                g.innerHTML = uiState('error', 'Erreur de chargement du classement.');
             }
         }
 
@@ -2248,7 +2496,7 @@
             document.getElementById('viewTitle').innerText = "File d'attente 🎵";
 
             if (!tracks || tracks.length === 0) {
-                document.getElementById('trackGrid').innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:50px;color:#555;">La file d\'attente est vide.</div>';
+                document.getElementById('trackGrid').innerHTML = uiState('empty', 'La file d\'attente est vide.', 'fa-list-ol');
                 return;
             }
 
@@ -2263,19 +2511,41 @@
         function toggleLyrics() {
             isLyricsMode = !isLyricsMode;
             if (isLyricsMode) {
-                document.getElementById('trackView').style.display = 'none';
-                document.getElementById('artistView').style.display = 'none';
-                document.getElementById('blindTestView').style.display = 'none';
-                document.getElementById('profileView').style.display = 'none';
-                // Correction pour masquer aussi les playlists
-                document.getElementById('playlistView').style.display = 'none';
-                document.getElementById('allPlaylistsView').style.display = 'none';
-
+                hideAllViews();
+                document.body.classList.remove('np-open');
                 document.getElementById('lyricsView').style.display = 'block';
                 renderSyncedLyrics();
             } else {
+                // Retour à la vue d'avant (accueil, résultats, favoris…) sans la recharger
+                const wasHome = !!document.querySelector('#trackGrid .dashboard');
+                const title = document.getElementById('viewTitle').innerHTML;
                 showTracks();
+                if (wasHome) { document.getElementById('trackView').classList.add('is-home'); setActiveNav('home'); }
+                else document.getElementById('viewTitle').innerHTML = title;
             }
+        }
+
+        // Crédit de la source des paroles (obligatoire pour lrc.red : lien visible vers le site)
+        function setLyricsCredit(meta) {
+            const el = document.getElementById('lyricsCredit');
+            if (!el) return;
+            const sources = {
+                'lrc.red': { label: 'lrc.red', url: meta && meta.credit_url ? meta.credit_url : 'https://lrc.red' },
+                'LRCLib': { label: 'LRCLib', url: 'https://lrclib.net' },
+                'YouTube': { label: 'YouTube Music', url: 'https://music.youtube.com' },
+            };
+            const src = meta && sources[meta.source];
+            if (!src) { el.style.display = 'none'; return; }
+            el.href = src.url;
+            el.innerHTML = `<i class="fas fa-closed-captioning"></i> Paroles · <b>${src.label}</b>`;
+            el.style.display = '';
+        }
+
+        function renderPlainLyrics(text) {
+            const ld = document.createElement('div');
+            ld.style.cssText = 'white-space:pre-line;font-size:20px;line-height:1.75;font-weight:600;color:rgba(255,255,255,0.86);';
+            ld.textContent = text;
+            document.getElementById('lyricsContent').replaceChildren(ld);
         }
 
         async function fetchLyrics(t, a, l) {
@@ -2285,6 +2555,7 @@
                 originalLyricsData = [];
                 translatedLyricsData = [];
                 isTranslated = false;
+                lyricsMeta = null; lyricsTranslation = null;
                 document.getElementById('btnTranslate').classList.remove('active');
                 document.getElementById('btnTranslate').innerHTML = '<i class="fas fa-language"></i> Traduire';
 
@@ -2292,71 +2563,80 @@
                 // de la piste précédente (2 appels externes par titre).
                 try { if (window._lyricsAbort) window._lyricsAbort.abort(); } catch (e) {}
                 window._lyricsAbort = new AbortController();
-                const r = await fetch(`${API_BASE}/lyrics?artist=${encodeURIComponent(a)}&title=${encodeURIComponent(t.title)}&album=${encodeURIComponent(l || '')}&duration=${t.duration}`, { signal: window._lyricsAbort.signal });
+                const isrcParam = t.isrc ? `&isrc=${encodeURIComponent(t.isrc)}` : '';
+                const r = await fetch(`${API_BASE}/lyrics?artist=${encodeURIComponent(a)}&title=${encodeURIComponent(t.title)}&album=${encodeURIComponent(l || '')}&duration=${t.duration}${isrcParam}`, { signal: window._lyricsAbort.signal });
                 const d = await r.json();
 
                 if (d.type === 'synced') {
-                    parseLRC(d.lyrics);
+                    if (Array.isArray(d.lines) && d.lines.length) {
+                        // lrc.red : vers avec minutage mot à mot, chœurs, voix et parties
+                        lyricsData = d.lines;
+                        firstLineTime = d.lines[0].time;
+                    } else {
+                        parseLRC(d.lyrics);
+                    }
+                    lyricsMeta = { source: d.source, credit_url: d.credit_url, translations: d.translations || {}, sync: d.sync || 'line', language: d.language || '' };
                     // Sauvegarde pour la traduction
                     originalLyricsData = [...lyricsData];
+                    setLyricsCredit(lyricsMeta);
                     renderSyncedLyrics();
                 } else if (d.type === 'plain') {
                     // Pour le texte brut, on crée un pseudo-objet pour la logique de traduction
                     originalLyricsData = [{ text: d.lyrics, isPlain: true }];
-                    const ld = document.createElement('div'); ld.style.cssText = 'white-space:pre-line;font-size:18px;line-height:1.6;'; ld.textContent = d.lyrics; document.getElementById('lyricsContent').replaceChildren(ld);
+                    lyricsMeta = { source: d.source };
+                    setLyricsCredit(lyricsMeta);
+                    renderPlainLyrics(d.lyrics);
                 } else {
-                    document.getElementById('lyricsContent').innerHTML = '<p style="margin-top:50px;">Non trouvé.</p>';
+                    setLyricsCredit(null);
+                    document.getElementById('lyricsContent').innerHTML = '<div class="lyrics-placeholder"><i class="fas fa-microphone-slash" style="font-size:28px;display:block;margin-bottom:12px;"></i>Pas de paroles trouvées pour ce titre.</div>';
                 }
             } catch (e) {
                 if (e && e.name === 'AbortError') return;  // zapping : normal
-                document.getElementById('lyricsContent').innerHTML = '<p style="margin-top:50px;">Indisponible.</p>';
+                document.getElementById('lyricsContent').innerHTML = '<div class="lyrics-placeholder">Paroles indisponibles pour le moment.</div>';
             }
         }
 
+        // Traduction affichée SOUS chaque vers : la synchro mot à mot de l'original est conservée.
+        // Priorité à la traduction fournie par lrc.red (si elle existe en français), sinon traduction automatique.
         async function toggleTranslation() {
+            const btn = document.getElementById('btnTranslate');
+            const isPlain = originalLyricsData.length > 0 && originalLyricsData[0].isPlain;
+            if (!originalLyricsData.length) return;
+
             if (isTranslated) {
                 // Revenir à l'original
                 isTranslated = false;
-                lyricsData = [...originalLyricsData];
-                document.getElementById('btnTranslate').classList.remove('active');
-                document.getElementById('btnTranslate').innerHTML = '<i class="fas fa-language"></i> Traduire';
-
-                if (lyricsData.length > 0 && lyricsData[0].isPlain) {
-                    const lt = document.createElement('div'); lt.style.cssText = 'white-space:pre-line;font-size:18px;line-height:1.6;'; lt.textContent = lyricsData[0].text; document.getElementById('lyricsContent').replaceChildren(lt);
-                } else {
-                    renderSyncedLyrics();
-                }
+                btn.classList.remove('active');
+                btn.innerHTML = '<i class="fas fa-language"></i> Traduire';
+                if (isPlain) renderPlainLyrics(originalLyricsData[0].text);
+                else { lyricsTranslation = null; renderSyncedLyrics(); }
                 return;
             }
 
             // Activer la traduction
-            const btn = document.getElementById('btnTranslate');
             btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> ...';
 
             try {
                 // Si on a déjà traduit, on utilise le cache
-                if (translatedLyricsData.length > 0) {
-                    lyricsData = [...translatedLyricsData];
-                } else {
-                    // Sinon on appelle l'API
-                    // Préparation des lignes à traduire
-                    const linesToTranslate = originalLyricsData.map(l => l.text);
-
-                    const res = await fetch(`${API_BASE}/translate_lines`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ lines: linesToTranslate, target: 'fr' })
-                    });
-
-                    const data = await res.json();
-
-                    if (data.translated) {
-                        // Reconstruction des données
-                        translatedLyricsData = originalLyricsData.map((l, i) => ({
-                            ...l,
-                            text: data.translated[i] || l.text // Fallback si manque de ligne
-                        }));
-                        lyricsData = [...translatedLyricsData];
+                if (!translatedLyricsData.length) {
+                    const offered = !isPlain && lyricsMeta && lyricsMeta.translations ? Object.entries(lyricsMeta.translations) : [];
+                    let provided = offered.find(([lang]) => lang.toLowerCase().startsWith('fr'));
+                    // Chanson déjà en français : on montre la traduction fournie (souvent l'anglais)
+                    // plutôt qu'une traduction « français → français »
+                    if (!provided && (lyricsMeta.language || '').startsWith('fr') && offered.length) provided = offered[0];
+                    if (provided) {
+                        translatedLyricsData = originalLyricsData.map(l => (l.key && provided[1][l.key]) || '');
+                    } else {
+                        // Sinon on appelle l'API
+                        const linesToTranslate = originalLyricsData.map(l => l.text);
+                        const res = await fetch(`${API_BASE}/translate_lines`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ lines: linesToTranslate, target: 'fr' })
+                        });
+                        const data = await res.json();
+                        if (!data.translated) throw new Error(data.error || 'traduction vide');
+                        translatedLyricsData = originalLyricsData.map((l, i) => data.translated[i] || '');
                     }
                 }
 
@@ -2364,11 +2644,8 @@
                 btn.classList.add('active');
                 btn.innerHTML = '<i class="fas fa-check"></i> Original';
 
-                if (lyricsData.length > 0 && lyricsData[0].isPlain) {
-                    const lt = document.createElement('div'); lt.style.cssText = 'white-space:pre-line;font-size:18px;line-height:1.6;'; lt.textContent = lyricsData[0].text; document.getElementById('lyricsContent').replaceChildren(lt);
-                } else {
-                    renderSyncedLyrics();
-                }
+                if (isPlain) renderPlainLyrics(translatedLyricsData[0] || originalLyricsData[0].text);
+                else { lyricsTranslation = translatedLyricsData; renderSyncedLyrics(); }
 
             } catch (e) {
                 console.error("Traduction error:", e);
@@ -2379,23 +2656,100 @@
 
         function parseLRC(l) { if (!l) return; try { const ls = l.split('\n'), rx = /^\[(\d{2}):(\d{2})[.:](\d{2,3})\](.*)/; lyricsData = []; ls.forEach(x => { const m = x.match(rx); if (m) { const s = parseInt(m[1]) * 60 + parseInt(m[2]) + (m[3].length === 2 ? parseInt(m[3]) / 100 : parseInt(m[3]) / 1000); lyricsData.push({ time: s, text: m[4].trim() }); } }); if (lyricsData.length > 0) firstLineTime = lyricsData[0].time; } catch (e) { } }
 
+        // Mots d'un vers : les syllabes collées (sans espace) sont regroupées pour ne jamais être
+        // coupées en fin de ligne ; chaque mot/syllabe garde son minutage pour le remplissage.
+        function buildLyricWords(container, words) {
+            const out = [];
+            let group = null;
+            words.forEach(w => {
+                if (!group) { group = document.createElement('span'); group.className = 'lwg'; container.appendChild(group); }
+                const el = document.createElement('span');
+                el.className = 'lw';
+                el.textContent = w.t;
+                group.appendChild(el);
+                out.push({ el, s: w.s, e: w.e, p: -1, on: false });
+                if (w.sp) { container.appendChild(document.createTextNode(' ')); group = null; }
+            });
+            return out;
+        }
+
         function renderSyncedLyrics() {
             if (!isLyricsMode || !lyricsData.length) return;
             const c = document.getElementById('lyricsContent');
             c.innerHTML = '';
-            const s = document.createElement('div'); s.style.height = "40vh"; c.appendChild(s);
+            const s = document.createElement('div'); s.style.height = "36vh"; c.appendChild(s);
             // Optimization: Store elements in array to avoid repeated querySelectorAll
             lyricsElements = [];
+
+            // Passage instrumental (intro ou pause > 6 s) : trois points qui s'allument
+            const addGap = (from, to) => {
+                const g = document.createElement('div');
+                g.className = 'lyric-gap';
+                g.innerHTML = '<span></span><span></span><span></span>';
+                c.appendChild(g);
+                lyricsElements.push({ el: g, time: from, end: to, gap: true });
+            };
+            if (lyricsData[0].end != null && lyricsData[0].time > 5) addGap(0, lyricsData[0].time);
+
             lyricsData.forEach((l, i) => {
                 const d = document.createElement('div');
                 d.className = 'lyric-line';
                 d.id = `line-${i}`;
-                d.innerText = l.text;
-                d.onclick = () => { activeAudio.currentTime = l.time; play(); };
+                if (l.alt) d.classList.add('alt');
+                if (l.part && i > 0) d.classList.add('section-start');
+
+                const main = document.createElement('div');
+                main.className = 'lyric-main';
+                let words = null, bg = null;
+                if (Array.isArray(l.words) && l.words.length) {
+                    d.classList.add('has-words');
+                    words = buildLyricWords(main, l.words);
+                } else {
+                    main.textContent = l.text;
+                }
+                d.appendChild(main);
+
+                if (Array.isArray(l.bg) && l.bg.length) {
+                    const b = document.createElement('div');
+                    b.className = 'lyric-bg';
+                    bg = buildLyricWords(b, l.bg);
+                    d.appendChild(b);
+                }
+                if (lyricsTranslation && lyricsTranslation[i]) {
+                    const tr = document.createElement('div');
+                    tr.className = 'lyric-tr';
+                    tr.textContent = lyricsTranslation[i];
+                    d.appendChild(tr);
+                }
+
+                d.onclick = () => { lyricsScrollHold = 0; activeAudio.currentTime = l.time; play(); };
                 c.appendChild(d);
-                lyricsElements.push({ el: d, time: l.time });
+                lyricsElements.push({ el: d, time: l.time, end: l.end, words, bg });
+
+                const next = lyricsData[i + 1];
+                if (next && l.end != null && next.time - l.end > 6) addGap(l.end, next.time);
             });
             const b = document.createElement('div'); b.style.height = "40vh"; c.appendChild(b);
+            syncLyricsUI();
+        }
+
+        // Remplissage d'un mot : 0 → 100 % entre son début et sa fin (écrit seulement si ça change)
+        function paintLyricWords(list, t) {
+            if (!list) return;
+            for (const w of list) {
+                const p = t <= w.s ? 0 : t >= w.e ? 100 : Math.round((t - w.s) / (w.e - w.s) * 100);
+                if (p !== w.p) { w.p = p; w.el.style.setProperty('--p', p + '%'); }
+                const on = p > 0;
+                if (on !== w.on) { w.on = on; w.el.classList.toggle('on', on); }
+            }
+        }
+
+        // Boucle d'animation (60 i/s) seulement pendant la lecture, paroles affichées et mot à mot
+        function lyricsTick() {
+            if (!isLyricsMode || !lyricsElements.length || document.hidden) { lyricsRaf = null; return; }
+            lyricsRaf = -1;  // boucle en cours : syncLyricsUI ne doit pas en lancer une seconde
+            syncLyricsUI();
+            lyricsRaf = activeAudio.paused ? null : requestAnimationFrame(lyricsTick);
         }
 
         function syncLyricsUI() {
@@ -2413,17 +2767,30 @@
             }
 
             // Mise à jour visuelle uniquement si changement
-            const currentActive = document.querySelector('.lyric-line.active');
-            const targetEl = activeIdx !== -1 ? lyricsElements[activeIdx].el : null;
+            const entry = activeIdx !== -1 ? lyricsElements[activeIdx] : null;
+            const currentActive = document.querySelector('#lyricsContent > .active');
+            const targetEl = entry ? entry.el : null;
 
             if (currentActive !== targetEl) {
                 if (currentActive) currentActive.classList.remove('active');
                 if (targetEl) {
                     targetEl.classList.add('active');
-                    targetEl.scrollIntoView({ behavior: "smooth", block: "center" });
+                    // Pas de recentrage pendant que l'utilisateur fait défiler lui-même
+                    if (Date.now() > lyricsScrollHold) targetEl.scrollIntoView({ behavior: "smooth", block: "center" });
                 }
             }
+
+            if (entry) {
+                if (entry.gap) entry.el.style.setProperty('--p', Math.min(1, Math.max(0, (t - entry.time) / (entry.end - entry.time))).toFixed(3));
+                paintLyricWords(entry.words, t);
+                paintLyricWords(entry.bg, t);
+            }
+            // Mot à mot : la boucle prend le relais entre deux « timeupdate » (4 par seconde seulement)
+            if (lyricsMeta && lyricsMeta.sync === 'word' && !lyricsRaf && !activeAudio.paused) lyricsRaf = requestAnimationFrame(lyricsTick);
         }
+
+        // Défilement manuel des paroles : on suspend le recentrage automatique quelques secondes
+        ['wheel', 'touchmove'].forEach(ev => document.getElementById('lyricsView').addEventListener(ev, () => { lyricsScrollHold = Date.now() + 3500; }, { passive: true }));
 
         window.onpopstate = async (e) => { const p = new URLSearchParams(window.location.search); if (p.get('artist_profile')) await openArtistProfile(p.get('artist_profile'), p.get('id'), p.get('source')); else if (p.get('artist')) await openArtist(p.get('artist')); else if (p.get('album')) await openAlbum(p.get('album'), p.get('source')); else if (p.get('q')) { document.getElementById('searchInput').value = p.get('q'); await performSearch(); } else goHome(false); };
         window.onload = async () => {
@@ -2437,14 +2804,12 @@
         };
         async function openTrackDirect(id, s) { try { const r = await fetch(`${API_BASE}/track?id=${id}&source=${s || ''}`); const d = await r.json(); if (d.id) { let i = d.source === 'subsonic' ? `${API_BASE}/get_subsonic_cover/${d.album.image.large}` : (d.album.image.large || '').replace('_300', '_600'); tracks = [{ ...d, img: i, performer: d.performer || { name: d.artist ? d.artist.name : "Artiste" }, type: 'track' }]; renderGrid(tracks, true); loadTrack(0, false); } } catch (e) { } }
         function showTracks() {
-            document.getElementById('trackView').style.display = 'block';
-            document.getElementById('artistView').style.display = 'none';
-            document.getElementById('lyricsView').style.display = 'none';
-            document.getElementById('blindTestView').style.display = 'none';
-            document.getElementById('profileView').style.display = 'none';
-            document.getElementById('playlistView').style.display = 'none';
-            document.getElementById('allPlaylistsView').style.display = 'none';
-            document.getElementById('memoriesView').style.display = 'none';
+            hideAllViews();
+            const tv = document.getElementById('trackView');
+            tv.style.display = 'block';
+            tv.classList.remove('is-home');
+            tv.dataset.view = '';
+            document.getElementById('viewActions').innerHTML = '';
             document.getElementById('searchBarContainer').style.display = 'flex';
             isLyricsMode = false;
             document.getElementById('introContainer').style.display = 'none';
@@ -2452,23 +2817,46 @@
             isRadioActive = false;
             document.getElementById('radioBadge').style.display = 'none';
         }
+        // Boutons « Tout lire » / « Aléatoire » d'une liste de titres (album, playlist, favoris…)
+        function playList(list, shuffle) {
+            if (!list || !list.length) return;
+            tracks = [...list];
+            isShuffle = !!shuffle;
+            document.getElementById('btnShuffle').classList.toggle('active', isShuffle);
+            loadTrack(shuffle ? Math.floor(Math.random() * tracks.length) : 0);
+        }
+        function renderPlayActions(containerId, list) {
+            const box = document.getElementById(containerId);
+            if (!box) return;
+            if (!list || !list.length) { box.innerHTML = ''; return; }
+            window._actionLists = window._actionLists || {};
+            window._actionLists[containerId] = list;
+            box.innerHTML = `<button class="pill-btn accent" onclick="playList(window._actionLists['${containerId}'], false)"><i class="fas fa-play"></i> Tout lire</button>`
+                + `<button class="pill-btn" onclick="playList(window._actionLists['${containerId}'], true)"><i class="fas fa-shuffle"></i> Aléatoire</button>`;
+        }
+
         function showFavorites() {
             resetNavStack();
             showTracks();
+            setActiveNav('favorites');
+            document.getElementById('trackView').dataset.view = 'favorites';
             document.getElementById('searchBarContainer').style.display = 'none';
-            renderGrid([...favorites], true, "Vous n'avez pas encore de favoris.<br>Likez des titres pour les retrouver ici !");
-            document.getElementById('viewTitle').innerText = "Mes Favoris ❤️";
+            renderGrid([...favorites], true, "Vous n'avez pas encore de favoris.<br>Touchez le cœur d'un titre pour le retrouver ici.");
+            document.getElementById('viewTitle').innerHTML = '<i class="fas fa-heart"></i> Mes favoris';
+            renderPlayActions('viewActions', [...favorites]);
         }
         function showHistory() {
             resetNavStack();
             showTracks();
+            setActiveNav('history');
             document.getElementById('searchBarContainer').style.display = 'none';
-            renderGrid([...window.userHistory], true, "Votre historique est vide.<br>Écoutez des titres pour les retrouver ici !<br>Nous gardons vos 50 dernières écoutes.");
-            document.getElementById('viewTitle').innerText = "Historique des 50 dernières chansons 🕒";
+            renderGrid([...window.userHistory], true, "Votre historique est vide.<br>Vos 50 dernières écoutes apparaîtront ici.");
+            document.getElementById('viewTitle').innerHTML = '<i class="fas fa-clock-rotate-left"></i> Écoutés récemment';
         }
         function showPlaylists() {
             resetNavStack();
             showTracks();
+            setActiveNav('playlists');
             document.getElementById('trackView').style.display = 'none';
             document.getElementById('allPlaylistsView').style.display = 'block';
             document.getElementById('searchBarContainer').style.display = 'none';
@@ -2483,7 +2871,10 @@
             if (!q) return;
             safePushState({}, "", `/?q=${encodeURIComponent(q)}`);
             showTracks();
-            document.getElementById('trackGrid').innerHTML = '<p style="text-align:center;margin-top:50px;">Chargement...</p>';
+            setActiveNav('home', 'search');
+            syncSearchChips();
+            document.getElementById('searchInput').blur();
+            document.getElementById('trackGrid').innerHTML = uiState('loading', `Recherche de « ${escapeHtml(q)} »…`);
 
             let results = [];
             if (t === 'all' || t === 'playlist') {
@@ -2546,28 +2937,17 @@
 
         function openExternalPlaylist(playlist) {
             pushNavState();
-            document.getElementById('trackView').style.display = 'none';
-            document.getElementById('artistView').style.display = 'none';
-            document.getElementById('lyricsView').style.display = 'none';
-            document.getElementById('blindTestView').style.display = 'none';
-            document.getElementById('profileView').style.display = 'none';
-            document.getElementById('allPlaylistsView').style.display = 'none';
-            document.getElementById('searchBarContainer').style.display = 'none';
+            isLyricsMode = false;
+            hideAllViews();
 
             const view = document.getElementById('playlistView');
             view.style.display = 'block';
+            view.scrollTop = 0;
 
-            document.getElementById('playlistTitle').innerHTML = `
-                <div style="display:flex; align-items:center; gap:10px;">
-                    <span>${playlist.name}</span>
-                    <span style="font-size:10px; background:rgba(255,255,255,0.1); padding:2px 6px; border-radius:4px;">PLAYLIST</span>
-                </div>`;
+            document.getElementById('playlistTitle').innerHTML = `<span>${playlist.name}</span><span class="type-badge badge-playlist">PLAYLIST</span>`;
+            document.getElementById('playlistActions').innerHTML = '';
             const g = document.getElementById('playlistGrid');
-            g.innerHTML = `
-                <div style="grid-column:1/-1; text-align:center; padding:50px;">
-                    <i class="fas fa-sync fa-spin" style="font-size:30px; color:var(--primary); margin-bottom:20px;"></i>
-                    <p>Chargement de la playlist...</p>
-                </div>`;
+            g.innerHTML = uiState('loading', 'Chargement de la playlist…');
 
             // Détection de la source pour choisir la bonne route API
             let url = '';
@@ -2580,22 +2960,24 @@
             fetch(url)
                 .then(r => r.json())
                 .then(details => {
-                    if (!details.tracks || details.tracks.length === 0) { g.innerHTML = '<p style="padding:20px;">Vide.</p>'; return; }
+                    if (!details.tracks || details.tracks.length === 0) { g.innerHTML = uiState('empty', 'Cette playlist est vide.', 'fa-compact-disc'); return; }
                     g.innerHTML = '';
+                    // Important : on propage la source pour que loadTrack sache comment résoudre
+                    const playable = details.tracks.map(t => ({
+                        ...t,
+                        img: t.img || t.album.image.large,
+                        type: 'track',
+                        source: playlist.source === 'deezer' ? 'deezer' : 'yt_lazy'
+                    }));
+                    renderPlayActions('playlistActions', playable);
                     details.tracks.forEach((it) => {
-                        const displayImg = it.img || it.album.image.large || 'https://placehold.co/300x300/1a1a1a/666666?text=Music';
+                        const displayImg = it.img || it.album.image.large || 'https://placehold.co/300x300/17171d/3a3a46?text=%E2%99%AA';
                         const div = document.createElement('div'); div.className = 'track-card';
                         div.dataset.id = it.id;
                         div.dataset.sig = getTrackSignature(it);
-                        div.innerHTML = `<div class="badges-container"></div><img src="${displayImg}" loading="lazy" decoding="async"><h3>${it.title}</h3><p>${it.performer.name}</p>`;
+                        div.innerHTML = `<div class="card-media"><img src="${displayImg}" loading="lazy" decoding="async" alt=""><span class="card-play"><i class="fas fa-play"></i></span></div><h3>${it.title}</h3><p>${it.performer.name}</p>`;
                         div.onclick = () => {
-                            // Important : on propage la source pour que loadTrack sache comment résoudre
-                            tracks = details.tracks.map(t => ({
-                                ...t,
-                                img: t.img || t.album.image.large,
-                                type: 'track',
-                                source: playlist.source === 'deezer' ? 'deezer' : 'yt_lazy'
-                            }));
+                            tracks = playable.slice();
                             const idx = tracks.findIndex(x => x.id === it.id);
                             loadTrack(idx !== -1 ? idx : 0);
                         };
@@ -2603,13 +2985,13 @@
                     });
                     updateActiveCard();
                 })
-                .catch(err => { console.error(err); g.innerHTML = '<p style="text-align:center; padding:20px; color:red;">Erreur de chargement.</p>'; });
+                .catch(err => { console.error(err); g.innerHTML = uiState('error', 'Impossible de charger cette playlist.'); });
         }
 
         function renderGrid(items, enableRadio, emptyMsg = "Aucun résultat.") {
             currentGridItems = items || [];
             const g = document.getElementById('trackGrid'); g.innerHTML = '';
-            if (!items || items.length === 0) { g.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:50px;color:#555;"><i class="far fa-folder-open" style="font-size:30px;margin-bottom:10px;"></i><p>${emptyMsg}</p></div>`; return; }
+            if (!items || items.length === 0) { g.innerHTML = uiState('empty', emptyMsg); return; }
 
             items.forEach(it => {
                 const isAlb = it.type === 'album'; const isPl = it.type === 'playlist'; const isArt = it.type === 'artist'; const src = it.source;
@@ -2621,15 +3003,15 @@
                     if (typeof it.image === 'string') u = it.image;
                     else if (it.image && it.image.large) u = it.image.large;
 
-                    if (!u) u = 'https://placehold.co/300x300/1a1a1a/666666?text=Artiste';
-                    mediaElement = `<img src="${u}" loading="lazy" decoding="async" style="border-radius:50%; aspect-ratio:1/1; object-fit:cover;">`;
+                    if (!u) u = 'https://placehold.co/300x300/17171d/3a3a46?text=Artiste';
+                    mediaElement = `<img src="${u}" loading="lazy" decoding="async" alt="">`;
                 }
                 else if (isPl) {
                     if (typeof getPlaylistCoverHTML === 'function' && src !== 'ytmusic' && src !== 'deezer') {
                         mediaElement = getPlaylistCoverHTML(it);
                     } else {
-                        let imgUrl = it.image || 'https://placehold.co/300x300/1a1a1a/666666?text=Playlist';
-                        mediaElement = `<img src="${imgUrl}" loading="lazy" decoding="async">`;
+                        let imgUrl = it.image || 'https://placehold.co/300x300/17171d/3a3a46?text=Playlist';
+                        mediaElement = `<img src="${imgUrl}" loading="lazy" decoding="async" alt="">`;
                     }
                 } else {
                     let u = '';
@@ -2638,17 +3020,14 @@
                         u = 'https://placehold.co/300x300/1a1a1a/666666?text=Musique';
                     }
                     else { u = (isAlb ? it.image.large : it.album.image.large) || it.image || ''; u = u.replace('_300', '_600'); }
-                    if (!u) u = 'https://placehold.co/300x300/1a1a1a/666666?text=Music';
-                    mediaElement = `<img src="${u}" loading="lazy" decoding="async">`;
+                    if (!u) u = 'https://placehold.co/300x300/17171d/3a3a46?text=%E2%99%AA';
+                    mediaElement = `<img src="${u}" loading="lazy" decoding="async" alt="">`;
                 }
 
                 const d = document.createElement('div'); d.className = 'track-card'; if (isArt) d.classList.add('artist-card');
                 d.dataset.id = it.id;
                 if (!isAlb && !isPl && !isArt) d.dataset.sig = getTrackSignature(it);
                 let b = ''; let rankBadgeHTML = '';
-                if (isAlb) b = '<div class="type-badge badge-album">ALBUM</div>';
-                else if (isPl) b = '<div class="type-badge badge-hires" style="background:#ff0055">PLAYLIST</div>';
-                else if (isArt) b = '<div class="type-badge badge-artist">ARTISTE</div>';
 
                 if (src !== 'subsonic' && src !== 'ytmusic' && src !== 'deezer' && it.maximum_bit_depth > 16 && !isPl && !isArt) b += '<div class="type-badge badge-hires">HI-RES</div>';
 
@@ -2658,10 +3037,12 @@
 
                 if (it.rank) { let rankClass = 'rank-other'; if (it.rank === 1) rankClass = 'rank-1'; else if (it.rank === 2) rankClass = 'rank-2'; else if (it.rank === 3) rankClass = 'rank-3'; rankBadgeHTML = `<div class="rank-badge ${rankClass}">#${it.rank}</div>`; }
 
+                // Le type est indiqué dans le sous-titre (plus lisible qu'un badge sur la pochette)
                 let subtitle = '';
-                if (isPl) { subtitle = it.performer ? it.performer.name : 'Playlist'; }
+                if (isPl) { subtitle = 'Playlist · ' + (it.performer ? it.performer.name : 'Zenith'); }
                 else if (isArt) { subtitle = 'Artiste'; }
-                else { subtitle = isAlb ? (it.artist ? it.artist.name : 'Artiste') : (it.performer ? it.performer.name : 'Artiste'); }
+                else if (isAlb) { subtitle = 'Album · ' + (it.artist ? it.artist.name : 'Artiste'); }
+                else { subtitle = it.performer ? it.performer.name : 'Artiste'; }
 
                 // Affichage de la date pour le debug ou pour l'utilisateur
                 if (it.date || it.release_date_original) {
@@ -2672,7 +3053,8 @@
                 }
 
                 let votesHTML = ''; if (it.like_count) { votesHTML = `<div class="vote-count"><i class="fas fa-heart"></i> ${it.like_count}</div>`; }
-                d.innerHTML = `${rankBadgeHTML}<div class="badges-container">${b}</div>${mediaElement}<h3>${it.name || it.title}</h3><p>${subtitle}</p>${votesHTML}`;
+                const playIcon = (isAlb || isPl || isArt) ? 'fa-arrow-right' : 'fa-play';
+                d.innerHTML = `<div class="card-media">${mediaElement}${rankBadgeHTML}<div class="badges-container">${b}</div><span class="card-play"><i class="fas ${playIcon}"></i></span></div><h3>${it.name || it.title}</h3><p>${subtitle}</p>${votesHTML}`;
                 d.onclick = () => {
                     if (isAlb) openAlbum(it.id, src);
                     else if (isArt) { openArtistProfile(it.name, it.id, it.source); }
@@ -2704,21 +3086,26 @@
             });
             updateActiveCard();
         }
-        async function openArtist(id) { safePushState({}, "", `/?artist=${id}`); document.getElementById('trackGrid').innerHTML = '<p style="text-align:center;margin-top:50px;">Chargement...</p>'; try { const r = await fetch(`${API_BASE}/artist?id=${id}`); const d = await r.json(); if (d.albums && d.albums.items) renderGrid(d.albums.items.map(a => ({ ...a, type: 'album', artist: { name: d.name } })), false); } catch (e) { console.error(e); } }
+        async function openArtist(id) { safePushState({}, "", `/?artist=${id}`); document.getElementById('trackGrid').innerHTML = uiState('loading', 'Chargement…'); try { const r = await fetch(`${API_BASE}/artist?id=${id}`); const d = await r.json(); if (d.albums && d.albums.items) renderGrid(d.albums.items.map(a => ({ ...a, type: 'album', artist: { name: d.name } })), false); } catch (e) { console.error(e); } }
         async function openAlbum(id, s) {
             showTracks(); // ADDED: Switch back to main grid view
             // document.getElementById('searchBarContainer').style.display='none'; // REMOVED: Keep search bar visible
             pushNavState();
             safePushState({}, "", `/?album=${id}&source=${s || ''}`);
-            document.getElementById('trackGrid').innerHTML = '<p style="text-align:center;margin-top:50px;">Chargement...</p>';
+            document.getElementById('viewTitle').innerText = 'Album';
+            document.getElementById('trackGrid').innerHTML = uiState('loading', "Chargement de l'album…");
             try {
                 const r = await fetch(`${API_BASE}/album?id=${id}&source=${s || ''}`);
                 const d = await r.json();
                 if (d.tracks && d.tracks.items) {
-                    renderGrid(d.tracks.items.map(t => ({ ...t, type: 'track', performer: t.performer || { name: d.artist.name }, album: { image: { large: d.image.large }, title: d.title }, source: d.source || t.source || 'qobuz' })), false);
+                    const albumTracks = d.tracks.items.map(t => ({ ...t, type: 'track', performer: t.performer || { name: d.artist.name }, album: { image: { large: d.image.large }, title: d.title }, source: d.source || t.source || 'qobuz' }));
+                    renderGrid(albumTracks, false);
                     if (d.title) document.getElementById('viewTitle').innerText = d.title; // ADDED: Update title
+                    renderPlayActions('viewActions', albumTracks);
+                } else {
+                    document.getElementById('trackGrid').innerHTML = uiState('error', 'Album introuvable.');
                 }
-            } catch (e) { console.error(e); }
+            } catch (e) { console.error(e); document.getElementById('trackGrid').innerHTML = uiState('error', 'Impossible de charger cet album.'); }
         }
 
         function setupMediaSession(t) {
@@ -3068,33 +3455,27 @@
 
         function showMemories() {
             resetNavStack();
-            document.getElementById('trackView').style.display = 'none';
-            document.getElementById('artistView').style.display = 'none';
-            document.getElementById('lyricsView').style.display = 'none';
-            document.getElementById('blindTestView').style.display = 'none';
-            document.getElementById('profileView').style.display = 'none';
-            document.getElementById('playlistView').style.display = 'none';
-            document.getElementById('allPlaylistsView').style.display = 'none';
-            document.getElementById('searchBarContainer').style.display = 'none';
+            isLyricsMode = false;
+            hideAllViews();
+            setActiveNav('memories');
             document.getElementById('memoriesView').style.display = 'block';
-            document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
             loadMemories();
         }
 
         async function loadMemories() {
             const feed = document.getElementById('memoriesFeed');
-            feed.innerHTML = '<p style="text-align:center;color:#444;padding:40px;">Chargement...</p>';
+            feed.innerHTML = uiState('loading', 'Chargement de vos souvenirs…');
             try {
                 const { data: { user } } = await supabaseClient.auth.getUser();
                 if (!user) return;
                 const { data, error } = await supabaseClient.from('memories').select('*').eq('user_id', user.id).order('created_at', { ascending: false });
                 if (error) throw error;
                 if (!data?.length) {
-                    feed.innerHTML = `<div style="text-align:center;padding:70px 20px;color:#444;"><i class="fas fa-bookmark" style="font-size:38px;margin-bottom:14px;display:block;"></i><p>Aucun souvenir pour l'instant.</p><p style="font-size:12px;margin-top:8px;">Écoute une musique et clique sur 📍</p></div>`;
+                    feed.innerHTML = uiState('empty', "Aucun souvenir pour l'instant.<br>Pendant l'écoute, touchez <i class=\"fas fa-thumbtack\"></i> pour épingler un moment à une musique.", 'fa-bookmark');
                     return;
                 }
                 renderMemoryCards(data, feed);
-            } catch (e) { console.error(e); feed.innerHTML = '<p style="color:red;text-align:center;padding:30px;">Erreur de chargement.</p>'; }
+            } catch (e) { console.error(e); feed.innerHTML = uiState('error', 'Impossible de charger vos souvenirs.'); }
         }
 
         function renderMemoryCards(memories, feed) {
@@ -3109,15 +3490,15 @@
                 const card = document.createElement('div');
                 card.className = 'memory-card';
                 card.innerHTML = `
-                    <img src="${escapeHtml(img)}" class="memory-card-art" onerror="this.src='https://placehold.co/64x64/111/444?text=Z'">
+                    <img src="${escapeHtml(img)}" class="memory-card-art" alt="" onerror="this.src='https://placehold.co/64x64/17171d/3a3a46?text=Z'">
                     <div class="memory-card-body">
-                        <span class="memory-date-badge">${escapeHtml(dateStr)} · ${escapeHtml(timeStr)}</span>
                         <div class="memory-card-title">${escapeHtml(t.title || 'Titre inconnu')}</div>
                         <div class="memory-card-artist">${escapeHtml(t.performer?.name || '')}</div>
                         ${m.note ? `<div class="memory-card-note">${escapeHtml(m.note)}</div>` : ''}
-                        ${m.photo_url ? `<img src="${escapeHtml(m.photo_url)}" class="memory-card-photo">` : ''}
+                        ${m.photo_url ? `<img src="${escapeHtml(m.photo_url)}" class="memory-card-photo" alt="">` : ''}
                         <div class="memory-card-meta">
-                            ${m.location_name ? `<span><i class="fas fa-map-marker-alt" style="color:#ff0055;"></i> ${escapeHtml(m.location_name)}</span>` : ''}
+                            <span class="memory-date-badge"><i class="far fa-calendar"></i> ${escapeHtml(dateStr)} · ${escapeHtml(timeStr)}</span>
+                            ${m.location_name ? `<span><i class="fas fa-map-marker-alt" style="color:var(--secondary);"></i> ${escapeHtml(m.location_name)}</span>` : ''}
                         </div>
                     </div>
                     <button class="memory-delete-btn" title="Supprimer ce souvenir"><i class="fas fa-trash"></i></button>`;
@@ -3293,6 +3674,23 @@
             document.getElementById('btnShuffle').addEventListener('click', toggleShuffle); // Listener ajouté
             document.getElementById('progressBar').addEventListener('click', (e) => { if (!activeAudio.duration) return; activeAudio.currentTime = (e.offsetX / document.getElementById('progressBar').clientWidth) * activeAudio.duration; updateMediaSessionState(); if (typeof broadcastSeek === 'function') broadcastSeek(); });
             document.querySelector('.vol-slider').oninput = function () { setGlobalVolume(this.value) };
+
+            // Navigation mobile : un choix dans la feuille « Plus » la referme
+            document.getElementById('sidebar').addEventListener('click', (e) => { if (e.target.closest('.nav-item')) closeMoreSheet(); });
+            // Mini-lecteur (tablette / mobile) : toucher la pochette ou le titre ouvre la lecture plein écran.
+            // En phase de capture pour passer avant le lien vers l'artiste.
+            document.querySelector('.cap-info').addEventListener('click', (e) => {
+                if (!isCompactLayout() || document.body.classList.contains('np-open')) return;
+                if (e.target.closest('button')) return;
+                if (e.target.closest('.cap-img, .cap-text')) { e.stopPropagation(); openNowPlaying(); }
+            }, true);
+            window.addEventListener('resize', () => { if (!isCompactLayout()) document.body.classList.remove('np-open'); });
+            document.addEventListener('keydown', (e) => {
+                if (e.key !== 'Escape') return;
+                if (document.getElementById('sidebar').classList.contains('sheet-open')) closeMoreSheet();
+                else if (document.body.classList.contains('np-open')) closeNowPlaying();
+                else if (document.getElementById('eqView').style.display === 'flex') toggleEQ();
+            });
         });
 
         document.addEventListener('visibilitychange', () => {

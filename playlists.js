@@ -19,17 +19,17 @@ async function loadUserPlaylists() {
 
     if (playlists) {
         userPlaylists = playlists;
-        
+
         // Optimisation: Pré-charger un aperçu des titres pour générer les pochettes
         // On charge les 4 premiers items de chaque playlist
         const playlistIds = playlists.map(p => p.id);
-        
+
         if (playlistIds.length > 0) {
              const { data: items } = await supabaseClient
                 .from('playlist_items')
                 .select('playlist_id, track_data')
                 .in('playlist_id', playlistIds);
-             
+
              // Associer les items aux playlists
              if(items) {
                  userPlaylists.forEach(pl => {
@@ -54,20 +54,17 @@ function getSafeSubsonicUrl(imagePath) {
 // Génère le HTML de la pochette (1 image ou 4 images)
 function getPlaylistCoverHTML(playlist) {
     const items = playlist.previewItems || [];
-    
+
     // Pas d'items : Placeholder
     if(items.length === 0) {
-        return `
-        <div style="width:100%; aspect-ratio:1/1; background:linear-gradient(45deg, #333, #111); border-radius:12px; display:flex; align-items:center; justify-content:center; margin-bottom:10px;">
-            <i class="fas fa-music" style="font-size:40px; color:#555;"></i>
-        </div>`;
+        return `<div class="cover-placeholder"><i class="fas fa-music"></i></div>`;
     }
 
     // Moins de 4 items : On prend la première image
     if(items.length < 4) {
         const t = items[0].track_data;
         let url = t.source === 'subsonic' ? getSafeSubsonicUrl(t.album.image.large) : (t.album.image.large || '').replace('_300', '_600');
-        return `<img src="${url}" style="width:100%; aspect-ratio:1/1; border-radius:12px; object-fit:cover; margin-bottom:10px;">`;
+        return `<img src="${url}" loading="lazy" alt="">`;
     }
 
     // 4 items ou plus : Collage 2x2
@@ -75,7 +72,7 @@ function getPlaylistCoverHTML(playlist) {
     for(let i=0; i<4; i++) {
         const t = items[i].track_data;
         let url = t.source === 'subsonic' ? getSafeSubsonicUrl(t.album.image.large) : (t.album.image.large || '').replace('_300', '_600');
-        collageHTML += `<img src="${url}">`;
+        collageHTML += `<img src="${url}" loading="lazy" alt="">`;
     }
     collageHTML += `</div>`;
     return collageHTML;
@@ -89,11 +86,9 @@ function renderAllPlaylists() {
     const createCard = document.createElement('div');
     createCard.className = 'track-card create-playlist-card';
     createCard.innerHTML = `
-        <div style="width:100%; aspect-ratio:1/1; background:rgba(255,255,255,0.05); border-radius:12px; display:flex; align-items:center; justify-content:center; margin-bottom:10px; border: 2px dashed rgba(255,255,255,0.2);">
-            <i class="fas fa-plus" style="font-size:30px; color:var(--primary);"></i>
-        </div>
-        <h3>Nouvelle Playlist</h3>
-        <p>Créer</p>
+        <div class="card-media"><div class="cover-placeholder create"><i class="fas fa-plus"></i></div></div>
+        <h3>Nouvelle playlist</h3>
+        <p>Créer une collection</p>
     `;
     createCard.onclick = openCreatePlaylistModal;
     container.appendChild(createCard);
@@ -101,16 +96,20 @@ function renderAllPlaylists() {
     userPlaylists.forEach(pl => {
         const div = document.createElement('div');
         div.className = 'track-card';
-        
+
         const coverHTML = getPlaylistCoverHTML(pl);
-        
+
+        const count = (pl.previewItems||[]).length;
         div.innerHTML = `
-            ${coverHTML}
-            <div class="badges-container">
-                ${pl.is_public ? '<div class="type-badge" style="background:var(--primary)">PUBLIC</div>' : ''}
+            <div class="card-media">
+                ${coverHTML}
+                <div class="badges-container">
+                    ${pl.is_public ? '<div class="type-badge badge-public">PUBLIC</div>' : ''}
+                </div>
+                <span class="card-play"><i class="fas fa-arrow-right"></i></span>
             </div>
             <h3>${pl.name}</h3>
-            <p>${(pl.previewItems||[]).length} titres</p>
+            <p>${count} titre${count > 1 ? 's' : ''}</p>
         `;
         div.onclick = () => openPlaylist(pl.id);
         container.appendChild(div);
@@ -131,11 +130,11 @@ function closeCreatePlaylistModal() {
 async function createPlaylist() {
     const name = document.getElementById('newPlaylistName').value.trim();
     const isPublic = document.getElementById('newPlaylistPublic').checked;
-    
+
     if (!name) return showToast("Nom requis !");
-    
+
     const { data: { user } } = await supabaseClient.auth.getUser();
-    
+
     const { data, error } = await supabaseClient
         .from('playlists')
         .insert({ user_id: user.id, name: name, is_public: isPublic })
@@ -147,7 +146,7 @@ async function createPlaylist() {
         showToast("Playlist créée ! 💿");
         closeCreatePlaylistModal();
         document.getElementById('newPlaylistName').value = '';
-        await loadUserPlaylists(); 
+        await loadUserPlaylists();
         renderAllPlaylists();
     }
 }
@@ -185,7 +184,7 @@ async function savePlaylistEdits() {
         showToast("Playlist modifiée ! ✅");
         closeEditPlaylistModal();
         openPlaylist(currentPlaylistId);
-        loadUserPlaylists(); 
+        loadUserPlaylists();
     }
 }
 
@@ -193,20 +192,17 @@ async function savePlaylistEdits() {
 
 async function openPlaylist(id) {
     currentPlaylistId = id;
-    
-    document.getElementById('trackView').style.display = 'none';
-    document.getElementById('artistView').style.display = 'none';
-    document.getElementById('lyricsView').style.display = 'none';
-    document.getElementById('blindTestView').style.display = 'none';
-    document.getElementById('profileView').style.display = 'none';
-    document.getElementById('allPlaylistsView').style.display = 'none';
-    document.getElementById('searchBarContainer').style.display = 'none';
-    
+
+    isLyricsMode = false;
+    hideAllViews();
+
     const view = document.getElementById('playlistView');
     view.style.display = 'block';
-    
-    document.getElementById('playlistTitle').innerHTML = 'Chargement...';
-    document.getElementById('playlistGrid').innerHTML = '<p style="text-align:center; padding:20px;">Récupération des titres...</p>';
+    view.scrollTop = 0;
+
+    document.getElementById('playlistTitle').innerHTML = 'Chargement…';
+    document.getElementById('playlistActions').innerHTML = '';
+    document.getElementById('playlistGrid').innerHTML = uiState('loading', 'Récupération des titres…');
 
     // 1. Info Playlist
     const { data: playlist } = await supabaseClient
@@ -214,20 +210,18 @@ async function openPlaylist(id) {
         .select('*')
         .eq('id', id)
         .single();
-        
+
     const { data: { user } } = await supabaseClient.auth.getUser();
     const isOwner = user && playlist.user_id === user.id;
 
     if(playlist) {
         document.getElementById('playlistTitle').innerHTML = `
-            <div style="display:flex; align-items:center; gap:10px;">
-                <span id="playlistTitleMain">${playlist.name}</span>
-                <span id="playlistPublicBadge" style="font-size:10px; background:rgba(255,255,255,0.1); padding:2px 6px; border-radius:4px;">${playlist.is_public ? 'PUBLIC' : 'PRIVÉ'}</span>
-                ${isOwner ? `
-                    <button onclick="openEditPlaylistModal()" class="action-btn-mini" title="Modifier"><i class="fas fa-pen"></i></button>
-                    <button onclick="deletePlaylist('${id}')" class="action-btn-mini" style="color:#ff0055;" title="Supprimer"><i class="fas fa-trash"></i></button>
-                ` : ''}
-            </div>
+            <span id="playlistTitleMain">${playlist.name}</span>
+            <span id="playlistPublicBadge" class="type-badge ${playlist.is_public ? 'badge-public' : ''}">${playlist.is_public ? 'PUBLIC' : 'PRIVÉ'}</span>
+            ${isOwner ? `
+                <button onclick="openEditPlaylistModal()" class="action-btn-mini" title="Modifier"><i class="fas fa-pen"></i></button>
+                <button onclick="deletePlaylist('${id}')" class="action-btn-mini" style="color:var(--secondary);" title="Supprimer"><i class="fas fa-trash"></i></button>
+            ` : ''}
         `;
     }
 
@@ -241,13 +235,9 @@ async function openPlaylist(id) {
     if(items && items.length > 0) {
         const trackList = items.map(i => i.track_data);
         renderPlaylistGrid(trackList, isOwner, id);
+        renderPlayActions('playlistActions', trackList);
     } else {
-        document.getElementById('playlistGrid').innerHTML = `
-            <div style="text-align:center; padding:50px; color:#666;">
-                <i class="fas fa-compact-disc" style="font-size:40px; margin-bottom:15px;"></i>
-                <p>Cette playlist est vide.</p>
-            </div>
-        `;
+        document.getElementById('playlistGrid').innerHTML = uiState('empty', "Cette playlist est vide.<br>Pendant l'écoute, touchez <i class=\"fas fa-plus\"></i> pour y ajouter le titre en cours.", 'fa-compact-disc');
     }
 }
 
@@ -259,7 +249,7 @@ function renderPlaylistGrid(items, isOwner, playlistId) {
         const d = document.createElement('div');
         d.className = 'track-card';
         // Important : Ajout de l'ID pour l'indicateur de lecture
-        d.dataset.id = it.id; 
+        d.dataset.id = it.id;
 
         // Gestion du badge Hi-Res
         let b = '';
@@ -268,14 +258,17 @@ function renderPlaylistGrid(items, isOwner, playlistId) {
         }
 
         d.innerHTML = `
-            <div class="badges-container">${b}</div>
-            <img src="${u}">
+            <div class="card-media">
+                <img src="${u}" loading="lazy" alt="">
+                <div class="badges-container">${b}</div>
+                <span class="card-play"><i class="fas fa-play"></i></span>
+                ${isOwner ? `<button class="card-remove" onclick="event.stopPropagation(); removeTrackFromPlaylist('${playlistId}', '${it.id}')" title="Retirer de la playlist"><i class="fas fa-minus"></i></button>` : ''}
+            </div>
             <h3>${it.title}</h3>
             <p>${it.performer.name}</p>
-            ${isOwner ? `<button onclick="event.stopPropagation(); removeTrackFromPlaylist('${playlistId}', '${it.id}')" style="position:absolute; top:10px; right:10px; background:rgba(0,0,0,0.7); border:none; color:#ff0055; width:24px; height:24px; border-radius:50%; cursor:pointer;"><i class="fas fa-minus"></i></button>` : ''}
         `;
         d.onclick = () => {
-            tracks = items; 
+            tracks = items;
             const idx = items.findIndex(x => x.id === it.id);
             loadTrack(idx !== -1 ? idx : 0);
         };
@@ -288,14 +281,14 @@ function renderPlaylistGrid(items, isOwner, playlistId) {
 
 async function removeTrackFromPlaylist(playlistId, trackId) {
     if(!confirm("Retirer ce titre ?")) return;
-    
+
     const { data: items } = await supabaseClient
         .from('playlist_items')
         .select('id, track_data')
         .eq('playlist_id', playlistId);
-        
+
     const itemToDelete = items.find(i => String(i.track_data.id) === String(trackId));
-    
+
     if(itemToDelete) {
         await supabaseClient.from('playlist_items').delete().eq('id', itemToDelete.id);
         showToast("Titre retiré");
@@ -325,11 +318,11 @@ async function searchPublicPlaylists(query) {
     if (!playlists || playlists.length === 0) return [];
 
     const results = [];
-    
+
     // 2. Pour chaque playlist, récupérer :
     //    - le pseudo du créateur (table profiles)
     //    - les images (table playlist_items)
-    
+
     // On récupère tous les IDs nécessaires
     const userIds = [...new Set(playlists.map(p => p.user_id))];
     const playlistIds = playlists.map(p => p.id);
@@ -354,16 +347,16 @@ async function searchPublicPlaylists(query) {
 
         // Trouver les items pour cette playlist
         const plItems = items ? items.filter(i => i.playlist_id === pl.id) : [];
-        
+
         // On utilise previewItems comme dans loadUserPlaylists pour que getPlaylistCoverHTML fonctionne
         results.push({
             id: pl.id,
             name: pl.name, // Pour l'affichage
             title: pl.name,
             performer: { name: ownerName }, // Pour l'affichage du créateur
-            type: 'playlist', 
+            type: 'playlist',
             previewItems: plItems, // Important pour getPlaylistCoverHTML
-            source: 'local_playlist' 
+            source: 'local_playlist'
         });
     }
 
@@ -381,10 +374,10 @@ function openAddToPlaylistModal() {
 function closeAddToPlaylistModal() { document.getElementById('addToPlaylistModal').style.display = 'none'; }
 function renderAddToModalList() {
     const container = document.getElementById('addToPlaylistList'); container.innerHTML = '';
-    if(userPlaylists.length === 0) { container.innerHTML = '<p style="color:#888;">Aucune playlist.</p>'; return; }
+    if(userPlaylists.length === 0) { container.innerHTML = '<p style="color:var(--text-dim); padding:6px 2px 4px;">Vous n\'avez pas encore de playlist.</p>'; return; }
     userPlaylists.forEach(pl => {
         const btn = document.createElement('div'); btn.className = 'playlist-select-item';
-        btn.innerHTML = `<span>${pl.name}</span> <i class="fas fa-plus"></i>`;
+        btn.innerHTML = `<span><i class="fas fa-layer-group" style="margin-right:10px;"></i>${pl.name}</span> <i class="fas fa-plus"></i>`;
         btn.onclick = () => addTrackToPlaylist(pl.id); container.appendChild(btn);
     });
 }
@@ -397,7 +390,7 @@ async function addTrackToPlaylist(playlistId) {
         .from('playlist_items')
         .select('track_data')
         .eq('playlist_id', playlistId);
-    
+
     if (existingItems) {
         const exists = existingItems.some(item => String(item.track_data.id) === String(trackToAddCandidate.id));
         if (exists) {
@@ -408,10 +401,10 @@ async function addTrackToPlaylist(playlistId) {
 
     // 2. Insertion
     const { error } = await supabaseClient.from('playlist_items').insert({ playlist_id: playlistId, track_data: trackToAddCandidate });
-    if(error) showToast("Erreur : " + error.message); 
-    else { 
-        showToast(`Ajouté ! ✅`); 
-        closeAddToPlaylistModal(); 
+    if(error) showToast("Erreur : " + error.message);
+    else {
+        showToast(`Ajouté ! ✅`);
+        closeAddToPlaylistModal();
         loadUserPlaylists();
     }
 }
