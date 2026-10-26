@@ -104,7 +104,7 @@ except ImportError:
 # Identifiants Qobuz officiels. Le token est lié à l'app_id : app_id + secret + token
 # doivent être cohérents. Le token et l'ID utilisateur donnent accès au compte : ils viennent
 # UNIQUEMENT de l'environnement (.env en local, tableau de bord Vercel en ligne).
-APP_VERSION  = "2026-10-25b · Qobuz prioritaire, radio Python 3.13"
+APP_VERSION  = "2026-10-26 · Qobuz + Tidal (Monochrome), contrôle de l'audio"
 
 def _env_clean(name):
     return (os.getenv(name) or '').strip().strip('"').strip("'").strip()
@@ -132,6 +132,15 @@ TIDAL_QUALITY = os.getenv('TIDAL_QUALITY', 'HI_RES_LOSSLESS')
 ELJOHNZC_BASE = (os.getenv('ELJOHNZC_BASE') or "https://eljohnzcaddon.velixir.run/c57e7b0ef2031b2f1fcd").rstrip('/')
 # Qualité demandée à l'addon : hires | lossless | high | low (il descend tout seul si indisponible).
 ELJOHNZC_QUALITY = os.getenv('ELJOHNZC_QUALITY') or 'hires'
+
+# --- MONOCHROME (tracks.monochrome.st) : catalogue + audio FLAC, source « Tidal » ---
+# Recherche /search, /search/tracks|releases|artists ; fiches /releases/{id}, /artists/{id} ;
+# audio /track/{id} (FLAC direct, lu par le NAVIGATEUR : le serveur, lui, est refusé en 429).
+MONO_BASE = (os.getenv('MONO_BASE') or "https://tracks.monochrome.st").rstrip('/')
+
+# Sources de lecture par ordre de priorité : Qobuz d'abord, Tidal (Monochrome, puis addon) en secours.
+# Le navigateur envoie la liste des sources dont l'audio fonctionne (?sources=qobuz,mono,tidal).
+SOURCE_KEYS = ('qobuz', 'mono', 'tidal')
 
 # MODE LOSSLESS (par défaut) : titres, albums et artistes viennent de Qobuz (si configuré) et de
 # Tidal, seules les playlists viennent de Deezer ; tout titre d'une autre source est re-cherché sur
@@ -1811,6 +1820,187 @@ def sync_search_deezer_artists(query, limit=15):
         return results
     except Exception as e: return []
 
+def _mono_get(path, params=None, timeout=10):
+    return HTTP.get(f"{MONO_BASE}{path}", params=params, timeout=timeout,
+                    headers={'Accept': 'application/json', 'User-Agent': 'Zenith/1.0 (lecteur de musique)'})
+
+def _mono_names(item):
+    names = item.get('artistNames') or [(a.get('displayName') or a.get('name')) for a in (item.get('artists') or []) if isinstance(a, dict)]
+    return [n for n in (names or []) if n]
+
+def _mono_track_obj(t, release=None):
+    """Titre Monochrome → objet titre du site (source 'mono', FLAC 16 bits)."""
+    tid = str(t.get('trackId') or t.get('id') or '')
+    if not tid or not t.get('title') or t.get('playable') is False:
+        return None
+    rel = release or {}
+    names = _mono_names(t) or _mono_names(rel)
+    return {
+        'id': tid, 'title': t['title'],
+        'performer': {'name': ', '.join(names[:3]) if names else 'Inconnu'},
+        'album': {'title': rel.get('title') or t.get('albumTitle') or '', 'image': {'large': t.get('artwork') or rel.get('artwork')}},
+        'duration': round((t.get('duration') or 0) / 1000),
+        'isrc': t.get('isrc'),
+        'maximum_bit_depth': 16, 'maximum_sampling_rate': 44.1,
+        'source': 'mono', 'release_id': str(t.get('releaseId') or rel.get('releaseId') or ''),
+    }
+
+def _mono_album_obj(r):
+    rid = str(r.get('releaseId') or r.get('id') or '')
+    if not rid or not r.get('title'):
+        return None
+    names = _mono_names(r)
+    date = (r.get('releaseDate') or '')[:10] or None
+    return {'id': rid, 'title': r['title'], 'artist': {'name': names[0] if names else 'Inconnu'},
+            'image': {'large': r.get('artwork')}, 'release_date_original': date, 'date': date,
+            'maximum_bit_depth': 16, 'source': 'mono', 'type': 'album'}
+
+def _mono_artist_obj(a):
+    aid = str(a.get('artistId') or a.get('id') or '')
+    name = a.get('displayName') or a.get('name')
+    if not aid or not name:
+        return None
+    return {'id': aid, 'name': name, 'image': a.get('avatar') or '', 'source': 'mono', 'type': 'artist'}
+
+def sync_search_mono(query, limit=25):
+    """Titres Monochrome (/search/tracks)."""
+    try:
+        r = _mono_get("/search/tracks", {'q': query, 'limit': limit})
+        items = ((r.json() or {}).get('tracks') or []) if r.status_code == 200 else []
+    except Exception as e:
+        logger.warning(f"[Monochrome] recherche titres : {e}")
+        return []
+    return [o for o in (_mono_track_obj(t) for t in items) if o][:limit]
+
+_QUERY_STOPWORDS = {'the', 'le', 'la', 'les', 'de', 'des', 'du', 'et', 'and', 'feat', 'ft', 'a', 'an', 'of', 'un', 'une'}
+
+def _query_tokens(query):
+    return [w for w in re.findall(r'[a-z0-9]+', unicodedata.normalize('NFD', (query or '').lower()).encode('ascii', 'ignore').decode())
+            if len(w) > 1 and w not in _QUERY_STOPWORDS]
+
+def _is_relevant(text, tokens, min_ratio=0.5):
+    """Le résultat contient-il assez de mots de la recherche ? (la recherche Monochrome renvoie
+    aussi des titres sans rapport, qu'on écarte)"""
+    if not tokens:
+        return True
+    hay = unicodedata.normalize('NFD', (text or '').lower()).encode('ascii', 'ignore').decode()
+    hits = sum(1 for t in tokens if t in hay)
+    return hits >= 1 and hits / len(tokens) >= min_ratio
+
+def sync_search_mono_all(query):
+    """Monochrome → (titres, albums, artistes) en un appel. Le service ne renvoie qu'une dizaine
+    de titres par recherche (pas de pagination)."""
+    try:
+        r = _mono_get("/search", {'q': query})
+        d = r.json() if r.status_code == 200 else {}
+    except Exception as e:
+        logger.warning(f"[Monochrome] recherche : {e}")
+        d = {}
+    toks = _query_tokens(query)
+    tracks = [o for o in (_mono_track_obj(t) for t in d.get('tracks') or [])
+              if o and _is_relevant(f"{o['title']} {o['performer']['name']}", toks)]
+    albums = [o for o in (_mono_album_obj(x) for x in d.get('releases') or [])
+              if o and _is_relevant(f"{o['title']} {o['artist']['name']}", toks)]
+    artists = [o for o in (_mono_artist_obj(x) for x in d.get('artists') or [])
+               if o and _is_relevant(o['name'], toks, min_ratio=0)]
+    return tracks, albums, artists
+
+def sync_get_mono_album(release_id):
+    try:
+        r = _mono_get(f"/releases/{urllib.parse.quote(str(release_id))}", timeout=15)
+        if r.status_code != 200:
+            return None
+        d = r.json()
+    except Exception as e:
+        logger.warning(f"[Monochrome] album {release_id} : {e}")
+        return None
+    alb = _mono_album_obj(d) or {}
+    tracks = []
+    for t in d.get('tracks') or []:
+        o = _mono_track_obj(t, d)
+        if o:
+            o['track_number'] = t.get('trackNumber')
+            tracks.append(o)
+    return {'id': str(d.get('releaseId') or release_id), 'title': d.get('title'),
+            'artist': alb.get('artist') or {'name': 'Inconnu'}, 'image': {'large': d.get('artwork')},
+            'source': 'mono', 'maximum_bit_depth': 16, 'tracks': {'items': tracks}}
+
+def _mono_find_artist_id(name):
+    if not name:
+        return None
+    try:
+        r = _mono_get("/search/artists", {'q': name, 'limit': 10})
+        items = ((r.json() or {}).get('artists') or []) if r.status_code == 200 else []
+    except Exception:
+        return None
+    wanted = _artist_forms(name)
+    for a in items:
+        n = a.get('displayName') or a.get('name')
+        if n and max(_ratio(w, _match_str(n)) for w in wanted) >= 90:
+            return str(a.get('artistId') or a.get('id'))
+    return None
+
+def sync_get_mono_artist(artist_id):
+    """Fiche artiste Monochrome : photo, bio, titres populaires et discographie."""
+    try:
+        r = _mono_get(f"/artists/{urllib.parse.quote(str(artist_id))}", timeout=15)
+        if r.status_code != 200:
+            return None
+        d = r.json()
+    except Exception as e:
+        logger.warning(f"[Monochrome] artiste {artist_id} : {e}")
+        return None
+    name = d.get('displayName') or d.get('name')
+    if not name:
+        return None
+    top = [o for o in (_mono_track_obj(t) for t in d.get('topTracks') or []) if o][:10]
+    albums, seen = [], set()
+    for group in ('albums', 'singles', 'compilations'):
+        for x in d.get(group) or []:
+            o = _mono_album_obj(x)
+            if o and o['id'] not in seen:
+                seen.add(o['id']); albums.append(o)
+    if not top and albums:  # pas de titres populaires : ceux du dernier album
+        top = ((sync_get_mono_album(albums[0]['id']) or {}).get('tracks') or {}).get('items', [])[:10]
+    bio = d.get('biography') or d.get('bio') or ''
+    if isinstance(bio, dict):
+        bio = bio.get('content') or bio.get('text') or ''
+    return {'id': str(d.get('artistId') or artist_id), 'name': name, 'image': d.get('avatar') or '',
+            'albums': albums, 'top_tracks': top, 'bio': str(bio).strip(), 'source': 'mono'}
+
+def _mono_resolve_one(title, artist, isrc=None):
+    """Titre sur Monochrome : ISRC identique en priorité, sinon correspondance titre + artiste."""
+    if not (title and artist):
+        if not isrc:
+            return None
+        d = _deezer_api(f"https://api.deezer.com/2.0/track/isrc:{isrc}")
+        if not d or 'error' in d:
+            return None
+        title, artist = d.get('title_short') or d.get('title'), (d.get('artist') or {}).get('name')
+        if not (title and artist):
+            return None
+    cands = sync_search_mono(f"{title} {_primary_artist(artist)}".strip(), 20)
+    if isrc:
+        for c in cands:
+            if (c.get('isrc') or '').upper() == isrc.upper():
+                return c
+    return _best_match(cands, title, artist)
+
+def sync_resolve_in_order(title, artist, isrc, order):
+    """Cherche le titre sur chaque source, dans l'ordre de priorité (toutes partent en parallèle,
+    on garde la première source de la liste qui l'a)."""
+    resolvers = {'qobuz': _qobuz_resolve_one, 'mono': _mono_resolve_one, 'tidal': _tidal_resolve_one}
+    futs = [(s_, _RESOLVE_POOL.submit(resolvers[s_], title, artist, isrc)) for s_ in order if s_ in resolvers]
+    for s_, f in futs:
+        try:
+            rec = f.result(timeout=30)
+        except Exception as e:
+            logger.warning(f"[Resolve] {s_} : {e}")
+            rec = None
+        if rec:
+            return rec
+    return None
+
 def sync_qobuz_search_all(query, limit_tracks=50, limit_albums=15, limit_artists=10):
     """UN appel Qobuz (catalog/search) → (titres, albums, artistes)."""
     if not (QOBUZ_ENABLED and client):
@@ -1846,6 +2036,21 @@ def _track_sig(t):
 
 def _album_sig(a):
     return f"{_match_str(a.get('title'))}|{_match_str((a.get('artist') or {}).get('name'))}"
+
+def _merge_ordered(lists, sig):
+    """Fusionne plusieurs listes sans doublon, dans l'ordre de priorité des sources : la première
+    source qui a le titre l'emporte ; entre deux versions d'une même source, la meilleure
+    profondeur de bits l'emporte. L'ordre de pertinence est conservé."""
+    best, order = {}, []
+    for items in lists:
+        for it in items or []:
+            k = sig(it)
+            cur = best.get(k)
+            if cur is None:
+                best[k] = it; order.append(k)
+            elif cur.get('source') == it.get('source') and (it.get('maximum_bit_depth') or 16) > (cur.get('maximum_bit_depth') or 16):
+                best[k] = it
+    return [best[k] for k in order]
 
 def _merge_lossless(qobuz_items, tidal_items, sig):
     """Fusionne sans doublon, Qobuz en priorité : Tidal ne fait que compléter avec ce que Qobuz
@@ -2427,13 +2632,13 @@ SEARCH_CACHE_TTL = 0    # cache désactivé (résultats toujours frais)
 SEARCH_CACHE_MAX = 200
 
 @app.get('/search')
-async def search_tracks(q: str, type: str = 'all'):
-    _ck = (q.strip().lower(), type)
+async def search_tracks(q: str, type: str = 'all', sources: str = None):
+    _ck = (q.strip().lower(), type, sources or '')
     _hit = _search_cache.get(_ck)
     if _hit and (time.time() - _hit[1]) < SEARCH_CACHE_TTL:
         return JSONResponse(_hit[0])
 
-    payload = await _do_search(q, type)
+    payload = await _do_search(q, type, sources)
     if len(_search_cache) >= SEARCH_CACHE_MAX:
         try:
             del _search_cache[min(_search_cache, key=lambda k: _search_cache[k][1])]
@@ -2442,41 +2647,47 @@ async def search_tracks(q: str, type: str = 'all'):
     _search_cache[_ck] = (payload, time.time())
     return JSONResponse(payload)
 
-async def _do_search(q: str, type: str = 'all'):
-    # MODE LOSSLESS : titres + albums + artistes via Qobuz et Tidal (fusionnés sans doublon),
-    # playlists via Deezer (leurs titres sont re-cherchés sur Qobuz/Tidal au clic)
+async def _do_search(q: str, type: str = 'all', sources: str = None):
+    # MODE LOSSLESS : titres + albums + artistes depuis les sources qui marchent (Qobuz d'abord,
+    # Tidal en secours), fusionnés sans doublon ; playlists via Deezer (titres re-cherchés au clic)
     if LOSSLESS_MODE:
+        order = _parse_sources(sources)
+        # Le catalogue Tidal complète toujours la recherche (en dernier) : même si son audio est en
+        # panne, ses titres sont retrouvés sur une source qui marche au moment de les écouter.
+        catalog = order + ([] if 'tidal' in order else ['tidal'])
         want_t, want_al, want_ar = type in ['track', 'all'], type in ['album', 'all'], type in ['artist', 'all']
-        subtasks, kinds = [], []
-        if QOBUZ_ENABLED and (want_t or want_al or want_ar):
-            subtasks.append(run_in_threadpool(sync_qobuz_search_all, q)); kinds.append('qobuz')
-        if want_t:
-            subtasks.append(run_in_threadpool(sync_search_tidal, q, 50)); kinds.append('tracks')
-        if want_al:
-            subtasks.append(run_in_threadpool(sync_search_tidal_albums, q, 15)); kinds.append('albums')
-        if want_ar:
-            subtasks.append(run_in_threadpool(sync_search_tidal_artists, q, 15)); kinds.append('artists')
+        jobs = {}
+        if want_t or want_al or want_ar:
+            if 'qobuz' in order and QOBUZ_ENABLED:
+                jobs['qobuz'] = run_in_threadpool(sync_qobuz_search_all, q)
+            if 'mono' in order:
+                jobs['mono'] = run_in_threadpool(sync_search_mono_all, q)
+            if 'tidal' in catalog:
+                if want_t: jobs['tidal_t'] = run_in_threadpool(sync_search_tidal, q, 50)
+                if want_al: jobs['tidal_al'] = run_in_threadpool(sync_search_tidal_albums, q, 15)
+                if want_ar and 'tidal' in order: jobs['tidal_ar'] = run_in_threadpool(sync_search_tidal_artists, q, 15)
         if type in ['playlist', 'all']:
-            subtasks.append(run_in_threadpool(sync_search_deezer_playlists, q, 50)); kinds.append('playlists')
-        done = await asyncio.gather(*subtasks, return_exceptions=True)
-        res = {'tracks': [], 'albums': [], 'playlists': [], 'artists': [], 'qobuz': ([], [], [])}
-        for k, r in zip(kinds, done):
-            if k == 'qobuz':
-                res[k] = r if isinstance(r, tuple) else ([], [], [])
-            else:
-                res[k] = r if isinstance(r, list) else []
-        qz_tracks, qz_albums, qz_artists = res['qobuz']
-        tracks = _merge_lossless(qz_tracks, res['tracks'], _track_sig) if want_t else []
-        albums = _merge_lossless(qz_albums, res['albums'], _album_sig) if want_al else []
+            jobs['playlists'] = run_in_threadpool(sync_search_deezer_playlists, q, 50)
+        keys = list(jobs)
+        done = await asyncio.gather(*jobs.values(), return_exceptions=True)
+        R = {k: (None if isinstance(v, Exception) else v) for k, v in zip(keys, done)}
+        per_source = {
+            'qobuz': R.get('qobuz') or ([], [], []),
+            'mono': R.get('mono') or ([], [], []),
+            'tidal': (R.get('tidal_t') or [], R.get('tidal_al') or [], R.get('tidal_ar') or []),
+        }
+        tracks = _merge_ordered([per_source[k][0] for k in catalog], _track_sig) if want_t else []
+        albums = _merge_ordered([per_source[k][1] for k in catalog], _album_sig) if want_al else []
         artists = []
         if want_ar:
             seen = set()
-            for a in qz_artists + res['artists']:  # Qobuz d'abord, Tidal complète
-                k = _match_str(a['name'])
-                if k not in seen:
-                    seen.add(k); artists.append(a)
-        return {"tracks": tracks, "albums": albums,
-                "external_playlists": res['playlists'], "artists": artists[:15]}
+            for k in order:
+                for a in per_source[k][2]:
+                    n = _match_str(a['name'])
+                    if n not in seen:
+                        seen.add(n); artists.append(a)
+        return {"tracks": tracks, "albums": albums, "external_playlists": R.get('playlists') or [],
+                "artists": artists[:15], "sources": order}
 
     tasks = []
     want_tracks = type in ['track', 'all']
@@ -2611,16 +2822,19 @@ async def _do_search(q: str, type: str = 'all'):
     }
 
 @app.get('/artist_bio')
-async def get_artist_bio_route(name: str, id: str = None, source: str = None):
-    # Qobuz d'abord (par ID si connu, sinon par nom), Tidal en secours, Deezer en dernier recours
-    qobuz_id = id if (source == 'qobuz' and id) else await run_in_threadpool(_qobuz_find_artist_id, name)
-    if qobuz_id:
-        data = await run_in_threadpool(sync_get_qobuz_artist, qobuz_id)
-        if data: return JSONResponse(data)
-    tidal_id = id if (source == 'tidal_hund' and id) else await run_in_threadpool(_tidal_find_artist_id, name)
-    if tidal_id:
-        data = await run_in_threadpool(sync_get_tidal_artist, tidal_id)
-        if data: return JSONResponse(data)
+async def get_artist_bio_route(name: str, id: str = None, source: str = None, sources: str = None):
+    # Sources qui marchent, dans l'ordre (Qobuz d'abord, Tidal en secours), Deezer en dernier recours.
+    # Par ID si la carte cliquée vient de cette source, sinon par nom.
+    finders = {'qobuz': (_qobuz_find_artist_id, sync_get_qobuz_artist),
+               'mono': (_mono_find_artist_id, sync_get_mono_artist),
+               'tidal': (_tidal_find_artist_id, sync_get_tidal_artist)}
+    src_key = {'qobuz': 'qobuz', 'mono': 'mono', 'tidal_hund': 'tidal'}.get(source)
+    for key in _parse_sources(sources):
+        find, get = finders[key]
+        aid = id if (src_key == key and id) else await run_in_threadpool(find, name)
+        if aid:
+            data = await run_in_threadpool(get, aid)
+            if data: return JSONResponse(data)
     if source == 'deezer' and id:
         data = await run_in_threadpool(sync_get_deezer_artist_by_id, id)
         if data: return JSONResponse(data)
@@ -2677,14 +2891,131 @@ async def get_yt_playlist_details_route(id: str):
     if "error" in res: raise HTTPException(500, res["error"])
     return JSONResponse(res)
     
+# --- SANTÉ DES SOURCES : l'audio est-il VRAIMENT lisible ? ---
+# Qobuz : lien signé + premiers octets du fichier. Tidal (addon) : manifeste + premier segment.
+# Monochrome : recherche côté serveur ; l'audio, lu par le navigateur, est testé par le navigateur.
+_health_cache = {'ts': 0.0, 'data': None, 'forced': 0.0}
+_health_lock = threading.Lock()
+HEALTH_TTL = 180
+
+def _http_code(e):
+    resp = getattr(e, 'response', None)
+    return f"HTTP {resp.status_code}" if resp is not None else type(e).__name__
+
+def _probe_bytes(url, timeout=12):
+    """Demande le tout début d'un fichier audio : (True, code) si le serveur le sert vraiment."""
+    try:
+        with HTTP.get(url, headers={'Range': 'bytes=0-1023'}, timeout=timeout, stream=True) as r:
+            return r.status_code in (200, 206), r.status_code
+    except Exception as e:
+        return False, type(e).__name__
+
+def _health_qobuz():
+    if not TOKEN or not USER_ID:
+        return {'search': False, 'audio': False, 'detail': 'jeton ou ID utilisateur absent'}
+    if not (QOBUZ_ENABLED and client):
+        return {'search': False, 'audio': False, 'detail': 'désactivé'}
+    try:
+        items = (client.api_call("catalog/search", query="daft punk get lucky", limit=1).get('tracks') or {}).get('items') or []
+    except Exception as e:
+        return {'search': False, 'audio': False, 'detail': f"jeton refusé ({_http_code(e)})"}
+    if not items:
+        return {'search': True, 'audio': False, 'detail': 'aucun titre de test trouvé'}
+    try:
+        d = client.get_track_url(items[0]['id'], 27)
+    except Exception as e:
+        return {'search': True, 'audio': False, 'detail': f"lien audio refusé ({_http_code(e)})"}
+    if not d.get('url'):
+        return {'search': True, 'audio': False, 'detail': 'aucun lien audio'}
+    if d.get('sample'):
+        return {'search': True, 'audio': False, 'detail': 'extraits de 30 s seulement (abonnement ?)'}
+    ok, code = _probe_bytes(d['url'])
+    return {'search': True, 'audio': ok,
+            'detail': f"FLAC {d.get('bit_depth')} bits / {d.get('sampling_rate')} kHz" if ok else f"fichier inaccessible ({code})"}
+
+def _health_tidal_addon():
+    out = {'search': False, 'audio': False, 'detail': ''}
+    try:
+        r = HTTP.get(f"{ELJOHNZC_BASE}/search", params={'q': 'daft punk'}, timeout=10)
+        out['search'] = r.status_code == 200 and bool((r.json() or {}).get('tracks'))
+    except Exception:
+        pass
+    try:
+        r = HTTP.get(f"{ELJOHNZC_BASE}/stream/1550546", params={'quality': 'lossless'}, timeout=12)
+        d = r.json() if 'json' in r.headers.get('content-type', '') else {}
+        if r.status_code != 200 or not d.get('url'):
+            out['detail'] = str(d.get('error') or f"HTTP {r.status_code}")[:120]
+            return out
+        m = re.search(r'initialization="([^"]+)"', HTTP.get(d['url'], timeout=12).text)
+        if not m:
+            out['detail'] = 'manifeste invalide'
+            return out
+        ok, code = _probe_bytes(m.group(1).replace('&amp;', '&'))
+        out['audio'] = ok
+        out['detail'] = 'FLAC (DASH)' if ok else f"segment inaccessible ({code})"
+    except Exception as e:
+        out['detail'] = type(e).__name__
+    return out
+
+def _health_mono():
+    try:
+        r = _mono_get("/search/tracks", {'q': 'daft punk one more time', 'limit': 1})
+        items = ((r.json() or {}).get('tracks') or []) if r.status_code == 200 else []
+    except Exception as e:
+        return {'search': False, 'audio': None, 'detail': f"injoignable ({type(e).__name__})"}
+    if not items:
+        return {'search': False, 'audio': None, 'detail': f"recherche HTTP {r.status_code}"}
+    tid = str(items[0].get('trackId') or items[0].get('id'))
+    return {'search': True, 'audio': None, 'detail': "audio testé par le navigateur",
+            'probe_url': f"{MONO_BASE}/track/{tid}", 'base': MONO_BASE}
+
+def sync_sources_health(force=False):
+    now = time.time()
+    with _health_lock:
+        fresh = _health_cache['data'] and now - _health_cache['ts'] < HEALTH_TTL
+        # Re-test forcé limité à une fois toutes les 20 s (évite de marteler les sources)
+        if _health_cache['data'] and (fresh and not force or now - _health_cache['forced'] < 20):
+            return _health_cache['data']
+        if force:
+            _health_cache['forced'] = now
+    futs = {k: _RESOLVE_POOL.submit(f) for k, f in (('qobuz', _health_qobuz), ('mono', _health_mono), ('tidal', _health_tidal_addon))}
+    data = {}
+    for k, f in futs.items():
+        try:
+            data[k] = f.result(timeout=40)
+        except Exception as e:
+            data[k] = {'search': False, 'audio': False, 'detail': type(e).__name__}
+    data['checked_at'] = int(time.time())
+    with _health_lock:
+        _health_cache.update(ts=time.time(), data=data)
+    return data
+
+def _default_sources():
+    """Ordre utilisé quand le navigateur n'en envoie pas : sources dont l'audio n'est pas en panne."""
+    h = _health_cache.get('data')
+    if not h:
+        return list(SOURCE_KEYS)
+    ok = [k for k in SOURCE_KEYS if h[k].get('audio') is not False and h[k].get('search') is not False]
+    return ok or list(SOURCE_KEYS)
+
+def _parse_sources(param):
+    """Sources à utiliser, dans l'ordre : celles envoyées par le navigateur (qui connaît l'état réel
+    de l'audio), sinon celles du dernier contrôle de santé."""
+    if param:
+        lst = [x for x in (y.strip() for y in param.split(',')) if x in SOURCE_KEYS]
+        if lst:
+            return list(dict.fromkeys(lst))
+    return _default_sources()
+
+@app.get('/sources/health')
+async def sources_health_route(force: int = 0):
+    data = await run_in_threadpool(sync_sources_health, bool(force))
+    return JSONResponse({**data, 'order': _default_sources()}, headers={'Cache-Control': 'no-store'})
+
 @app.get('/status')
 async def status_route():
     """Diagnostic : version en ligne, Qobuz (identifiants, recherche, flux) et addon Tidal.
     N'affiche jamais le jeton."""
-    def _http_code(e):
-        resp = getattr(e, 'response', None)
-        return f"HTTP {resp.status_code}" if resp is not None else type(e).__name__
-
     def _check():
         qz = {
             'jeton': 'présent' if TOKEN else 'ABSENT',
@@ -2746,6 +3077,7 @@ async def status_route():
         return {'version': APP_VERSION, 'mode': 'lossless' if LOSSLESS_MODE else 'mixte',
                 'serveur': {'python': platform.python_version(), 'ytmusicapi': ytm_version},
                 'qobuz': qz, 'tidal_addon': tidal, 'radio_youtube': radio_state,
+                'sources': sync_sources_health(),
                 'conseil': conseil, **({'conseil_radio': conseil_radio} if conseil_radio else {})}
 
     return JSONResponse(await run_in_threadpool(_check), headers={'Cache-Control': 'no-store'})
@@ -2805,19 +3137,18 @@ async def resolve_and_stream(title: str, artist: str):
     raise HTTPException(404, "Track not found")
 
 @app.get('/resolve_metadata')
-async def resolve_metadata_route(title: str = '', artist: str = '', isrc: str = None, exclude: str = None):
+async def resolve_metadata_route(title: str = '', artist: str = '', isrc: str = None, exclude: str = None, sources: str = None):
     """
     Retourne l'objet track complet (ID, source, image, etc.).
     Accepte title+artist et/ou isrc (ISRC est prioritaire).
-    exclude=qobuz|tidal_hund : cherche le même titre sur L'AUTRE source (secours quand une
-    source n'arrive pas à lire un titre).
+    sources=qobuz,mono,tidal : sources à essayer, dans l'ordre (celles dont l'audio fonctionne).
+    exclude=qobuz|mono|tidal_hund : retire une source (secours quand elle n'arrive pas à lire un titre).
     """
-    if exclude == 'qobuz':
-        match = await run_in_threadpool(_tidal_resolve_one, title, artist, isrc)
-    elif exclude == 'tidal_hund':
-        match = await run_in_threadpool(_qobuz_resolve_one, title, artist, isrc)
-    else:
-        match = await run_in_threadpool(sync_resolve_track, title, artist, isrc)
+    order = _parse_sources(sources)
+    if exclude:
+        ex = 'tidal' if exclude == 'tidal_hund' else exclude
+        order = [x for x in order if x != ex]
+    match = await run_in_threadpool(sync_resolve_in_order, title, artist, isrc, order)
     if match: return JSONResponse(match)
     raise HTTPException(404, "Not found")
 
@@ -2862,6 +3193,9 @@ async def get_album(id: str, source: str = None):
         raise HTTPException(404)
     elif source == 'tidal_hund':
         res = await run_in_threadpool(sync_get_tidal_album, id)
+        if res: return JSONResponse(res)
+    elif source == 'mono':
+        res = await run_in_threadpool(sync_get_mono_album, id)
         if res: return JSONResponse(res)
     elif source == 'deezer':
         def _fetch_deezer_album():

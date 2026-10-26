@@ -267,6 +267,10 @@
             </div>
 
             <div class="nav-footer">
+                <div class="source-status" id="sourceStatusMini" onclick="showProfileSettings()" title="État de l'audio des sources (cliquer pour le détail)">
+                    <span class="src-pill" data-src="qobuz"><span class="src-dot"></span><span class="src-name">Qobuz</span></span>
+                    <span class="src-pill" data-src="tidal"><span class="src-dot"></span><span class="src-name">Tidal</span></span>
+                </div>
                 <div class="nav-item" data-nav="profile" onclick="showProfileSettings()" title="Compte et paramètres"><i class="fas fa-circle-user"></i><span>Compte</span></div>
                 <div class="nav-item danger" onclick="logout()" title="Déconnexion"><i class="fas fa-arrow-right-from-bracket"></i><span>Déconnexion</span></div>
             </div>
@@ -453,6 +457,14 @@
                             </div>
                             <label class="switch"><input type="checkbox" id="settingEcoMode" onchange="changeSetting('eco', this.checked)"><span class="slider round"></span></label>
                         </div>
+                    </section>
+
+                    <section class="settings-section">
+                        <div class="settings-section-title"><i class="fas fa-signal"></i> Sources audio
+                            <button class="pill-btn" id="btnTestSources" onclick="refreshSourceHealth(true)" style="margin-left:auto;"><i class="fas fa-rotate"></i> Tester maintenant</button>
+                        </div>
+                        <div id="sourceStatusList"></div>
+                        <p class="setting-note">La recherche et la lecture utilisent automatiquement les sources dont l'audio fonctionne : Qobuz d'abord, Tidal en secours. Une source qui échoue deux fois de suite est mise de côté et re-testée.</p>
                     </section>
 
                     <section class="settings-section">
@@ -1139,8 +1151,9 @@
                 label = (hires ? 'Hi-Res · FLAC 24 bits' : 'Lossless · FLAC 16 bits') + (sr ? ` / ${String(sr).replace('.', ',')} kHz` : '');
             }
             else if (t.source === 'deezer_flac') label = 'Lossless · FLAC';
+            else if (t.source === 'mono') label = 'Lossless · FLAC';
             else if (t.source === 'amazon_music') label = 'Amazon Music · FLAC';
-            const sourceName = { qobuz: 'Qobuz', tidal_hund: 'Tidal', deezer_flac: 'Deezer', amazon_music: 'Amazon' }[t.source];
+            const sourceName = { qobuz: 'Qobuz', mono: 'Tidal', tidal_hund: 'Tidal', deezer_flac: 'Deezer', amazon_music: 'Amazon' }[t.source];
             el.innerHTML = label ? `<i class="fas fa-wave-square"></i> ${sourceName && t.source !== 'amazon_music' ? sourceName + ' · ' : ''}${label}` : '';
             el.classList.toggle('hires', hires && !!label);
             document.getElementById('xlBadge').style.display = (t.source !== 'subsonic' && hires) ? 'block' : 'none';
@@ -1391,10 +1404,10 @@
 
             // Qobuz + Tidal : un titre venant d'une autre source (playlist Deezer, radio, classement,
             // ancien favori…) est cherché sur Qobuz puis Tidal avant lecture, sans aucun message.
-            if (!PLAYABLE_SOURCES.includes(nextTrack.source)) {
+            if (!isPlayableSource(nextTrack.source)) {
                 try {
                     const artist = nextTrack.performer ? nextTrack.performer.name : (nextTrack.artist ? nextTrack.artist.name : 'Inconnu');
-                    const resolveParams = new URLSearchParams({ title: nextTrack.title || '', artist, ...(nextTrack.isrc && { isrc: nextTrack.isrc }) });
+                    const resolveParams = new URLSearchParams({ title: nextTrack.title || '', artist, sources: sourcesParam(), ...(nextTrack.isrc && { isrc: nextTrack.isrc }) });
                     const res = await fetch(`${API_BASE}/resolve_metadata?${resolveParams}`, { signal: abortSignal });
 
                     if (thisLoadId !== currentLoadId) return;
@@ -1423,7 +1436,7 @@
             }
 
             // Ni sur Qobuz ni sur Tidal : on passe discrètement au titre suivant
-            if (!PLAYABLE_SOURCES.includes(nextTrack.source)) { skipUnplayable(index); return; }
+            if (!isPlayableSource(nextTrack.source)) { skipUnplayable(index); return; }
 
             // Gestion Source AMAZON MUSIC (FLAC chiffré CENC — Shaka déchiffre en ClearKey)
             if (nextTrack.source === 'amazon_music') {
@@ -1468,10 +1481,17 @@
                     if (e && e.name === 'AbortError') return;  // zapping : chargement annulé, normal
                     console.error("Tidal Load Error", e);
                     if (thisLoadId !== currentLoadId) return;
-                    if (await tryOtherSource(index)) return;  // même titre sur Qobuz
+                    noteSourceFailure('tidal_hund');
+                    if (await tryOtherSource(index)) return;  // même titre sur une autre source
                     skipUnplayable(index);
                     return;
                 }
+            }
+            // Gestion Source MONOCHROME (« Tidal ») : FLAC servi directement au navigateur
+            else if (nextTrack.source === 'mono') {
+                await nextShaka.unload();
+                nextAudio.src = `${sourceHealth.monoBase}/track/${encodeURIComponent(nextTrack.id)}`;
+                console.log("✅ Loading Monochrome (FLAC) for:", nextTrack.title);
             }
             else {
                 // Standard Track (URL directe)
@@ -1636,6 +1656,7 @@
                     const params = new URLSearchParams({
                         title: fav.title || '',
                         artist: artist || '',
+                        sources: sourcesParam(),
                         ...(isrc && { isrc })
                     });
                     const res = await fetch(`${API_BASE}/resolve_metadata?${params}`);
@@ -1686,21 +1707,132 @@
         }
 
         // Titre introuvable ou illisible sur Tidal : on passe discrètement au suivant (aucun message)
-        const PLAYABLE_SOURCES = ['qobuz', 'tidal_hund'];
+        const PLAYABLE_SOURCES = ['qobuz', 'mono', 'tidal_hund'];
+
+        // --- SANTÉ DES SOURCES AUDIO ---
+        // Le serveur teste Qobuz et l'addon Tidal ; l'audio de Monochrome est lu par le navigateur,
+        // donc c'est le navigateur qui le teste. Les échecs de lecture réels comptent aussi.
+        const SOURCE_KEY = { qobuz: 'qobuz', mono: 'mono', tidal_hund: 'tidal' };   // source d'un titre → clé
+        const SOURCE_LABEL = { qobuz: 'Qobuz', mono: 'Tidal · Monochrome', tidal: 'Tidal · Eljohnzc' };
+        const sourceHealth = { qobuz: null, mono: null, tidal: null, details: {}, checkedAt: 0, monoBase: 'https://tracks.monochrome.st' };
+        const sourceStrikes = {};   // échecs de lecture récents : { clé: { n, at } }
+        const STRIKE_WINDOW = 10 * 60 * 1000;
+
+        function isStruck(k) {
+            const st = sourceStrikes[k];
+            return !!st && st.n >= 2 && Date.now() - st.at < STRIKE_WINDOW;
+        }
+        // Sources utilisables, dans l'ordre de priorité (toutes si aucune ne répond : on essaie quand même)
+        function activeSources() {
+            const ok = ['qobuz', 'mono', 'tidal'].filter(k => sourceHealth[k] !== false && !isStruck(k));
+            return ok.length ? ok : ['qobuz', 'mono', 'tidal'];
+        }
+        function sourcesParam() { return activeSources().join(','); }
+        function isPlayableSource(src) { const k = SOURCE_KEY[src]; return !!k && activeSources().includes(k); }
+
+        function noteSourceFailure(src) {
+            const k = SOURCE_KEY[src];
+            if (!k) return;
+            const st = sourceStrikes[k] || { n: 0, at: 0 };
+            st.n = Date.now() - st.at < STRIKE_WINDOW ? st.n + 1 : 1;
+            st.at = Date.now();
+            sourceStrikes[k] = st;
+            if (st.n === 2) { renderSourceStatus(); refreshSourceHealth(true); }
+        }
+        function noteSourceSuccess(src) {
+            const k = SOURCE_KEY[src];
+            if (k && sourceStrikes[k]) { delete sourceStrikes[k]; renderSourceStatus(); }
+        }
+
+        // Le navigateur peut-il lire ce fichier ? (on ne garde que l'en-tête, le téléchargement est coupé)
+        async function probeAudioUrl(url) {
+            const ctrl = new AbortController();
+            const timer = setTimeout(() => ctrl.abort(), 9000);
+            try {
+                const r = await fetch(url, { signal: ctrl.signal, cache: 'no-store' });
+                const type = r.headers.get('content-type') || '';
+                return (r.status === 200 || r.status === 206) && !/json|html|text/.test(type);
+            } catch (e) {
+                return false;
+            } finally {
+                clearTimeout(timer);
+                ctrl.abort();
+            }
+        }
+
+        let _healthPromise = null;
+        function refreshSourceHealth(force = false) {
+            if (_healthPromise) return _healthPromise;
+            const btn = document.getElementById('btnTestSources');
+            if (btn) btn.disabled = true;
+            _healthPromise = (async () => {
+                try {
+                    const r = await fetch(`${API_BASE}/sources/health${force ? '?force=1' : ''}`, { cache: 'no-store' });
+                    const d = await r.json();
+                    sourceHealth.qobuz = d.qobuz ? d.qobuz.audio : null;
+                    sourceHealth.tidal = d.tidal ? d.tidal.audio : null;
+                    sourceHealth.details = { qobuz: d.qobuz && d.qobuz.detail, tidal: d.tidal && d.tidal.detail, mono: d.mono && d.mono.detail };
+                    if (d.mono && d.mono.base) sourceHealth.monoBase = d.mono.base;
+                    // Monochrome limite le nombre de fichiers par adresse IP : tant qu'il marche, ce sont les
+                    // vraies lectures qui le surveillent ; le test ne sert qu'à voir s'il revient (ou sur demande)
+                    if (d.mono && d.mono.search && d.mono.probe_url) {
+                        if (force || sourceHealth.mono !== true) {
+                            const ok = await probeAudioUrl(d.mono.probe_url);
+                            sourceHealth.mono = ok;
+                            sourceHealth.details.mono = ok ? 'FLAC lu par ce navigateur' : 'fichiers audio refusés à ce navigateur (limite de débit ou panne)';
+                        }
+                    } else {
+                        sourceHealth.mono = false;
+                    }
+                    if (force) for (const k in sourceStrikes) delete sourceStrikes[k];
+                    sourceHealth.checkedAt = Date.now();
+                    console.log('[Sources] audio :', { qobuz: sourceHealth.qobuz, mono: sourceHealth.mono, tidal: sourceHealth.tidal }, '→ ordre', activeSources());
+                } catch (e) {
+                    console.warn('[Sources] contrôle impossible', e);
+                } finally {
+                    _healthPromise = null;
+                    if (btn) btn.disabled = false;
+                    renderSourceStatus();
+                }
+            })();
+            return _healthPromise;
+        }
+
+        function sourceState(k) {
+            if (isStruck(k)) return 'down';
+            return sourceHealth[k] === true ? 'ok' : sourceHealth[k] === false ? 'down' : 'unknown';
+        }
+        function renderSourceStatus() {
+            // Barre latérale : Qobuz, et Tidal = Monochrome ou l'addon
+            const tidal = ['mono', 'tidal'].map(sourceState);
+            const agg = { qobuz: sourceState('qobuz'), tidal: tidal.includes('ok') ? 'ok' : tidal.includes('unknown') ? 'unknown' : 'down' };
+            document.querySelectorAll('#sourceStatusMini .src-pill').forEach(el => { el.dataset.state = agg[el.dataset.src]; });
+            const list = document.getElementById('sourceStatusList');
+            if (!list) return;
+            const words = { ok: 'Fonctionne', down: 'En panne', unknown: 'Vérification…' };
+            list.innerHTML = ['qobuz', 'mono', 'tidal'].map(k => {
+                const st = sourceState(k);
+                const detail = isStruck(k) ? 'Échecs de lecture répétés : mise de côté temporairement' : (sourceHealth.details[k] || '');
+                return `<div class="setting-row"><div class="setting-text"><strong><span class="src-dot" data-state="${st}"></span> ${SOURCE_LABEL[k]}</strong><span>${escapeHtml(detail)}</span></div><span class="src-state" data-state="${st}">${words[st]}</span></div>`;
+            }).join('') + (sourceHealth.checkedAt ? `<div class="source-checked">Dernier contrôle : ${new Date(sourceHealth.checkedAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</div>` : '');
+        }
 
         // Une source n'arrive pas à lire un titre : on cherche le même sur l'autre (une seule fois,
         // sans message). Renvoie true si la lecture a été relancée avec l'autre source.
         async function tryOtherSource(index) {
             const t = tracks[index];
-            if (!t || t._altTried || !PLAYABLE_SOURCES.includes(t.source)) return false;
-            t._altTried = true;
+            if (!t || !PLAYABLE_SOURCES.includes(t.source)) return false;
+            t._tried = t._tried || [];
+            if (!t._tried.includes(SOURCE_KEY[t.source])) t._tried.push(SOURCE_KEY[t.source]);
+            const remaining = activeSources().filter(k => !t._tried.includes(k));
+            if (!remaining.length) return false;
             try {
                 const artist = t.performer ? t.performer.name : (t.artist ? t.artist.name : '');
-                const params = new URLSearchParams({ title: t.title || '', artist, exclude: t.source, ...(t.isrc && { isrc: t.isrc }) });
+                const params = new URLSearchParams({ title: t.title || '', artist, sources: remaining.join(','), ...(t.isrc && { isrc: t.isrc }) });
                 const res = await fetch(`${API_BASE}/resolve_metadata?${params}`);
                 if (!res.ok || currentIndex !== index) return false;
                 const m = await res.json();
-                if (!m || !m.id || m.source === t.source || !PLAYABLE_SOURCES.includes(m.source)) return false;
+                if (!m || !m.id || t._tried.includes(SOURCE_KEY[m.source]) || !PLAYABLE_SOURCES.includes(m.source)) return false;
                 console.log(`[Lecture] ${t.source} n'a pas pu lire « ${t.title} » → ${m.source}:${m.id}`);
                 t.id = m.id; t.source = m.source;
                 if (m.maximum_bit_depth) t.maximum_bit_depth = m.maximum_bit_depth;
@@ -1733,6 +1865,7 @@
 
             // Qobuz / Tidal : on tente le même titre sur l'autre source, sinon titre suivant
             if (PLAYABLE_SOURCES.includes(track.source)) {
+                noteSourceFailure(track.source);
                 if (await tryOtherSource(index)) return;
                 skipUnplayable(index);
                 return;
@@ -1776,6 +1909,7 @@
                 const params = new URLSearchParams({
                     title: track.title || '',
                     artist: artistName,
+                    sources: sourcesParam(),
                     ...(track.isrc && { isrc: track.isrc })
                 });
                 const res = await fetch(`${API_BASE}/resolve_metadata?${params}`);
@@ -1898,7 +2032,7 @@
                 }
             };
             audioObj.onended = () => { if (audioObj === activeAudio && !nextTrackTriggered) handleNext(); };
-            audioObj.addEventListener('playing', () => { skipStreak = 0; });
+            audioObj.addEventListener('playing', () => { skipStreak = 0; const ct = tracks[currentIndex]; if (ct && audioObj === activeAudio) noteSourceSuccess(ct.source); });
 
             audioObj.onerror = () => {
                 if (audioObj === activeAudio && audioObj.src) {
@@ -2067,7 +2201,7 @@
         }
 
         async function openArtistProfile(name, id = null, source = null) {
-            const passId = id && ['qobuz', 'tidal_hund', 'deezer'].includes(source);
+            const passId = id && ['qobuz', 'mono', 'tidal_hund', 'deezer'].includes(source);
             let query = `/?artist_profile=${encodeURIComponent(name)}`;
             if (passId) query += `&id=${id}&source=${source}`;
             safePushState({}, "", query);
@@ -2100,6 +2234,7 @@
             try {
                 let apiUrl = `${API_BASE}/artist_bio?name=${encodeURIComponent(name)}`;
                 if (passId) apiUrl += `&id=${id}&source=${source}`;
+                apiUrl += `&sources=${sourcesParam()}`;
 
                 const res = await fetch(apiUrl);
                 const data = await res.json();
@@ -2795,6 +2930,9 @@
         window.onpopstate = async (e) => { const p = new URLSearchParams(window.location.search); if (p.get('artist_profile')) await openArtistProfile(p.get('artist_profile'), p.get('id'), p.get('source')); else if (p.get('artist')) await openArtist(p.get('artist')); else if (p.get('album')) await openAlbum(p.get('album'), p.get('source')); else if (p.get('q')) { document.getElementById('searchInput').value = p.get('q'); await performSearch(); } else goHome(false); };
         window.onload = async () => {
             initShaka(); // Init Shaka
+            renderSourceStatus();
+            refreshSourceHealth();
+            setInterval(() => { if (!document.hidden) refreshSourceHealth(); }, 10 * 60 * 1000);
             loadLocalSettings();
             const p = new URLSearchParams(window.location.search);
             if (p.get('track')) await openTrackDirect(p.get('track'), p.get('source'));
@@ -2882,7 +3020,7 @@
                 results = results.concat(playlists);
             }
             try {
-                const r = await fetch(`${API_BASE}/search?q=${encodeURIComponent(q)}&type=${t}`);
+                const r = await fetch(`${API_BASE}/search?q=${encodeURIComponent(q)}&type=${t}&sources=${sourcesParam()}`);
                 const d = await r.json();
                 if (d.albums) d.albums.forEach(a => results.push({ ...a, type: 'album' }));
                 if (d.tracks) d.tracks.forEach(x => results.push({ ...x, type: 'track' }));
