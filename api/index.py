@@ -111,8 +111,8 @@ def _env_clean(name):
 
 USER_ID      = _env_clean('QOBUZ_USER_ID')
 TOKEN        = _env_clean('QOBUZ_TOKEN')
-APP_ID       = os.getenv('QOBUZ_APP_ID') or '798273057'
-QOBUZ_SECRET = os.getenv('QOBUZ_SECRET') or 'abb21364945c0583309667d13ca3d93a'
+APP_ID       = _env_clean('QOBUZ_APP_ID') or '312369995'
+QOBUZ_SECRET = _env_clean('QOBUZ_SECRET') or 'e79f8b9be485692b0e5f9dd895826368'
 
 TIDAL_HUND_BASE = "https://api.monochrome.tf"
 
