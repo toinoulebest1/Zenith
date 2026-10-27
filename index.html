@@ -270,6 +270,7 @@
                 <div class="source-status" id="sourceStatusMini" onclick="showProfileSettings()" title="État de l'audio des sources (cliquer pour le détail)">
                     <span class="src-pill" data-src="qobuz"><span class="src-dot"></span><span class="src-name">Qobuz</span></span>
                     <span class="src-pill" data-src="tidal"><span class="src-dot"></span><span class="src-name">Tidal</span></span>
+                    <span class="src-pill" data-src="deezer"><span class="src-dot"></span><span class="src-name">Deezer</span></span>
                 </div>
                 <div class="nav-item" data-nav="profile" onclick="showProfileSettings()" title="Compte et paramètres"><i class="fas fa-circle-user"></i><span>Compte</span></div>
                 <div class="nav-item danger" onclick="logout()" title="Déconnexion"><i class="fas fa-arrow-right-from-bracket"></i><span>Déconnexion</span></div>
@@ -1146,11 +1147,11 @@
             const hires = t.maximum_bit_depth > 16;
             let label = '';
             if (t.source === 'tidal_hund') label = hires ? 'Hi-Res Lossless · FLAC 24 bits' : 'Lossless · FLAC 16 bits';
-            else if (t.source === 'qobuz') {
+            else if (t.source === 'qobuz' || (t.source === 'deezer_flac' && !/^MP3/.test(t._dzFormat || ''))) {
                 const sr = parseFloat(t.maximum_sampling_rate);
                 label = (hires ? 'Hi-Res · FLAC 24 bits' : 'Lossless · FLAC 16 bits') + (sr ? ` / ${String(sr).replace('.', ',')} kHz` : '');
             }
-            else if (t.source === 'deezer_flac') label = 'Lossless · FLAC';
+            else if (t.source === 'deezer_flac') label = t._dzFormat === 'MP3_128' ? 'MP3 128 kb/s' : 'MP3 320 kb/s';
             else if (t.source === 'mono') label = 'Lossless · FLAC';
             else if (t.source === 'amazon_music') label = 'Amazon Music · FLAC';
             const sourceName = { qobuz: 'Qobuz', mono: 'Tidal', tidal_hund: 'Tidal', deezer_flac: 'Deezer', amazon_music: 'Amazon' }[t.source];
@@ -1462,11 +1463,20 @@
                     return;
                 }
             }
-            // Gestion Source DEEZER FLAC (secours quand Qobuz n'a pas le titre — déchiffré par plages)
+            // Gestion Source DEEZER (compte ARL — déchiffré par plages côté serveur)
             else if (nextTrack.source === 'deezer_flac') {
                 await nextShaka.unload();
-                nextAudio.src = `${API_BASE}/deezer_stream/${nextTrack.id}`;
-                console.log("✅ Loading Deezer FLAC fallback for:", nextTrack.title);
+                nextAudio.src = `${API_BASE}/deezer_stream/${encodeURIComponent(nextTrack.id)}`;
+                console.log("✅ Loading Deezer for:", nextTrack.title);
+                // Qualité réelle du fichier servi (Hi-Res 24 bits si le titre et l'abonnement le permettent)
+                const dzTrack = nextTrack;
+                fetch(`${API_BASE}/deezer_info/${encodeURIComponent(dzTrack.id)}`).then(r => r.ok ? r.json() : null).then(q => {
+                    if (!q) return;
+                    dzTrack._dzFormat = q.format || '';
+                    dzTrack.maximum_bit_depth = q.bit_depth || 16;
+                    if (q.sample_rate) dzTrack.maximum_sampling_rate = q.sample_rate;
+                    if (tracks[currentIndex] === dzTrack) updateQualityInfo(dzTrack);
+                }).catch(() => { });
             }
             // Gestion Source TIDAL (FLAC non chiffré via hifi-api ; segments proxifiés)
             // PAS de repli Qobuz : un titre Tidal se lit en Tidal, ou pas du tout.
@@ -1707,14 +1717,15 @@
         }
 
         // Titre introuvable ou illisible sur Tidal : on passe discrètement au suivant (aucun message)
-        const PLAYABLE_SOURCES = ['qobuz', 'mono', 'tidal_hund'];
+        const PLAYABLE_SOURCES = ['qobuz', 'mono', 'deezer_flac', 'tidal_hund'];
 
         // --- SANTÉ DES SOURCES AUDIO ---
-        // Le serveur teste Qobuz et l'addon Tidal ; l'audio de Monochrome est lu par le navigateur,
-        // donc c'est le navigateur qui le teste. Les échecs de lecture réels comptent aussi.
-        const SOURCE_KEY = { qobuz: 'qobuz', mono: 'mono', tidal_hund: 'tidal' };   // source d'un titre → clé
-        const SOURCE_LABEL = { qobuz: 'Qobuz', mono: 'Tidal · Monochrome', tidal: 'Tidal · Eljohnzc' };
-        const sourceHealth = { qobuz: null, mono: null, tidal: null, details: {}, checkedAt: 0, monoBase: 'https://tracks.monochrome.st' };
+        // Le serveur teste Qobuz, Deezer (ARL) et l'addon Tidal ; l'audio de Monochrome est lu par le
+        // navigateur, donc c'est le navigateur qui le teste. Les échecs de lecture réels comptent aussi.
+        const SOURCE_ORDER = ['qobuz', 'mono', 'deezer', 'tidal'];
+        const SOURCE_KEY = { qobuz: 'qobuz', mono: 'mono', deezer_flac: 'deezer', tidal_hund: 'tidal' };   // source d'un titre → clé
+        const SOURCE_LABEL = { qobuz: 'Qobuz', mono: 'Tidal · Monochrome', deezer: 'Deezer', tidal: 'Tidal · Eljohnzc' };
+        const sourceHealth = { qobuz: null, mono: null, deezer: null, tidal: null, details: {}, checkedAt: 0, monoBase: 'https://tracks.monochrome.st' };
         const sourceStrikes = {};   // échecs de lecture récents : { clé: { n, at } }
         const STRIKE_WINDOW = 10 * 60 * 1000;
 
@@ -1724,8 +1735,8 @@
         }
         // Sources utilisables, dans l'ordre de priorité (toutes si aucune ne répond : on essaie quand même)
         function activeSources() {
-            const ok = ['qobuz', 'mono', 'tidal'].filter(k => sourceHealth[k] !== false && !isStruck(k));
-            return ok.length ? ok : ['qobuz', 'mono', 'tidal'];
+            const ok = SOURCE_ORDER.filter(k => sourceHealth[k] !== false && !isStruck(k));
+            return ok.length ? ok : SOURCE_ORDER.slice();
         }
         function sourcesParam() { return activeSources().join(','); }
         function isPlayableSource(src) { const k = SOURCE_KEY[src]; return !!k && activeSources().includes(k); }
@@ -1770,8 +1781,9 @@
                     const r = await fetch(`${API_BASE}/sources/health${force ? '?force=1' : ''}`, { cache: 'no-store' });
                     const d = await r.json();
                     sourceHealth.qobuz = d.qobuz ? d.qobuz.audio : null;
+                    sourceHealth.deezer = d.deezer ? d.deezer.audio : null;
                     sourceHealth.tidal = d.tidal ? d.tidal.audio : null;
-                    sourceHealth.details = { qobuz: d.qobuz && d.qobuz.detail, tidal: d.tidal && d.tidal.detail, mono: d.mono && d.mono.detail };
+                    sourceHealth.details = { qobuz: d.qobuz && d.qobuz.detail, deezer: d.deezer && d.deezer.detail, tidal: d.tidal && d.tidal.detail, mono: d.mono && d.mono.detail };
                     if (d.mono && d.mono.base) sourceHealth.monoBase = d.mono.base;
                     // Monochrome limite le nombre de fichiers par adresse IP : tant qu'il marche, ce sont les
                     // vraies lectures qui le surveillent ; le test ne sert qu'à voir s'il revient (ou sur demande)
@@ -1786,7 +1798,7 @@
                     }
                     if (force) for (const k in sourceStrikes) delete sourceStrikes[k];
                     sourceHealth.checkedAt = Date.now();
-                    console.log('[Sources] audio :', { qobuz: sourceHealth.qobuz, mono: sourceHealth.mono, tidal: sourceHealth.tidal }, '→ ordre', activeSources());
+                    console.log('[Sources] audio :', { qobuz: sourceHealth.qobuz, mono: sourceHealth.mono, deezer: sourceHealth.deezer, tidal: sourceHealth.tidal }, '→ ordre', activeSources());
                 } catch (e) {
                     console.warn('[Sources] contrôle impossible', e);
                 } finally {
@@ -1803,14 +1815,14 @@
             return sourceHealth[k] === true ? 'ok' : sourceHealth[k] === false ? 'down' : 'unknown';
         }
         function renderSourceStatus() {
-            // Barre latérale : Qobuz, et Tidal = Monochrome ou l'addon
+            // Barre latérale : Qobuz, Tidal (= Monochrome ou l'addon) et Deezer
             const tidal = ['mono', 'tidal'].map(sourceState);
-            const agg = { qobuz: sourceState('qobuz'), tidal: tidal.includes('ok') ? 'ok' : tidal.includes('unknown') ? 'unknown' : 'down' };
+            const agg = { qobuz: sourceState('qobuz'), tidal: tidal.includes('ok') ? 'ok' : tidal.includes('unknown') ? 'unknown' : 'down', deezer: sourceState('deezer') };
             document.querySelectorAll('#sourceStatusMini .src-pill').forEach(el => { el.dataset.state = agg[el.dataset.src]; });
             const list = document.getElementById('sourceStatusList');
             if (!list) return;
             const words = { ok: 'Fonctionne', down: 'En panne', unknown: 'Vérification…' };
-            list.innerHTML = ['qobuz', 'mono', 'tidal'].map(k => {
+            list.innerHTML = SOURCE_ORDER.map(k => {
                 const st = sourceState(k);
                 const detail = isStruck(k) ? 'Échecs de lecture répétés : mise de côté temporairement' : (sourceHealth.details[k] || '');
                 return `<div class="setting-row"><div class="setting-text"><strong><span class="src-dot" data-state="${st}"></span> ${SOURCE_LABEL[k]}</strong><span>${escapeHtml(detail)}</span></div><span class="src-state" data-state="${st}">${words[st]}</span></div>`;

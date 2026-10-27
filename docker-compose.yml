@@ -6,6 +6,7 @@ services:
     environment:
       - QOBUZ_TOKEN=${QOBUZ_TOKEN:-}
       - QOBUZ_USER_ID=${QOBUZ_USER_ID:-}
+      - DEEZER_ARL=${DEEZER_ARL:-}
       - LRCRED_SITE=${LRCRED_SITE:-}
       - LRCRED_CONTACT=${LRCRED_CONTACT:-}
     ports:

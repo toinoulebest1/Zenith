@@ -104,7 +104,7 @@ except ImportError:
 # Identifiants Qobuz officiels. Le token est lié à l'app_id : app_id + secret + token
 # doivent être cohérents. Le token et l'ID utilisateur donnent accès au compte : ils viennent
 # UNIQUEMENT de l'environnement (.env en local, tableau de bord Vercel en ligne).
-APP_VERSION  = "2026-10-26 · Qobuz + Tidal (Monochrome), contrôle de l'audio"
+APP_VERSION  = "2026-10-27 · Qobuz + Tidal (Monochrome) + Deezer (ARL), contrôle de l'audio"
 
 def _env_clean(name):
     return (os.getenv(name) or '').strip().strip('"').strip("'").strip()
@@ -138,9 +138,14 @@ ELJOHNZC_QUALITY = os.getenv('ELJOHNZC_QUALITY') or 'hires'
 # audio /track/{id} (FLAC direct, lu par le NAVIGATEUR : le serveur, lui, est refusé en 429).
 MONO_BASE = (os.getenv('MONO_BASE') or "https://tracks.monochrome.st").rstrip('/')
 
-# Sources de lecture par ordre de priorité : Qobuz d'abord, Tidal (Monochrome, puis addon) en secours.
-# Le navigateur envoie la liste des sources dont l'audio fonctionne (?sources=qobuz,mono,tidal).
-SOURCE_KEYS = ('qobuz', 'mono', 'tidal')
+# --- DEEZER (compte via le cookie ARL) : lecture complète, FLAC si l'abonnement le permet ---
+# L'ARL donne accès au compte : il vient UNIQUEMENT de l'environnement (.env / Coolify).
+DEEZER_ARL = _env_clean('DEEZER_ARL')
+
+# Sources de lecture par ordre de priorité : Qobuz d'abord, Tidal (Monochrome) en secours, puis
+# Deezer (ARL), puis l'addon Tidal. Le navigateur envoie la liste des sources dont l'audio
+# fonctionne (?sources=qobuz,mono,deezer,tidal).
+SOURCE_KEYS = ('qobuz', 'mono', 'deezer', 'tidal')
 
 # MODE LOSSLESS (par défaut) : titres, albums et artistes viennent de Qobuz (si configuré) et de
 # Tidal, seules les playlists viennent de Deezer ; tout titre d'une autre source est re-cherché sur
@@ -1986,10 +1991,68 @@ def _mono_resolve_one(title, artist, isrc=None):
                 return c
     return _best_match(cands, title, artist)
 
+def _deezer_track_obj(t):
+    """Titre de l'API publique Deezer → 'deezer_flac' (id = ID Deezer, audio via l'ARL)."""
+    alb = t.get('album') or {}
+    return {
+        'id': str(t.get('id')),
+        'title': t.get('title'),
+        'performer': {'name': (t.get('artist') or {}).get('name', 'Inconnu')},
+        'album': {'title': alb.get('title'), 'image': {'large': alb.get('cover_xl') or alb.get('cover_big') or alb.get('cover_medium')}},
+        'duration': t.get('duration', 0),
+        'isrc': t.get('isrc'),
+        'maximum_bit_depth': 16,
+        'source': 'deezer_flac',
+        'date': alb.get('release_date'),
+    }
+
+def sync_search_deezer_playable(query, limit=50, mark_hires=False):
+    """Titres Deezer lisibles via l'ARL. mark_hires : un appel de plus pour repérer ceux qui
+    existent en Hi-Res pour ce compte (badge 24 bits dans les résultats)."""
+    try:
+        r = HTTP.get("https://api.deezer.com/search", params={'q': query, 'limit': limit}, timeout=8)
+        out = [_deezer_track_obj(t) for t in (r.json() or {}).get('data', []) if t.get('id')]
+    except Exception as e:
+        logger.error(f"[Deezer Search] {e}")
+        return []
+    if mark_hires and deezer_arl and out:
+        try:
+            hires = deezer_arl.hires_ids([t['id'] for t in out])
+            for t in out:
+                if t['id'] in hires:
+                    t['maximum_bit_depth'] = 24
+        except Exception as e:
+            logger.info(f"[Deezer] Hi-Res non vérifié : {e}")
+    return out
+
+def _deezer_resolve_one(title, artist, isrc=None):
+    """Titre sur Deezer (lu via l'ARL) : ISRC d'abord, sinon correspondance titre + artiste."""
+    if not deezer_arl:
+        return None
+    if isrc:
+        d = _deezer_api(f"https://api.deezer.com/2.0/track/isrc:{isrc}")
+        if d and 'error' not in d and d.get('id'):
+            return _deezer_track_obj(d)
+    if not (title and artist):
+        return None
+    return _best_match(sync_search_deezer_playable(f"{title} {_primary_artist(artist)}".strip(), 20), title, artist)
+
+def _deezer_find_artist_id(name):
+    try:
+        items = (HTTP.get("https://api.deezer.com/search/artist", params={'q': name, 'limit': 10}, timeout=6).json() or {}).get('data') or []
+    except Exception:
+        return None
+    target = _match_str(name)
+    for a in items:
+        if _ratio(target, _match_str(a.get('name'))) >= 90:
+            return str(a['id'])
+    return None
+
 def sync_resolve_in_order(title, artist, isrc, order):
     """Cherche le titre sur chaque source, dans l'ordre de priorité (toutes partent en parallèle,
     on garde la première source de la liste qui l'a)."""
-    resolvers = {'qobuz': _qobuz_resolve_one, 'mono': _mono_resolve_one, 'tidal': _tidal_resolve_one}
+    resolvers = {'qobuz': _qobuz_resolve_one, 'mono': _mono_resolve_one,
+                 'deezer': _deezer_resolve_one, 'tidal': _tidal_resolve_one}
     futs = [(s_, _RESOLVE_POOL.submit(resolvers[s_], title, artist, isrc)) for s_ in order if s_ in resolvers]
     for s_, f in futs:
         try:
@@ -2662,6 +2725,10 @@ async def _do_search(q: str, type: str = 'all', sources: str = None):
                 jobs['qobuz'] = run_in_threadpool(sync_qobuz_search_all, q)
             if 'mono' in order:
                 jobs['mono'] = run_in_threadpool(sync_search_mono_all, q)
+            if 'deezer' in order and deezer_arl:
+                if want_t: jobs['deezer_t'] = run_in_threadpool(sync_search_deezer_playable, q, 50, True)
+                if want_al: jobs['deezer_al'] = run_in_threadpool(sync_search_deezer_albums, q, 15)
+                if want_ar: jobs['deezer_ar'] = run_in_threadpool(sync_search_deezer_artists, q, 10)
             if 'tidal' in catalog:
                 if want_t: jobs['tidal_t'] = run_in_threadpool(sync_search_tidal, q, 50)
                 if want_al: jobs['tidal_al'] = run_in_threadpool(sync_search_tidal_albums, q, 15)
@@ -2674,6 +2741,7 @@ async def _do_search(q: str, type: str = 'all', sources: str = None):
         per_source = {
             'qobuz': R.get('qobuz') or ([], [], []),
             'mono': R.get('mono') or ([], [], []),
+            'deezer': (R.get('deezer_t') or [], R.get('deezer_al') or [], R.get('deezer_ar') or []),
             'tidal': (R.get('tidal_t') or [], R.get('tidal_al') or [], R.get('tidal_ar') or []),
         }
         tracks = _merge_ordered([per_source[k][0] for k in catalog], _track_sig) if want_t else []
@@ -2827,8 +2895,9 @@ async def get_artist_bio_route(name: str, id: str = None, source: str = None, so
     # Par ID si la carte cliquée vient de cette source, sinon par nom.
     finders = {'qobuz': (_qobuz_find_artist_id, sync_get_qobuz_artist),
                'mono': (_mono_find_artist_id, sync_get_mono_artist),
+               'deezer': (_deezer_find_artist_id, sync_get_deezer_artist_by_id),
                'tidal': (_tidal_find_artist_id, sync_get_tidal_artist)}
-    src_key = {'qobuz': 'qobuz', 'mono': 'mono', 'tidal_hund': 'tidal'}.get(source)
+    src_key = {'qobuz': 'qobuz', 'mono': 'mono', 'deezer': 'deezer', 'tidal_hund': 'tidal'}.get(source)
     for key in _parse_sources(sources):
         find, get = finders[key]
         aid = id if (src_key == key and id) else await run_in_threadpool(find, name)
@@ -2969,6 +3038,28 @@ def _health_mono():
     return {'search': True, 'audio': None, 'detail': "audio testé par le navigateur",
             'probe_url': f"{MONO_BASE}/track/{tid}", 'base': MONO_BASE}
 
+def _health_deezer():
+    if not deezer_arl:
+        return {'search': False, 'audio': False, 'detail': 'ARL absent (variable DEEZER_ARL)'}
+    try:
+        deezer_arl.login(force=True)
+    except RuntimeError as e:
+        return {'search': False, 'audio': False, 'detail': str(e)[:120]}
+    except Exception as e:
+        return {'search': False, 'audio': False, 'detail': f"injoignable ({_http_code(e)})"}
+    try:
+        m = deezer_arl.media(DEEZER_TEST_TRACK)
+    except Exception as e:
+        return {'search': True, 'audio': False, 'detail': f"lien audio refusé ({_http_code(e)})"}
+    if not m:
+        return {'search': True, 'audio': False, 'detail': "aucun lien audio (droits de l'abonnement ?)"}
+    ok, code = _probe_bytes(m['url'])
+    label = DEEZER_FORMAT_LABEL.get(m['format'], m['format'])
+    if m['format'] == 'FLAC':   # le titre de test n'existe qu'en 16 bits : le Hi-Res reste demandé en premier
+        label += " (titre de test) · Hi-Res 24 bits quand le titre l'a"
+    return {'search': True, 'audio': ok, 'format': m['format'],
+            'detail': label if ok else f"fichier inaccessible ({code})"}
+
 def sync_sources_health(force=False):
     now = time.time()
     with _health_lock:
@@ -2978,7 +3069,8 @@ def sync_sources_health(force=False):
             return _health_cache['data']
         if force:
             _health_cache['forced'] = now
-    futs = {k: _RESOLVE_POOL.submit(f) for k, f in (('qobuz', _health_qobuz), ('mono', _health_mono), ('tidal', _health_tidal_addon))}
+    futs = {k: _RESOLVE_POOL.submit(f) for k, f in (('qobuz', _health_qobuz), ('mono', _health_mono),
+                                                      ('deezer', _health_deezer), ('tidal', _health_tidal_addon))}
     data = {}
     for k, f in futs.items():
         try:
@@ -3076,7 +3168,8 @@ async def status_route():
                              if old_ytm else "YouTube Music ne répond pas depuis ce serveur (adresse IP peut-être bloquée).")
         return {'version': APP_VERSION, 'mode': 'lossless' if LOSSLESS_MODE else 'mixte',
                 'serveur': {'python': platform.python_version(), 'ytmusicapi': ytm_version},
-                'qobuz': qz, 'tidal_addon': tidal, 'radio_youtube': radio_state,
+                'qobuz': qz, 'deezer_arl': 'présent' if DEEZER_ARL else 'ABSENT',
+                'tidal_addon': tidal, 'radio_youtube': radio_state,
                 'sources': sync_sources_health(),
                 'conseil': conseil, **({'conseil_radio': conseil_radio} if conseil_radio else {})}
 
@@ -3141,12 +3234,12 @@ async def resolve_metadata_route(title: str = '', artist: str = '', isrc: str = 
     """
     Retourne l'objet track complet (ID, source, image, etc.).
     Accepte title+artist et/ou isrc (ISRC est prioritaire).
-    sources=qobuz,mono,tidal : sources à essayer, dans l'ordre (celles dont l'audio fonctionne).
-    exclude=qobuz|mono|tidal_hund : retire une source (secours quand elle n'arrive pas à lire un titre).
+    sources=qobuz,mono,deezer,tidal : sources à essayer, dans l'ordre (celles dont l'audio fonctionne).
+    exclude=qobuz|mono|deezer_flac|tidal_hund : retire une source (secours quand elle n'arrive pas à lire un titre).
     """
     order = _parse_sources(sources)
     if exclude:
-        ex = 'tidal' if exclude == 'tidal_hund' else exclude
+        ex = {'tidal_hund': 'tidal', 'deezer_flac': 'deezer'}.get(exclude, exclude)
         order = [x for x in order if x != ex]
     match = await run_in_threadpool(sync_resolve_in_order, title, artist, isrc, order)
     if match: return JSONResponse(match)
@@ -3394,11 +3487,95 @@ def sync_deezer_lookup(title, artist, isrc):
         'source': 'deezer_flac',
     }
 
-def _dzr_resolve(isrc):
-    """Resolver dzr par ISRC → {'url','key'(bytes),'mt','size'} (mis en cache) ou None."""
-    c = _dzr_cache.get(isrc)
-    if c and (time.time() - c['ts']) < DZR_CACHE_TTL:
-        return c
+# Compte Deezer (cookie ARL) : getUserData donne api_token + license_token, song.getData le
+# TRACK_TOKEN d'un titre, media.deezer.com le lien CDN (chiffré Blowfish stripe) dans le meilleur
+# format permis par l'abonnement. La clé se calcule à partir de l'ID du titre.
+DEEZER_GW = "https://www.deezer.com/ajax/gw-light.php"
+DEEZER_MEDIA = "https://media.deezer.com/v1/get_url"
+DEEZER_BF_SECRET = b"g4el58wc0zvf9na1"
+# Même liste que le lecteur web Deezer : Hi-Res (FLAC jusqu'à 24 bits / 192 kHz, depuis octobre 2026)
+# d'abord ; Deezer renvoie le meilleur format que le titre ET l'abonnement permettent.
+DEEZER_FORMATS = ('FLAC_24', 'FLAC', 'MP3_320', 'MP3_128')
+DEEZER_FORMAT_LABEL = {'FLAC_24': 'FLAC Hi-Res 24 bits', 'FLAC': 'FLAC 16 bits / 44,1 kHz',
+                       'MP3_320': 'MP3 320 kb/s', 'MP3_128': 'MP3 128 kb/s'}
+DEEZER_TEST_TRACK = '3135556'   # Daft Punk — Harder, Better, Faster, Stronger
+
+def _deezer_bf_key(sng_id):
+    h = hashlib.md5(str(sng_id).encode('ascii')).hexdigest()
+    return bytes(ord(h[i]) ^ ord(h[i + 16]) ^ DEEZER_BF_SECRET[i] for i in range(16))
+
+class DeezerArl:
+    def __init__(self, arl):
+        self.session = requests.Session()
+        self.session.headers.update({'User-Agent': SQUID_UA, 'Accept-Language': 'fr-FR,fr;q=0.9'})
+        self.session.cookies.set('arl', arl, domain='.deezer.com')
+        self._lock = threading.Lock()
+        self.api_token = None
+        self.license_token = None
+        self.user = {}
+        self.ts = 0.0
+
+    def _call(self, method, params=None, token=None):
+        r = self.session.post(DEEZER_GW, params={'method': method, 'input': '3', 'api_version': '1.0',
+                                                 'api_token': token or self.api_token or ''},
+                              json=params or {}, timeout=10)
+        r.raise_for_status()
+        d = r.json()
+        if d.get('error'):   # [] ou {} quand tout va bien
+            raise RuntimeError(f"{method} : {d['error']}")
+        return d.get('results') or {}
+
+    def login(self, force=False):
+        """Jetons de session (renouvelés toutes les heures). Lève une erreur si l'ARL est refusé."""
+        with self._lock:
+            if not force and self.license_token and time.time() - self.ts < 3600:
+                return self.user
+            res = self._call('deezer.getUserData', token='null')
+            user = res.get('USER') or {}
+            if not user.get('USER_ID'):
+                raise RuntimeError("ARL refusé (expiré ou invalide)")
+            self.api_token = res.get('checkForm')
+            self.license_token = (user.get('OPTIONS') or {}).get('license_token')
+            self.user, self.ts = user, time.time()
+            return user
+
+    def _gw(self, method, params):
+        self.login()
+        try:
+            return self._call(method, params)
+        except RuntimeError:
+            self.login(force=True)   # api_token périmé : on le renouvelle une fois
+            return self._call(method, params)
+
+    def media(self, sng_id):
+        """ID d'un titre → {'url','key','mt','format'} dans le meilleur format permis, ou None.
+        Si le titre n'est pas lisible, essaie sa version de remplacement (FALLBACK) proposée par Deezer."""
+        song = self._gw('song.getData', {'SNG_ID': str(sng_id)})
+        fallback = song.get('FALLBACK')
+        for s in [song] + ([fallback] if isinstance(fallback, dict) and fallback.get('TRACK_TOKEN') else []):
+            r = self.session.post(DEEZER_MEDIA, timeout=10, json={
+                'license_token': self.license_token,
+                'media': [{'type': 'FULL', 'formats': [{'cipher': 'BF_CBC_STRIPE', 'format': f} for f in DEEZER_FORMATS]}],
+                'track_tokens': [s.get('TRACK_TOKEN')]})
+            item = ((r.json() or {}).get('data') or [{}])[0]
+            media = (item.get('media') or [{}])[0]
+            if not media.get('sources'):
+                logger.info(f"[Deezer] {s.get('SNG_ID')} non lisible : {item.get('errors')}")
+                continue
+            fmt = media.get('format', '')
+            return {'url': media['sources'][0]['url'], 'key': _deezer_bf_key(s['SNG_ID']),
+                    'mt': 'audio/flac' if fmt.startswith('FLAC') else 'audio/mpeg', 'format': fmt}
+        return None
+
+    def hires_ids(self, ids):
+        """Parmi ces titres, ceux disponibles en Hi-Res (FLAC 24 bits) pour ce compte."""
+        data = self._gw('song.getListData', {'sng_ids': [str(i) for i in ids]})
+        return {str(s.get('SNG_ID')) for s in data.get('data') or [] if int(s.get('FILESIZE_FLAC_24') or 0) > 0}
+
+deezer_arl = DeezerArl(DEEZER_ARL) if DEEZER_ARL else None
+
+def _dzr_lookup(isrc):
+    """Ancien resolver dzr par ISRC (utilisé seulement sans ARL) → {'url','key','mt'} ou None."""
     try:
         r = HTTP.get(f"{DZR_RESOLVER}?isrc={urllib.parse.quote(isrc)}&format=FLAC",
                          headers={"User-Agent": SQUID_UA, "Origin": DZR_ORIGIN}, timeout=25)
@@ -3410,20 +3587,64 @@ def _dzr_resolve(isrc):
         if not url or not kh:
             return None
         mt = 'audio/flac' if str(d.get('format', '')).upper().startswith('FLAC') else 'audio/mpeg'
-        size = 0
-        try:
-            h = HTTP.get(url, headers={'Range': 'bytes=0-0', 'User-Agent': SQUID_UA}, timeout=10)
-            cr = h.headers.get('Content-Range', '')
-            if '/' in cr:
-                size = int(cr.rsplit('/', 1)[-1])
-        except Exception:
-            pass
-        info = {'url': url, 'key': bytes.fromhex(kh), 'mt': mt, 'size': size, 'ts': time.time()}
-        _dzr_cache[isrc] = info
-        return info
+        return {'url': url, 'key': bytes.fromhex(kh), 'mt': mt}
     except Exception as e:
         logger.error(f"[Deezer] dzr resolve error {isrc}: {e}")
         return None
+
+def _flac_streaminfo(head):
+    """Début (déchiffré) d'un fichier FLAC → (bits, kHz) lus dans le bloc STREAMINFO, ou (None, None)."""
+    if len(head) < 42 or head[:4] != b'fLaC':
+        return None, None
+    si = head[8:42]
+    rate = (si[10] << 12) | (si[11] << 4) | (si[12] >> 4)
+    bits = (((si[12] & 1) << 4) | (si[13] >> 4)) + 1
+    return bits, round(rate / 1000, 1)
+
+_dzr_locks: dict = {}
+_dzr_locks_guard = threading.Lock()
+
+def _deezer_resolve(key, fresh=False):
+    """Titre Deezer (ID numérique ou ISRC) → {'url','key'(bytes),'mt','size','format','bit_depth',
+    'sample_rate'} (mis en cache) ou None. Compte ARL d'abord ; sans ARL, ancien resolver dzr (ISRC).
+    Une seule résolution à la fois par titre (le flux et /deezer_info arrivent ensemble)."""
+    with _dzr_locks_guard:
+        lock = _dzr_locks.setdefault(key, threading.Lock())
+    with lock:
+        c = _dzr_cache.get(key)
+        if c and not fresh and (time.time() - c['ts']) < DZR_CACHE_TTL:
+            return c
+        return _deezer_resolve_locked(key)
+
+def _deezer_resolve_locked(key):
+    info = None
+    if deezer_arl:
+        try:
+            sng_id = key if key.isdigit() else (_deezer_api(f"https://api.deezer.com/2.0/track/isrc:{key}") or {}).get('id')
+            if sng_id:
+                info = deezer_arl.media(sng_id)
+        except Exception as e:
+            logger.warning(f"[Deezer] {key} : {e}")
+    elif not key.isdigit():
+        info = _dzr_lookup(key)
+    if not info:
+        return None
+    info.setdefault('format', 'FLAC' if info['mt'] == 'audio/flac' else 'MP3')
+    info['size'] = 0
+    info['bit_depth'] = info['sample_rate'] = None
+    try:
+        # Premier bloc : taille totale (Content-Range) + résolution réelle (en-tête FLAC)
+        h = HTTP.get(info['url'], headers={'Range': f'bytes=0-{DEEZER_CHUNK - 1}', 'User-Agent': SQUID_UA}, timeout=10)
+        cr = h.headers.get('Content-Range', '')
+        if '/' in cr:
+            info['size'] = int(cr.rsplit('/', 1)[-1])
+        if info['mt'] == 'audio/flac':
+            info['bit_depth'], info['sample_rate'] = _flac_streaminfo(_deezer_decrypt(info['key'], h.content, 0))
+    except Exception:
+        pass
+    info['ts'] = time.time()
+    _dzr_cache[key] = info
+    return info
 
 def _deezer_decrypt(key, enc, abs_start):
     """Déchiffre une plage (abs_start aligné sur 2048) — schéma Blowfish stripe Deezer."""
@@ -3438,12 +3659,22 @@ def _deezer_decrypt(key, enc, abs_start):
             data[i:i + DEEZER_CHUNK] = cipher.decrypt(bytes(data[i:i + DEEZER_CHUNK]))
     return bytes(data)
 
-@app.get('/deezer_stream/{isrc}')
-async def deezer_stream(isrc: str, request: Request):
-    info = await run_in_threadpool(_dzr_resolve, isrc)
+@app.get('/deezer_info/{track_key}')
+async def deezer_info(track_key: str):
+    """Qualité réelle du fichier servi pour ce titre (format Deezer, bits, kHz) : badge du lecteur."""
+    info = await run_in_threadpool(_deezer_resolve, track_key)
+    if not info:
+        raise HTTPException(404, "Deezer stream not found")
+    return JSONResponse({'format': info.get('format'), 'bit_depth': info.get('bit_depth'),
+                         'sample_rate': info.get('sample_rate')}, headers={'Cache-Control': 'no-store'})
+
+@app.get('/deezer_stream/{track_key}')
+async def deezer_stream(track_key: str, request: Request):
+    """Audio d'un titre Deezer (ID Deezer ou ISRC), déchiffré à la volée, par plages."""
+    info = await run_in_threadpool(_deezer_resolve, track_key)
     if not info or not info.get('url'):
         raise HTTPException(404, "Deezer stream not found")
-    url = info['url']; key = info['key']; mt = info['mt']; size = info.get('size') or 0
+    size = info.get('size') or 0
 
     # Plage demandée (sinon début), plafonnée pour rester sous la limite Vercel
     start = 0; end = None
@@ -3468,15 +3699,22 @@ async def deezer_stream(isrc: str, request: Request):
     if size:
         aligned_end = min(aligned_end, size - 1)
 
-    def _fetch_dec():
-        r = HTTP.get(url, headers={'Range': f'bytes={aligned_start}-{aligned_end}', 'User-Agent': SQUID_UA}, timeout=40)
-        dec = _deezer_decrypt(key, r.content, aligned_start)
+    def _fetch_dec(inf):
+        r = HTTP.get(inf['url'], headers={'Range': f'bytes={aligned_start}-{aligned_end}', 'User-Agent': SQUID_UA}, timeout=40)
+        if r.status_code not in (200, 206):
+            return None
+        dec = _deezer_decrypt(inf['key'], r.content, aligned_start)
         return dec[start - aligned_start: end - aligned_start + 1]
 
-    body = await run_in_threadpool(_fetch_dec)
+    body = await run_in_threadpool(_fetch_dec, info)
+    if body is None:   # lien CDN expiré : on en redemande un, une fois
+        info = await run_in_threadpool(_deezer_resolve, track_key, True)
+        body = await run_in_threadpool(_fetch_dec, info) if info else None
+        if body is None:
+            raise HTTPException(502, "Deezer CDN error")
     total = str(size) if size else '*'
     return Response(
-        content=body, status_code=206, media_type=mt,
+        content=body, status_code=206, media_type=info['mt'],
         headers={
             'Content-Range': f'bytes {start}-{start + len(body) - 1}/{total}',
             'Accept-Ranges': 'bytes',
