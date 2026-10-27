@@ -156,6 +156,7 @@ dmypy.json
 cython_debug/
 
 token.json
+*.exe
 
 # PyCharm
 #  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
