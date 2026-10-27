@@ -1,0 +1,12 @@
+# Fichiers exclus de l'image Docker (Coolify) : secrets locaux, gros binaires, fichiers de dev.
+.env
+.env.*
+!.env.example
+token.json
+*.exe
+.git
+.claude
+node_modules
+__pycache__
+*.py[cod]
+*.log

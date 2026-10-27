@@ -4,12 +4,10 @@ FROM python:3.13-slim
 
 WORKDIR /app
 
-# Installation des dépendances système nécessaires
-# - gcc / libc-dev : compilation de certains packages Python
-# - ffmpeg : OBLIGATOIRE pour déchiffrer/transcoder les flux squid.wtf (Amazon Music)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    libc-dev \
+# Dépendances système : ffmpeg seulement (source Amazon / squid.wtf, en pause).
+# Pas de gcc : toutes les dépendances Python existent en version précompilée pour Python 3.13,
+# et gcc doublait la taille de cette étape (risque de build interrompu sur un petit serveur).
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
