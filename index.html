@@ -1311,7 +1311,14 @@
             const mres = await fetch(`${API_BASE}/tidal_manifest/${tidalId}`, signal ? { signal } : undefined);
             if (!mres.ok) throw new Error("tidal_manifest HTTP " + mres.status);
             const md = await mres.json();
-            if (md.mimeType !== 'application/dash+xml') throw new Error("Tidal: pas de manifeste DASH");
+            if (md.mimeType !== 'application/dash+xml') {
+                // Lien FLAC direct (manifeste « BTS ») : lu par l'élément audio, via le relais
+                if (!md.url) throw new Error("Tidal: pas de manifeste");
+                const el = shakaInstance.getMediaElement();
+                await shakaInstance.unload();
+                el.src = `${API_BASE}/tidal_proxy?url=${encodeURIComponent(md.url)}`;
+                return;
+            }
             // Pas de DRM ; Shaka patient (le proxy ajoute de la latence).
             shakaInstance.configure({
                 drm: { clearKeys: {} },
@@ -1720,11 +1727,11 @@
         const PLAYABLE_SOURCES = ['qobuz', 'mono', 'deezer_flac', 'tidal_hund'];
 
         // --- SANTÉ DES SOURCES AUDIO ---
-        // Le serveur teste Qobuz, Deezer (ARL) et l'addon Tidal ; l'audio de Monochrome est lu par le
+        // Le serveur teste Qobuz, Tidal (instance hifi-api) et Deezer (ARL) ; l'audio de Monochrome est lu par le
         // navigateur, donc c'est le navigateur qui le teste. Les échecs de lecture réels comptent aussi.
-        const SOURCE_ORDER = ['qobuz', 'mono', 'deezer', 'tidal'];
+        const SOURCE_ORDER = ['qobuz', 'tidal', 'mono', 'deezer'];
         const SOURCE_KEY = { qobuz: 'qobuz', mono: 'mono', deezer_flac: 'deezer', tidal_hund: 'tidal' };   // source d'un titre → clé
-        const SOURCE_LABEL = { qobuz: 'Qobuz', mono: 'Tidal · Monochrome', deezer: 'Deezer', tidal: 'Tidal · Eljohnzc' };
+        const SOURCE_LABEL = { qobuz: 'Qobuz', tidal: 'Tidal', mono: 'Tidal · Monochrome', deezer: 'Deezer' };
         const sourceHealth = { qobuz: null, mono: null, deezer: null, tidal: null, details: {}, checkedAt: 0, monoBase: 'https://tracks.monochrome.st' };
         const sourceStrikes = {};   // échecs de lecture récents : { clé: { n, at } }
         const STRIKE_WINDOW = 10 * 60 * 1000;

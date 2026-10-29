@@ -118,16 +118,16 @@ TIDAL_HUND_BASE = "https://api.monochrome.tf"
 
 TIDAL_HUND_BASE = "https://api.monochrome.tf"
 
-# API Tidal hifi-api (recherche + lecture). Instance auto-hébergée (HTTP → appelée
-# uniquement côté serveur ; l'audio est proxifié, le navigateur n'y touche jamais).
-TIDAL_HIFI_BASE = os.getenv('TIDAL_HIFI_BASE', "http://k9zejj70jg59p0qeo95lzpel.46.224.72.133.sslip.io")
+# API Tidal hifi-api (recherche + lecture : titres complets, jusqu'à 24 bits). Instance
+# auto-hébergée (HTTP → appelée uniquement côté serveur ; les segments audio passent par
+# /tidal_proxy, le navigateur ne touche jamais l'instance).
+TIDAL_HIFI_BASE = (os.getenv('TIDAL_HIFI_BASE') or "http://i58w6109mn9ok01g4eaxtu6o.46.224.72.133.sslip.io").rstrip('/')
 TIDAL_HIFI_KEY = os.getenv('TIDAL_HIFI_KEY', "")
 # Qualité de lecture Tidal : 24 bits hi-res par défaut.
 TIDAL_QUALITY = os.getenv('TIDAL_QUALITY', 'HI_RES_LOSSLESS')
 
-# --- ADDON ELJOHNZC (source principale : recherche + lecture Tidal) ---
-# Remplace l'ancienne hifi-api (qui ne renvoie plus que des extraits de 30 s) et Qobuz (hors
-# service). /search?q= → pistes (ID Tidal) ; /stream/{id}?quality= → URL d'un manifeste DASH
+# --- ADDON ELJOHNZC (secours de l'instance hifi-api pour Tidal) ---
+# /search?q= → pistes (ID Tidal) ; /stream/{id}?quality= → URL d'un manifeste DASH
 # non chiffré dont les segments sont sur *.audio.tidal.com (relayés par /tidal_proxy).
 ELJOHNZC_BASE = (os.getenv('ELJOHNZC_BASE') or "https://eljohnzcaddon.velixir.run/c57e7b0ef2031b2f1fcd").rstrip('/')
 # Qualité demandée à l'addon : hires | lossless | high | low (il descend tout seul si indisponible).
@@ -142,10 +142,10 @@ MONO_BASE = (os.getenv('MONO_BASE') or "https://tracks.monochrome.st").rstrip('/
 # L'ARL donne accès au compte : il vient UNIQUEMENT de l'environnement (.env / Coolify).
 DEEZER_ARL = _env_clean('DEEZER_ARL')
 
-# Sources de lecture par ordre de priorité : Qobuz d'abord, Tidal (Monochrome) en secours, puis
-# Deezer (ARL), puis l'addon Tidal. Le navigateur envoie la liste des sources dont l'audio
-# fonctionne (?sources=qobuz,mono,deezer,tidal).
-SOURCE_KEYS = ('qobuz', 'mono', 'deezer', 'tidal')
+# Sources de lecture par ordre de priorité : Qobuz d'abord, Tidal en secours (instance hifi-api,
+# jusqu'à 24 bits, puis Monochrome), puis Deezer (ARL). Le navigateur envoie la liste des sources
+# dont l'audio fonctionne (?sources=qobuz,tidal,mono,deezer).
+SOURCE_KEYS = ('qobuz', 'tidal', 'mono', 'deezer')
 
 # MODE LOSSLESS (par défaut) : titres, albums et artistes viennent de Qobuz (si configuré) et de
 # Tidal, seules les playlists viennent de Deezer ; tout titre d'une autre source est re-cherché sur
@@ -651,9 +651,12 @@ def _addon_track_obj(t):
     }
 
 def sync_search_tidal(query, limit=25):
-    """Recherche Tidal via l'addon Eljohnzc → objets 'tidal_hund'. Lecture via /tidal_manifest.
-    L'addon renvoie au plus 25 titres (pas de pagination). S'il ne répond pas, repli sur l'API
-    Tidal de métadonnées : même catalogue, mêmes ID, donc lisibles dès que l'addon revient."""
+    """Recherche Tidal → objets 'tidal_hund' (lecture via /tidal_manifest) : instance hifi-api,
+    puis l'addon Eljohnzc en secours (même catalogue, mêmes ID)."""
+    return _hifi_search_tracks(query, limit) or _addon_search_tracks(query, limit)
+
+def _addon_search_tracks(query, limit=25):
+    """Recherche via l'addon Eljohnzc (au plus 25 titres, pas de pagination)."""
     items = []
     try:
         r = HTTP.get(f"{ELJOHNZC_BASE}/search", params={'q': query}, timeout=12)
@@ -670,10 +673,10 @@ def sync_search_tidal(query, limit=25):
             out.append(obj)
         if len(out) >= limit:
             break
-    return out or _hifi_search_tracks(query, limit)
+    return out
 
 def _hifi_search_tracks(query, limit=25):
-    """Recherche de titres sur l'API Tidal de métadonnées (repli de l'addon)."""
+    """Recherche de titres sur l'instance hifi-api."""
     try:
         r = HTTP.get(f"{TIDAL_HIFI_BASE.rstrip('/')}/search/", params={'s': query, 'limit': limit},
                      headers=_tidal_headers(), timeout=12)
@@ -778,7 +781,7 @@ def _best_match(candidates, title, artist):
     return best
 
 def _tidal_resolve_one(title, artist, isrc=None):
-    """Cherche un titre sur Tidal via l'addon → 'tidal_hund'. Sans titre/artiste, l'ISRC est
+    """Cherche un titre sur Tidal → 'tidal_hund'. Sans titre/artiste, l'ISRC est
     d'abord converti en titre+artiste via Deezer. Résultat mis en cache (instantané ensuite)."""
     key = 'tidal:' + _resolve_key(title, artist, isrc)
     found, cached = _resolve_cache_get(key)
@@ -3026,6 +3029,30 @@ def _health_tidal_addon():
         out['detail'] = type(e).__name__
     return out
 
+def _health_tidal():
+    """Instance hifi-api : recherche, titre complet et premier segment ; sinon l'addon en secours."""
+    search = False
+    try:
+        r = HTTP.get(f"{TIDAL_HIFI_BASE}/search/", params={'s': 'daft punk'}, headers=_tidal_headers(), timeout=10)
+        search = r.status_code == 200 and bool(((r.json() or {}).get('data') or {}).get('items'))
+    except Exception:
+        pass
+    res = _hifi_playback('1550546')
+    if res:
+        m = re.search(r'initialization="([^"]+)"', res[1]) if res[0] == 'dash' else None
+        url = m.group(1).replace('&amp;', '&') if m else (res[1] if res[0] == 'url' else None)
+        ok, code = _probe_bytes(url) if url else (False, 'manifeste invalide')
+        if ok:
+            return {'search': True, 'audio': True, 'detail': "FLAC jusqu'à 24 bits, titres complets (instance hifi-api)"}
+        hifi_detail = f"segment inaccessible ({code})"
+    else:
+        hifi_detail = "aucun titre complet" if search else "injoignable"
+    addon = _health_tidal_addon()
+    if addon.get('audio'):
+        return {**addon, 'search': True, 'detail': f"{addon['detail']} (addon de secours)"}
+    return {'search': search or addon.get('search', False), 'audio': False,
+            'detail': f"instance hifi-api : {hifi_detail} · addon : {addon.get('detail') or 'en panne'}"}
+
 def _health_mono():
     try:
         r = _mono_get("/search/tracks", {'q': 'daft punk one more time', 'limit': 1})
@@ -3069,8 +3096,8 @@ def sync_sources_health(force=False):
             return _health_cache['data']
         if force:
             _health_cache['forced'] = now
-    futs = {k: _RESOLVE_POOL.submit(f) for k, f in (('qobuz', _health_qobuz), ('mono', _health_mono),
-                                                      ('deezer', _health_deezer), ('tidal', _health_tidal_addon))}
+    futs = {k: _RESOLVE_POOL.submit(f) for k, f in (('qobuz', _health_qobuz), ('tidal', _health_tidal),
+                                                      ('mono', _health_mono), ('deezer', _health_deezer))}
     data = {}
     for k, f in futs.items():
         try:
@@ -3132,9 +3159,9 @@ async def status_route():
                 qz['recherche'] = f"erreur ({_http_code(e)})"
 
         try:
-            r = HTTP.get(f"{ELJOHNZC_BASE}/search", params={'q': 'daft punk'}, timeout=10)
-            body = r.json() if 'json' in r.headers.get('content-type', '') else {}
-            tidal = 'ok' if r.status_code == 200 and body.get('tracks') else f"en panne (HTTP {r.status_code}{' : ' + body['error'] if body.get('error') else ''})"
+            r = HTTP.get(f"{TIDAL_HIFI_BASE}/search/", params={'s': 'daft punk'}, headers=_tidal_headers(), timeout=10)
+            items = ((r.json() or {}).get('data') or {}).get('items') if r.status_code == 200 else None
+            tidal = 'ok' if items else f"en panne (HTTP {r.status_code})"
         except Exception as e:
             tidal = f"injoignable ({type(e).__name__})"
 
@@ -3169,7 +3196,7 @@ async def status_route():
         return {'version': APP_VERSION, 'mode': 'lossless' if LOSSLESS_MODE else 'mixte',
                 'serveur': {'python': platform.python_version(), 'ytmusicapi': ytm_version},
                 'qobuz': qz, 'deezer_arl': 'présent' if DEEZER_ARL else 'ABSENT',
-                'tidal_addon': tidal, 'radio_youtube': radio_state,
+                'tidal': tidal, 'radio_youtube': radio_state,
                 'sources': sync_sources_health(),
                 'conseil': conseil, **({'conseil_radio': conseil_radio} if conseil_radio else {})}
 
@@ -4279,10 +4306,33 @@ async def get_amazon_stream_info_route(asin: str):
         return JSONResponse(stream_data)
     raise HTTPException(404, "Amazon Music stream not found")
 
-# --- TIDAL (lecture via l'addon Eljohnzc : manifeste DASH FLAC non chiffré + proxy segments) ---
-# L'ancienne hifi-api ne renvoie plus que des extraits de 30 s (PREVIEW) : remplacée par l'addon.
-# L'addon descend tout seul de qualité si celle demandée n'existe pas pour le titre ; les
-# qualités suivantes ne servent qu'en cas d'erreur.
+# --- TIDAL (lecture : instance hifi-api, puis l'addon Eljohnzc en secours) ---
+# Manifeste DASH FLAC non chiffré (ou lien FLAC direct « BTS ») ; les segments passent par
+# /tidal_proxy. Hi-Res demandé d'abord : l'API descend toute seule en Lossless si le titre
+# n'a pas mieux. Un extrait de 30 s (PREVIEW) est refusé.
+def _hifi_playback(track_id):
+    """Instance hifi-api → ('dash', texte du MPD, None) ou ('url', lien, type MIME), ou None."""
+    for q in dict.fromkeys([TIDAL_QUALITY, 'LOSSLESS']):
+        try:
+            r = HTTP.get(f"{TIDAL_HIFI_BASE}/track/", params={'id': track_id, 'quality': q},
+                         headers=_tidal_headers(), timeout=15)
+            if r.status_code != 200:
+                continue
+            d = (r.json() or {}).get('data') or {}
+            if d.get('assetPresentation') not in (None, 'FULL'):
+                continue
+            raw = base64.b64decode(d.get('manifest') or '')
+            mt = d.get('manifestMimeType') or ''
+            if 'dash' in mt and b'<MPD' in raw:
+                return 'dash', raw.decode('utf-8'), None
+            if 'bts' in mt:
+                m = json.loads(raw)
+                if (m.get('encryptionType') or 'NONE') == 'NONE' and m.get('urls'):
+                    return 'url', m['urls'][0], m.get('mimeType') or 'audio/flac'
+        except Exception as e:
+            logger.warning(f"[Tidal] hifi-api {track_id} ({q}): {e}")
+    return None
+
 def _addon_qualities():
     return list(dict.fromkeys([ELJOHNZC_QUALITY, 'lossless', 'high']))
 
@@ -4311,11 +4361,15 @@ def _tidal_resolve_mpd(track_id):
 
 @app.get('/tidal_manifest/{track_id}')
 async def get_tidal_manifest_route(track_id: str):
-    """Manifeste DASH Tidal pour Shaka via l'addon (100 % async, aucun cache : toujours frais)."""
+    """Lecture Tidal pour le navigateur (aucun cache : toujours frais) : manifeste DASH pour Shaka,
+    ou {'mimeType', 'url'} quand l'instance renvoie un lien FLAC direct."""
     if not track_id.isdigit():
         raise HTTPException(404, "Tidal stream not found")
-    mpd = None
-    if ASYNC_HTTP_OK:
+    hifi = await run_in_threadpool(_hifi_playback, track_id)
+    if hifi and hifi[0] == 'url':
+        return JSONResponse({'mimeType': hifi[2], 'url': hifi[1]})
+    mpd = hifi[1] if hifi else None
+    if not mpd and ASYNC_HTTP_OK:   # secours : l'addon
         for q in _addon_qualities():
             try:
                 r = await AHTTP.get(f"{ELJOHNZC_BASE}/stream/{track_id}", params={'quality': q})
@@ -4332,7 +4386,7 @@ async def get_tidal_manifest_route(track_id: str):
                     break
             except Exception as e:
                 logger.warning(f"[Tidal] async addon stream {track_id} ({q}): {e}")
-    else:
+    elif not mpd:
         mpd = await run_in_threadpool(_tidal_resolve_mpd, track_id)
     if not mpd:
         raise HTTPException(404, "Tidal stream not found")
